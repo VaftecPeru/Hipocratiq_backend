@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Auth\LoginController;
+use App\Http\Controllers\Api\V1\Auth\OtpController;
+use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
+use App\Http\Controllers\Api\V1\Auth\SessionController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +27,31 @@ Route::get('/health', function (): JsonResponse {
         ],
     ]);
 })->name('api.health');
+
+Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
+    Route::post('/register/patient', [PatientRegistrationController::class, 'store'])
+        ->middleware('throttle:auth-register')
+        ->name('register.patient');
+    Route::post('/register/verify-otp', [PatientRegistrationController::class, 'verify'])
+        ->middleware('throttle:auth-otp')
+        ->name('register.verify-otp');
+    Route::post('/login', [LoginController::class, 'store'])
+        ->middleware('throttle:auth-login')
+        ->name('login');
+    Route::post('/login/verify-otp', [LoginController::class, 'verify'])
+        ->middleware('throttle:auth-otp')
+        ->name('login.verify-otp');
+    Route::post('/otp/resend', [OtpController::class, 'store'])
+        ->middleware('throttle:auth-otp')
+        ->name('otp.resend');
+
+    Route::middleware(['auth:sanctum', 'auth.session'])->group(function (): void {
+        Route::get('/me', [SessionController::class, 'show'])->name('me');
+        Route::post('/session/renew', [SessionController::class, 'renew'])->name('session.renew');
+        Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
+        Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
+    });
+});
 
 Route::fallback(function (): JsonResponse {
     return response()->json([
