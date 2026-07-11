@@ -50,12 +50,14 @@ jobs:
           key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
           restore-keys: ${{ runner.os }}-composer-
 
+      - name: Create environment file
+        run: cp .env.example .env
+
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --verbose
 
       - name: Prepare environment
         run: |
-          cp .env.example .env
           php artisan key:generate --ansi
           echo "OTP_HASH_KEY=ci-test-hash-key" >> .env
           echo "OTP_FIXED_CODE=123456" >> .env
