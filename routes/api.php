@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\Auth\LoginController;
+use App\Http\Controllers\Api\V1\Auth\OtpAuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
@@ -29,6 +30,12 @@ Route::get('/health', function (): JsonResponse {
 })->name('api.health');
 
 Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
+    Route::post('/otp/request', [OtpAuthenticationController::class, 'request'])
+        ->middleware('throttle:auth-otp-request')
+        ->name('otp.request');
+    Route::post('/otp/verify', [OtpAuthenticationController::class, 'verify'])
+        ->middleware('throttle:auth-otp')
+        ->name('otp.verify');
     Route::post('/register/patient', [PatientRegistrationController::class, 'store'])
         ->middleware('throttle:auth-register')
         ->name('register.patient');

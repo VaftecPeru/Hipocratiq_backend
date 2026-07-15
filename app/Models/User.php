@@ -3,11 +3,13 @@
 namespace App\Models;
 
 use App\Enums\OnboardingStatus;
+use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -17,6 +19,7 @@ use Laravel\Sanctum\HasApiTokens;
 #[Fillable([
     'name',
     'email',
+    'email_verified_at',
     'phone_number',
     'country_code',
     'password',
@@ -44,6 +47,19 @@ class User extends Authenticatable
     public function authenticationSessions(): HasMany
     {
         return $this->hasMany(AuthenticationSession::class);
+    }
+
+    public function roles(): BelongsToMany
+    {
+        return $this->belongsToMany(Role::class)->withTimestamps();
+    }
+
+    public function hasRole(RoleKey|string $role): bool
+    {
+        $key = $role instanceof RoleKey ? $role->value : $role;
+        $this->loadMissing('roles');
+
+        return $this->roles->contains('key', $key);
     }
 
     /**

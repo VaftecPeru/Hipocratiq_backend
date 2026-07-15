@@ -24,7 +24,7 @@ class LoginTest extends TestCase
 
     public function test_verified_user_can_login_with_password_and_otp_then_logout(): void
     {
-        $user = User::factory()->create([
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -68,7 +68,7 @@ class LoginTest extends TestCase
 
     public function test_invalid_password_does_not_issue_otp_challenge(): void
     {
-        User::factory()->create([
+        User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -86,7 +86,7 @@ class LoginTest extends TestCase
 
     public function test_unverified_user_cannot_start_login(): void
     {
-        User::factory()->unverified()->create([
+        User::factory()->superAdmin()->unverified()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -109,7 +109,7 @@ class LoginTest extends TestCase
 
     public function test_suspended_user_cannot_finish_pending_login(): void
     {
-        $user = User::factory()->create([
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -167,7 +167,7 @@ class LoginTest extends TestCase
 
     private function authenticatedUser(): array
     {
-        $user = User::factory()->create([
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);

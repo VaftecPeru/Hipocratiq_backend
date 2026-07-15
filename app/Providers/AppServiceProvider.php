@@ -3,13 +3,18 @@
 namespace App\Providers;
 
 use App\Contracts\SmsSender;
+use App\Enums\RoleKey;
+use App\Enums\UserStatus;
+use App\Models\User;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\RandomOtpCodeGenerator;
 use App\Services\Sms\ArraySmsSender;
+use App\Services\Sms\TwilioSmsSender;
 use App\Support\PhoneNumber;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -32,6 +37,7 @@ class AppServiceProvider extends ServiceProvider
             SmsSender::class,
             fn () => match (config('sms.driver')) {
                 'array' => $this->app->make(ArraySmsSender::class),
+                'twilio' => $this->app->make(TwilioSmsSender::class),
                 default => throw new LogicException('El proveedor SMS configurado no está disponible.'),
             },
         );
@@ -49,6 +55,10 @@ class AppServiceProvider extends ServiceProvider
 
         Password::defaults(fn () => Password::min(10)->letters()->mixedCase()->numbers());
 
+        Gate::before(fn (User $user, string $ability): ?bool => (
+            $user->status === UserStatus::Active && $user->hasRole(RoleKey::SuperAdmin)
+        ) ? true : null);
+
         RateLimiter::for('auth-register', fn (Request $request) => [
             Limit::perMinute(10)->by('register-ip:'.$request->ip()),
             Limit::perHour(5)->by('register-phone:'.$this->phoneRateLimitKey($request)),
@@ -63,6 +73,11 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(10)->by('otp-ip:'.$request->ip()),
             Limit::perMinute(5)->by('otp-challenge:'.hash('sha256', (string) $request->input('challenge_id'))),
         ]);
+
+        RateLimiter::for('auth-otp-request', fn (Request $request) => [
+            Limit::perMinute(10)->by('otp-request-ip:'.$request->ip()),
+            Limit::perHour(5)->by('otp-request-identity:'.$this->authenticationIdentityRateLimitKey($request)),
+        ]);
     }
 
     private function phoneRateLimitKey(Request $request): string
@@ -74,6 +89,25 @@ class AppServiceProvider extends ServiceProvider
             )->value;
         } catch (InvalidArgumentException) {
             $phoneNumber = strtoupper((string) $request->input('country_code')).'|'.(string) $request->input('phone_number');
+        }
+
+        return hash('sha256', $phoneNumber);
+    }
+
+    private function authenticationIdentityRateLimitKey(Request $request): string
+    {
+        $identifier = strtolower((string) ($request->input('identifier') ?? $request->input('phone_number')));
+
+        if (str_contains($identifier, '@')) {
+            return hash('sha256', $identifier);
+        }
+
+        try {
+            $phoneNumber = $request->filled('country_code')
+                ? PhoneNumber::from($identifier, (string) $request->input('country_code'))->value
+                : PhoneNumber::fromE164($identifier)->value;
+        } catch (InvalidArgumentException) {
+            $phoneNumber = $identifier;
         }
 
         return hash('sha256', $phoneNumber);

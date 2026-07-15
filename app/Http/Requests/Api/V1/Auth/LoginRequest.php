@@ -16,7 +16,7 @@ class LoginRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'country_code' => ['required', 'string', 'in:MX,US'],
+            'country_code' => ['required', 'string', 'in:PE,MX,US'],
             'phone_number' => [
                 'required',
                 'string',

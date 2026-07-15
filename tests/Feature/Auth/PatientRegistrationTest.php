@@ -44,7 +44,13 @@ class PatientRegistrationTest extends TestCase
         $this->assertSame(UserStatus::PendingVerification, $user->status);
         $this->assertTrue(Hash::check('SecurePass123', $user->password));
         $this->assertModelExists($user->patientProfile);
-        $this->assertCount(1, $this->app->make(ArraySmsSender::class)->messages());
+        $messages = $this->app->make(ArraySmsSender::class)->messages();
+
+        $this->assertCount(1, $messages);
+        $this->assertSame(
+            'Tu código Hipocratiq es 123456. Expira en 5 minutos.',
+            $messages[0]['message'],
+        );
 
         $verifyResponse = $this->withSpaOrigin()->postJson('/api/v1/auth/register/verify-otp', [
             'challenge_id' => $response->json('data.challenge_id'),
