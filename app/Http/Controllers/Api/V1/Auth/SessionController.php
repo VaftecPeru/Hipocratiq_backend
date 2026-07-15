@@ -12,15 +12,22 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class SessionController extends Controller
 {
     public function show(Request $request): JsonResponse
     {
+        $accessToken = $request->user()->currentAccessToken();
+
         return response()->json([
             'success' => true,
             'data' => [
                 'user' => new UserResource($request->user()),
+                'client_type' => $accessToken instanceof PersonalAccessToken ? 'mobile' : 'web',
+                'actor_context' => $accessToken instanceof PersonalAccessToken
+                    ? $accessToken->abilities[0] ?? null
+                    : $request->session()->get('actor_context'),
             ],
         ]);
     }
@@ -52,6 +59,18 @@ class SessionController extends Controller
         AuthenticationSessionKey $sessionKey,
         RecordAuthenticationEvent $recordEvent,
     ): Response {
+        $accessToken = $request->user()->currentAccessToken();
+
+        if ($accessToken instanceof PersonalAccessToken) {
+            $recordEvent->handle($request->user(), 'mobile_logout', metadata: [
+                'token_id' => $accessToken->id,
+            ]);
+            $accessToken->delete();
+            Auth::forgetGuards();
+
+            return response()->noContent();
+        }
+
         AuthenticationSession::query()
             ->whereBelongsTo($request->user())
             ->where('session_id_hash', $sessionKey->make($request->session()->getId()))
@@ -72,6 +91,8 @@ class SessionController extends Controller
     {
         $user = $request->user();
 
+        $user->tokens()->delete();
+
         $user->authenticationSessions()
             ->whereNull('revoked_at')
             ->update([
@@ -84,9 +105,12 @@ class SessionController extends Controller
         }
 
         $recordEvent->handle($user, 'logout_all');
-        Auth::guard('web')->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+
+        if ($request->hasSession()) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         return response()->noContent();
     }

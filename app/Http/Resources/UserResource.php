@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\RoleKey;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -9,6 +10,8 @@ class UserResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $this->resource->loadMissing('roles');
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -21,6 +24,8 @@ class UserResource extends JsonResource
             'profiles' => [
                 'patient' => $this->patientProfile()->exists(),
             ],
+            'roles' => $this->roles->pluck('key')->all(),
+            'is_global' => $this->hasRole(RoleKey::SuperAdmin),
         ];
     }
 }

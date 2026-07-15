@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Auth;
 use App\Actions\Auth\RegisterPatient;
 use App\Actions\Auth\StartAuthenticatedSession;
 use App\Actions\Auth\VerifyOtpChallenge;
+use App\Enums\AuthenticationContext;
 use App\Enums\OtpPurpose;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\RegisterPatientRequest;
@@ -40,7 +41,7 @@ class PatientRegistrationController extends Controller
             OtpPurpose::Registration,
         );
 
-        $startSession->handle($request, $user);
+        $startSession->handle($request, $user, AuthenticationContext::Patient);
 
         return response()->json([
             'success' => true,

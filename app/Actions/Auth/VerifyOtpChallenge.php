@@ -48,7 +48,7 @@ final class VerifyOtpChallenge
                 return ['user' => $challenge->user, 'error' => 'El código ha expirado.'];
             }
 
-            if (! $this->hasher->verify($challenge->id, $code, $challenge->code_hash)) {
+            if ($challenge->code_hash === null || ! $this->hasher->verify($challenge->id, $code, $challenge->code_hash)) {
                 $attempts = $challenge->attempts + 1;
                 $challenge->update([
                     'attempts' => $attempts,
@@ -58,7 +58,10 @@ final class VerifyOtpChallenge
                 return ['user' => $challenge->user, 'error' => 'El código no es válido.'];
             }
 
-            $challenge->update(['consumed_at' => now()]);
+            $challenge->update([
+                'consumed_at' => now(),
+                'code_hash' => null,
+            ]);
 
             if ($purpose === OtpPurpose::Registration) {
                 $challenge->user->update([

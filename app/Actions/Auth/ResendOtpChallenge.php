@@ -47,7 +47,15 @@ final class ResendOtpChallenge
                 ]);
             }
 
-            return $this->issueOtpChallenge->handle($user, $challenge->purpose);
+            return $this->issueOtpChallenge->handle(
+                $user,
+                $challenge->purpose,
+                $challenge->client_type,
+                $challenge->actor_context,
+                $challenge->device_name,
+                null,
+                $challenge->device_id_hash,
+            );
         });
     }
 }

@@ -19,7 +19,7 @@ class RegisterPatientRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:120'],
             'email' => ['nullable', 'email:rfc', 'max:255', 'unique:users,email'],
-            'country_code' => ['required', 'string', 'in:MX,US'],
+            'country_code' => ['required', 'string', 'in:PE,MX,US'],
             'phone_number' => [
                 'required',
                 'string',
@@ -32,7 +32,7 @@ class RegisterPatientRequest extends FormRequest
                     }
                 },
             ],
-            'password' => ['required', 'confirmed', 'max:72', Password::defaults()],
+            'password' => ['nullable', 'confirmed', 'max:72', Password::defaults()],
         ];
     }
 }

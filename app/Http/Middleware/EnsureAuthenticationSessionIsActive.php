@@ -9,6 +9,7 @@ use App\Services\Auth\AuthenticationSessionKey;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureAuthenticationSessionIsActive
@@ -20,6 +21,29 @@ class EnsureAuthenticationSessionIsActive
 
     public function handle(Request $request, Closure $next): Response
     {
+        $user = $request->user()->fresh();
+        $accessToken = $request->user()->currentAccessToken();
+
+        if ($accessToken instanceof PersonalAccessToken) {
+            if ($user->status !== UserStatus::Active) {
+                $accessToken->delete();
+                $this->recordEvent->handle($user, 'mobile_token_revoked', metadata: [
+                    'reason' => 'account_inactive',
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'code' => 'ACCOUNT_INACTIVE',
+                    'message' => 'La cuenta no está disponible.',
+                ], 403);
+            }
+
+            $user->withAccessToken($accessToken);
+            $request->setUserResolver(fn () => $user);
+
+            return $next($request);
+        }
+
         if (! $request->hasSession()) {
             return response()->json([
                 'success' => false,
@@ -28,7 +52,6 @@ class EnsureAuthenticationSessionIsActive
             ], 401);
         }
 
-        $user = $request->user()->fresh();
         Auth::guard('web')->setUser($user);
 
         $session = AuthenticationSession::query()
