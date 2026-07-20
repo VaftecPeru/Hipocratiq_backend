@@ -54,6 +54,28 @@ class User extends Authenticatable
         return $this->belongsToMany(Role::class)->withTimestamps();
     }
 
+    public function clinicMemberships(): HasMany
+    {
+        return $this->hasMany(ClinicMembership::class);
+    }
+
+    public function hasActiveClinicMembership(): bool
+    {
+        return $this->clinicMemberships()->where('status', 'active')->exists();
+    }
+
+    public function hasActiveClinicAdminMembership(): bool
+    {
+        return $this->clinicMemberships()
+            ->where('status', 'active')
+            ->whereHas('role', fn ($query) => $query->where('key', RoleKey::ClinicAdmin->value))
+            ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+            }))
+            ->exists();
+    }
+
     public function hasRole(RoleKey|string $role): bool
     {
         $key = $role instanceof RoleKey ? $role->value : $role;

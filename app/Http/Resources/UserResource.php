@@ -11,6 +11,10 @@ class UserResource extends JsonResource
     public function toArray(Request $request): array
     {
         $this->resource->loadMissing('roles');
+        $clinicMembership = $this->clinicMemberships()
+            ->where('status', 'active')
+            ->with(['clinic.subscriptions' => fn ($query) => $query->where('status', 'active')->with('plan')->latest('starts_at')])
+            ->first();
 
         return [
             'id' => $this->id,
@@ -26,6 +30,12 @@ class UserResource extends JsonResource
             ],
             'roles' => $this->roles->pluck('key')->all(),
             'is_global' => $this->hasRole(RoleKey::SuperAdmin),
+            'clinic' => $clinicMembership === null ? null : [
+                'id' => $clinicMembership->clinic->id,
+                'name' => $clinicMembership->clinic->name,
+                'status' => $clinicMembership->clinic->status,
+                'plan' => $clinicMembership->clinic->subscriptions->first()?->plan?->key,
+            ],
         ];
     }
 }

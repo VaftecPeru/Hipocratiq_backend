@@ -60,26 +60,19 @@ final class IssueOtpChallenge
                 'expires_at' => now()->addMinutes(config('authentication.otp.ttl_minutes')),
             ]);
 
-            DB::afterCommit(function () use ($challenge, $lockedUser, $code): void {
-                try {
-                    $this->smsSender->send(
-                        $lockedUser->phone_number,
-                        "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
-                    );
-                } catch (Throwable $exception) {
-                    $challenge->update(['invalidated_at' => now()]);
-                    $this->recordEvent->handle($lockedUser, 'otp_delivery_failed', 'failure', [
-                        'challenge_id' => $challenge->id,
-                        'purpose' => $challenge->purpose->value,
-                    ]);
-                    Log::error('OTP delivery failed.', [
-                        'challenge_id' => $challenge->id,
-                        'provider_error' => $exception::class,
-                    ]);
+            try {
+                $this->smsSender->send(
+                    $lockedUser->phone_number,
+                    "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
+                );
+            } catch (Throwable $exception) {
+                Log::error('OTP delivery failed.', [
+                    'challenge_id' => $challenge->id,
+                    'provider_error' => $exception::class,
+                ]);
 
-                    throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.');
-                }
-            });
+                throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.', $exception);
+            }
 
             $this->recordEvent->handle($lockedUser, 'otp_sent', metadata: [
                 'challenge_id' => $challenge->id,

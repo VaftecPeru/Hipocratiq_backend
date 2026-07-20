@@ -78,6 +78,16 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(10)->by('otp-request-ip:'.$request->ip()),
             Limit::perHour(5)->by('otp-request-identity:'.$this->authenticationIdentityRateLimitKey($request)),
         ]);
+
+        RateLimiter::for('clinic-registration', fn (Request $request) => [
+            Limit::perMinute(8)->by('clinic-registration-ip:'.$request->ip()),
+            Limit::perHour(3)->by('clinic-registration-identity:'.$this->authenticationIdentityRateLimitKey($request)),
+        ]);
+
+        RateLimiter::for('clinic-registration-otp', fn (Request $request) => [
+            Limit::perMinute(10)->by('clinic-registration-otp-ip:'.$request->ip()),
+            Limit::perHour(5)->by('clinic-registration-otp-draft:'.hash('sha256', (string) $request->cookie('clinic_registration'))),
+        ]);
     }
 
     private function phoneRateLimitKey(Request $request): string
@@ -96,7 +106,10 @@ class AppServiceProvider extends ServiceProvider
 
     private function authenticationIdentityRateLimitKey(Request $request): string
     {
-        $identifier = strtolower((string) ($request->input('identifier') ?? $request->input('phone_number')));
+        $identifier = strtolower((string) ($request->input('identifier')
+            ?? $request->input('phone_number')
+            ?? $request->input('admin_email')
+            ?? $request->input('admin_phone_number')));
 
         if (str_contains($identifier, '@')) {
             return hash('sha256', $identifier);
