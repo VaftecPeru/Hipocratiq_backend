@@ -92,6 +92,7 @@ class OtpAuthenticationController extends Controller
             'success' => true,
             'data' => [
                 'user' => new UserResource($user),
+                'actor_context' => $challenge->actor_context->value,
                 'next_step' => $purpose === OtpPurpose::Registration ? 'select_plan' : null,
             ],
         ]);

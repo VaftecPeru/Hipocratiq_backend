@@ -181,7 +181,7 @@ class OtpAuthenticationTest extends TestCase
             && $request['To'] === '+51900112844');
     }
 
-    public function test_delivery_failure_invalidates_challenge_and_is_audited(): void
+    public function test_delivery_failure_rolls_back_registration_and_returns_service_unavailable(): void
     {
         Log::spy();
         $this->app->instance(SmsSender::class, new class implements SmsSender
@@ -192,16 +192,24 @@ class OtpAuthenticationTest extends TestCase
             }
         });
 
-        $this->postJson('/api/v1/auth/otp/request', [
+        $response = $this->postJson('/api/v1/auth/otp/request', [
             'purpose' => 'registration',
             'name' => 'Ana Torres',
             'phone_number' => '+51900112844',
-        ])->assertServiceUnavailable();
+        ]);
 
-        $this->assertNotNull(OtpChallenge::query()->sole()->invalidated_at);
-        $this->assertDatabaseHas('authentication_events', [
-            'event' => 'otp_delivery_failed',
-            'outcome' => 'failure',
+        $response
+            ->assertServiceUnavailable()
+            ->assertJson([
+                'success' => false,
+                'code' => 'OTP_DELIVERY_UNAVAILABLE',
+                'message' => 'No se pudo enviar el código OTP.',
+            ]);
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('patient_profiles', 0);
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseMissing('authentication_events', [
+            'event' => 'otp_sent',
         ]);
         Log::shouldHaveReceived('error')->once();
     }

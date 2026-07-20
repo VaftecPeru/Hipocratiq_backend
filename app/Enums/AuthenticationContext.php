@@ -6,4 +6,5 @@ enum AuthenticationContext: string
 {
     case Patient = 'patient';
     case Staff = 'staff';
+    case ClinicAdmin = 'clinic_admin';
 }

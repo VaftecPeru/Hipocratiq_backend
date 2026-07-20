@@ -25,6 +25,8 @@ final class StartLogin
         $context = AuthenticationContext::from($data['actor_context'] ?? AuthenticationContext::Staff->value);
         $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
         $user = $this->findUser($data);
+        $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
+        $resolvedContext = $isClinicAdmin ? AuthenticationContext::ClinicAdmin : $context;
 
         if (
             $user === null
@@ -35,7 +37,7 @@ final class StartLogin
                 || $user->hasRole(RoleKey::SuperAdmin)
             ))
             || ($context === AuthenticationContext::Staff && (
-                ! $user->hasRole(RoleKey::SuperAdmin)
+                (! $user->hasRole(RoleKey::SuperAdmin) && ! $isClinicAdmin)
                 || $client !== AuthenticationClient::Web
                 || $user->password === null
                 || ! isset($data['password'])
@@ -55,7 +57,7 @@ final class StartLogin
             $user,
             OtpPurpose::Login,
             $client,
-            $context,
+            $resolvedContext,
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,
         );
