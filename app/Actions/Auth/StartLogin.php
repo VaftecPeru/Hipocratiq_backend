@@ -26,7 +26,12 @@ final class StartLogin
         $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
         $user = $this->findUser($data);
         $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
-        $resolvedContext = $isClinicAdmin ? AuthenticationContext::ClinicAdmin : $context;
+        $isDoctor = $user?->hasActiveDoctorAccess() ?? false;
+        $resolvedContext = match (true) {
+            $isClinicAdmin => AuthenticationContext::ClinicAdmin,
+            $isDoctor => AuthenticationContext::Doctor,
+            default => $context,
+        };
 
         if (
             $user === null
@@ -37,7 +42,7 @@ final class StartLogin
                 || $user->hasRole(RoleKey::SuperAdmin)
             ))
             || ($context === AuthenticationContext::Staff && (
-                (! $user->hasRole(RoleKey::SuperAdmin) && ! $isClinicAdmin)
+                (! $user->hasRole(RoleKey::SuperAdmin) && ! $isClinicAdmin && ! $isDoctor)
                 || $client !== AuthenticationClient::Web
                 || $user->password === null
                 || ! isset($data['password'])

@@ -1,0 +1,55 @@
+<?php
+
+namespace App\Http\Requests\Api\V1\Auth;
+
+use App\Enums\DoctorPracticeType;
+use App\Support\PhoneNumber;
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
+use InvalidArgumentException;
+
+class StartDoctorRegistrationRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true;
+    }
+
+    public function rules(): array
+    {
+        $isClinicDoctor = $this->input('practice_type') === DoctorPracticeType::Clinic->value;
+
+        return [
+            'doctor_name' => ['required', 'string', 'max:120'],
+            'doctor_email' => ['required', 'email:rfc', 'max:255', 'unique:users,email'],
+            'country_code' => ['required', 'string', 'in:PE,MX,US'],
+            'doctor_phone_number' => ['required', 'string', 'max:30', $this->phoneRule()],
+            'medical_license' => ['required', 'string', 'max:80', 'unique:doctor_profiles,medical_license'],
+            'specialty' => ['required', 'string', 'max:120'],
+            'practice_type' => ['required', Rule::enum(DoctorPracticeType::class)],
+            'clinic_id' => [Rule::requiredIf($isClinicDoctor), 'nullable', 'integer', Rule::exists('clinics', 'id')->where('status', 'active')],
+            'password' => ['required', 'confirmed', 'max:72', Password::defaults()],
+            'terms_accepted' => ['accepted'],
+        ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'doctor_email' => is_string($this->input('doctor_email')) ? strtolower(trim($this->input('doctor_email'))) : $this->input('doctor_email'),
+            'medical_license' => is_string($this->input('medical_license')) ? strtoupper(trim($this->input('medical_license'))) : $this->input('medical_license'),
+        ]);
+    }
+
+    private function phoneRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            try {
+                PhoneNumber::from((string) $value, (string) $this->input('country_code'));
+            } catch (InvalidArgumentException $exception) {
+                $fail($exception->getMessage());
+            }
+        };
+    }
+}

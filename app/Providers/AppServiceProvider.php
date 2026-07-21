@@ -86,7 +86,7 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('clinic-registration-otp', fn (Request $request) => [
             Limit::perMinute(10)->by('clinic-registration-otp-ip:'.$request->ip()),
-            Limit::perHour(5)->by('clinic-registration-otp-draft:'.hash('sha256', (string) $request->cookie('clinic_registration'))),
+            Limit::perHour(5)->by('clinic-registration-otp-draft:'.hash('sha256', (string) ($request->cookie('clinic_registration') ?? $request->cookie('doctor_registration')))),
         ]);
     }
 
@@ -109,7 +109,9 @@ class AppServiceProvider extends ServiceProvider
         $identifier = strtolower((string) ($request->input('identifier')
             ?? $request->input('phone_number')
             ?? $request->input('admin_email')
-            ?? $request->input('admin_phone_number')));
+            ?? $request->input('admin_phone_number')
+            ?? $request->input('doctor_email')
+            ?? $request->input('doctor_phone_number')));
 
         if (str_contains($identifier, '@')) {
             return hash('sha256', $identifier);

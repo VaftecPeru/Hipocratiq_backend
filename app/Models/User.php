@@ -39,6 +39,11 @@ class User extends Authenticatable
         return $this->hasOne(PatientProfile::class);
     }
 
+    public function doctorProfile(): HasOne
+    {
+        return $this->hasOne(DoctorProfile::class);
+    }
+
     public function otpChallenges(): HasMany
     {
         return $this->hasMany(OtpChallenge::class);
@@ -73,6 +78,33 @@ class User extends Authenticatable
             ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
                 $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
             }))
+            ->exists();
+    }
+
+    public function hasActiveDoctorAccess(): bool
+    {
+        $profile = $this->doctorProfile()->first();
+
+        if ($profile === null || ! $this->hasRole(RoleKey::Doctor)) {
+            return false;
+        }
+
+        if ($profile->practice_type === \App\Enums\DoctorPracticeType::Clinic) {
+            return $this->clinicMemberships()
+                ->where('clinic_id', $profile->clinic_id)
+                ->where('status', 'active')
+                ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+                ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
+                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                }))
+                ->exists();
+        }
+
+        return $profile->subscriptions()
+            ->where('status', 'active')
+            ->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+            })
             ->exists();
     }
 

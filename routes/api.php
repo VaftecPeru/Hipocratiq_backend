@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AdminClinicController;
 use App\Http\Controllers\Api\V1\Auth\ClinicRegistrationController;
+use App\Http\Controllers\Api\V1\Auth\DoctorRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\LoginController;
 use App\Http\Controllers\Api\V1\Auth\OtpAuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\OtpController;
@@ -39,6 +40,13 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/plan', [ClinicRegistrationController::class, 'selectPlan'])->middleware('throttle:clinic-registration')->name('plan');
         Route::post('/verify-otp', [ClinicRegistrationController::class, 'verify'])->middleware('throttle:auth-otp')->name('verify-otp');
         Route::post('/resend-otp', [ClinicRegistrationController::class, 'resend'])->middleware('throttle:clinic-registration-otp')->name('resend-otp');
+    });
+    Route::prefix('register/doctor')->name('register.doctor.')->group(function (): void {
+        Route::get('/clinics', [DoctorRegistrationController::class, 'clinics'])->name('clinics');
+        Route::post('/draft', [DoctorRegistrationController::class, 'draft'])->middleware('throttle:clinic-registration')->name('draft');
+        Route::post('/plan', [DoctorRegistrationController::class, 'selectPlan'])->middleware('throttle:clinic-registration')->name('plan');
+        Route::post('/verify-otp', [DoctorRegistrationController::class, 'verify'])->middleware('throttle:auth-otp')->name('verify-otp');
+        Route::post('/resend-otp', [DoctorRegistrationController::class, 'resend'])->middleware('throttle:clinic-registration-otp')->name('resend-otp');
     });
     Route::post('/otp/request', [OtpAuthenticationController::class, 'request'])
         ->middleware('throttle:auth-otp-request')

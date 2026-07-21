@@ -20,6 +20,11 @@ class Plan extends Model
         return $this->hasMany(ClinicSubscription::class);
     }
 
+    public function doctorSubscriptions(): HasMany
+    {
+        return $this->hasMany(DoctorSubscription::class);
+    }
+
     protected function casts(): array
     {
         return [
