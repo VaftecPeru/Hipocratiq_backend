@@ -45,12 +45,14 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if ($this->app->isProduction() && config('sms.driver') === 'array') {
-            throw new LogicException('Configura un proveedor SMS antes de ejecutar en producción.');
-        }
+        if ($this->app->runningInConsole() === false) {
+            if ($this->app->isProduction() && config('sms.driver') === 'array') {
+                throw new LogicException('Configura un proveedor SMS antes de ejecutar en producción.');
+            }
 
-        if ($this->app->isProduction() && config('authentication.otp.fixed_code')) {
-            throw new LogicException('OTP_FIXED_CODE no puede usarse en producción.');
+            if ($this->app->isProduction() && config('authentication.otp.fixed_code')) {
+                throw new LogicException('OTP_FIXED_CODE no puede usarse en producción.');
+            }
         }
 
         Password::defaults(fn () => Password::min(10)->letters()->mixedCase()->numbers());
