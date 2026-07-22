@@ -8,7 +8,6 @@ use App\Models\Clinic;
 use App\Models\ClinicSubscription;
 use App\Models\Plan;
 use App\Models\Role;
-use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Sms\ArraySmsSender;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;

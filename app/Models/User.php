@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\DoctorPracticeType;
 use App\Enums\OnboardingStatus;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
@@ -89,7 +90,7 @@ class User extends Authenticatable
             return false;
         }
 
-        if ($profile->practice_type === \App\Enums\DoctorPracticeType::Clinic) {
+        if ($profile->practice_type === DoctorPracticeType::Clinic) {
             return $this->clinicMemberships()
                 ->where('clinic_id', $profile->clinic_id)
                 ->where('status', 'active')
