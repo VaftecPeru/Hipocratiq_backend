@@ -15,6 +15,7 @@ class AuthenticationSession extends Model
         'id',
         'user_id',
         'session_id_hash',
+        'actor_context',
         'ip_address',
         'user_agent',
         'last_seen_at',

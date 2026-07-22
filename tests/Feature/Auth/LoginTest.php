@@ -2,12 +2,14 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Contracts\SmsSender;
 use App\Enums\UserStatus;
 use App\Models\AuthenticationEvent;
 use App\Models\AuthenticationSession;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use RuntimeException;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
 
@@ -24,7 +26,7 @@ class LoginTest extends TestCase
 
     public function test_verified_user_can_login_with_password_and_otp_then_logout(): void
     {
-        $user = User::factory()->create([
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -68,7 +70,7 @@ class LoginTest extends TestCase
 
     public function test_invalid_password_does_not_issue_otp_challenge(): void
     {
-        User::factory()->create([
+        User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -84,9 +86,40 @@ class LoginTest extends TestCase
         $this->assertSame('login_failed', AuthenticationEvent::query()->sole()->event);
     }
 
+    public function test_otp_delivery_failure_returns_service_unavailable_without_persisting_challenge(): void
+    {
+        User::factory()->superAdmin()->create([
+            'phone_number' => '+525512345678',
+            'password' => 'SecurePass123',
+        ]);
+        $this->app->instance(SmsSender::class, new class implements SmsSender
+        {
+            public function send(string $phoneNumber, string $message): void
+            {
+                throw new RuntimeException('Provider unavailable.');
+            }
+        });
+
+        $response = $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 1234 5678',
+            'password' => 'SecurePass123',
+        ]);
+
+        $response
+            ->assertServiceUnavailable()
+            ->assertJson([
+                'success' => false,
+                'code' => 'OTP_DELIVERY_UNAVAILABLE',
+                'message' => 'No se pudo enviar el código OTP.',
+            ]);
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseMissing('authentication_events', ['event' => 'otp_sent']);
+    }
+
     public function test_unverified_user_cannot_start_login(): void
     {
-        User::factory()->unverified()->create([
+        User::factory()->superAdmin()->unverified()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -109,7 +142,7 @@ class LoginTest extends TestCase
 
     public function test_suspended_user_cannot_finish_pending_login(): void
     {
-        $user = User::factory()->create([
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);
@@ -167,7 +200,7 @@ class LoginTest extends TestCase
 
     private function authenticatedUser(): array
     {
-        $user = User::factory()->create([
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
             'password' => 'SecurePass123',
         ]);

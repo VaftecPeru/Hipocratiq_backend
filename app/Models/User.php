@@ -3,11 +3,13 @@
 namespace App\Models;
 
 use App\Enums\OnboardingStatus;
+use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -17,6 +19,7 @@ use Laravel\Sanctum\HasApiTokens;
 #[Fillable([
     'name',
     'email',
+    'email_verified_at',
     'phone_number',
     'country_code',
     'password',
@@ -36,6 +39,11 @@ class User extends Authenticatable
         return $this->hasOne(PatientProfile::class);
     }
 
+    public function doctorProfile(): HasOne
+    {
+        return $this->hasOne(DoctorProfile::class);
+    }
+
     public function otpChallenges(): HasMany
     {
         return $this->hasMany(OtpChallenge::class);
@@ -44,6 +52,68 @@ class User extends Authenticatable
     public function authenticationSessions(): HasMany
     {
         return $this->hasMany(AuthenticationSession::class);
+    }
+
+    public function roles(): BelongsToMany
+    {
+        return $this->belongsToMany(Role::class)->withTimestamps();
+    }
+
+    public function clinicMemberships(): HasMany
+    {
+        return $this->hasMany(ClinicMembership::class);
+    }
+
+    public function hasActiveClinicMembership(): bool
+    {
+        return $this->clinicMemberships()->where('status', 'active')->exists();
+    }
+
+    public function hasActiveClinicAdminMembership(): bool
+    {
+        return $this->clinicMemberships()
+            ->where('status', 'active')
+            ->whereHas('role', fn ($query) => $query->where('key', RoleKey::ClinicAdmin->value))
+            ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+            }))
+            ->exists();
+    }
+
+    public function hasActiveDoctorAccess(): bool
+    {
+        $profile = $this->doctorProfile()->first();
+
+        if ($profile === null || ! $this->hasRole(RoleKey::Doctor)) {
+            return false;
+        }
+
+        if ($profile->practice_type === \App\Enums\DoctorPracticeType::Clinic) {
+            return $this->clinicMemberships()
+                ->where('clinic_id', $profile->clinic_id)
+                ->where('status', 'active')
+                ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+                ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
+                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                }))
+                ->exists();
+        }
+
+        return $profile->subscriptions()
+            ->where('status', 'active')
+            ->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+            })
+            ->exists();
+    }
+
+    public function hasRole(RoleKey|string $role): bool
+    {
+        $key = $role instanceof RoleKey ? $role->value : $role;
+        $this->loadMissing('roles');
+
+        return $this->roles->contains('key', $key);
     }
 
     /**

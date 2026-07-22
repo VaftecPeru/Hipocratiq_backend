@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\AuthenticationClient;
+use App\Enums\AuthenticationContext;
 use App\Enums\OtpPurpose;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,6 +18,10 @@ class OtpChallenge extends Model
         'id',
         'user_id',
         'purpose',
+        'client_type',
+        'actor_context',
+        'device_name',
+        'device_id_hash',
         'code_hash',
         'attempts',
         'max_attempts',
@@ -34,6 +40,8 @@ class OtpChallenge extends Model
     {
         return [
             'purpose' => OtpPurpose::class,
+            'client_type' => AuthenticationClient::class,
+            'actor_context' => AuthenticationContext::class,
             'sent_at' => 'datetime',
             'expires_at' => 'datetime',
             'consumed_at' => 'datetime',

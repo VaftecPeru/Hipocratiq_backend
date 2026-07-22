@@ -11,4 +11,7 @@ return [
     'session' => [
         'absolute_minutes' => (int) env('AUTH_SESSION_ABSOLUTE_MINUTES', 720),
     ],
+    'mobile_token' => [
+        'ttl_minutes' => (int) env('AUTH_MOBILE_TOKEN_MINUTES', 43200),
+    ],
 ];

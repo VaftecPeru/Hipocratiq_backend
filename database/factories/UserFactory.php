@@ -3,7 +3,10 @@
 namespace Database\Factories;
 
 use App\Enums\OnboardingStatus;
+use App\Enums\RoleKey;
+use App\Enums\RoleScope;
 use App\Enums\UserStatus;
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
@@ -49,5 +52,21 @@ class UserFactory extends Factory
             'status' => UserStatus::PendingVerification,
             'onboarding_status' => OnboardingStatus::PhoneVerification,
         ]);
+    }
+
+    public function superAdmin(): static
+    {
+        return $this->afterCreating(function (User $user): void {
+            $role = Role::query()->firstOrCreate(
+                ['key' => RoleKey::SuperAdmin->value],
+                [
+                    'name' => 'Super Administrador',
+                    'scope' => RoleScope::Global,
+                    'is_system' => true,
+                ],
+            );
+
+            $user->roles()->syncWithoutDetaching([$role->id]);
+        });
     }
 }
