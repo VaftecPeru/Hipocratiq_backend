@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Redis;
+use RuntimeException;
 use Tests\TestCase;
 
 class ApiStatusTest extends TestCase
@@ -30,6 +32,24 @@ class ApiStatusTest extends TestCase
                     'checked_at',
                 ],
             ]);
+    }
+
+    public function test_api_health_returns_service_unavailable_when_required_redis_is_down(): void
+    {
+        config([
+            'cache.default' => 'redis',
+            'cache.limiter' => 'array',
+            'session.driver' => 'array',
+        ]);
+        Redis::shouldReceive('connection')
+            ->once()
+            ->andThrow(new RuntimeException('Redis unavailable.'));
+
+        $this->getJson('/api/health')
+            ->assertServiceUnavailable()
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('data.status', 'unavailable')
+            ->assertJsonPath('data.dependencies.redis', 'unavailable');
     }
 
     public function test_missing_api_endpoint_returns_json_not_found_response(): void

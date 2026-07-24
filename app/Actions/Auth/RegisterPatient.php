@@ -7,6 +7,7 @@ use App\Enums\AuthenticationContext;
 use App\Enums\OnboardingStatus;
 use App\Enums\OtpPurpose;
 use App\Enums\UserStatus;
+use App\Models\Clinic;
 use App\Models\OtpChallenge;
 use App\Models\User;
 use App\Support\PhoneNumber;
@@ -33,6 +34,17 @@ final class RegisterPatient
                 ]);
             }
 
+            $clinic = Clinic::query()
+                ->whereKey($data['clinic_id'])
+                ->where('status', 'active')
+                ->first();
+
+            if ($clinic === null) {
+                throw ValidationException::withMessages([
+                    'clinic_id' => ['La clínica seleccionada no está disponible.'],
+                ]);
+            }
+
             $user = User::query()->create([
                 'name' => $data['name'],
                 'email' => isset($data['email']) ? strtolower($data['email']) : null,
@@ -43,8 +55,10 @@ final class RegisterPatient
                 'onboarding_status' => OnboardingStatus::PhoneVerification,
             ]);
 
-            $user->patientProfile()->create();
-            $this->recordEvent->handle($user, 'registration_started');
+            $user->patientProfile()->create(['clinic_id' => $clinic->id]);
+            $this->recordEvent->handle($user, 'registration_started', metadata: [
+                'clinic_id' => $clinic->id,
+            ]);
 
             return $this->issueOtpChallenge->handle(
                 $user,

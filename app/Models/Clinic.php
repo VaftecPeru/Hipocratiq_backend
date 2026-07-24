@@ -33,6 +33,11 @@ class Clinic extends Model
         return $this->hasMany(ClinicSubscription::class);
     }
 
+    public function doctorProfiles(): HasMany
+    {
+        return $this->hasMany(DoctorProfile::class);
+    }
+
     protected function casts(): array
     {
         return ['status' => ClinicStatus::class];
