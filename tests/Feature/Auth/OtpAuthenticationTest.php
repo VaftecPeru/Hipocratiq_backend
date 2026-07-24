@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Contracts\SmsSender;
+use App\Models\Clinic;
 use App\Models\OtpChallenge;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
@@ -20,11 +21,14 @@ class OtpAuthenticationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
+    private Clinic $clinic;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->app->instance(OtpCodeGenerator::class, new FixedOtpCodeGenerator);
+        $this->clinic = Clinic::factory()->create();
     }
 
     public function test_patient_can_register_with_peruvian_e164_phone_without_password(): void
@@ -34,6 +38,8 @@ class OtpAuthenticationTest extends TestCase
             'name' => 'Ana Torres',
             'email' => 'ana@example.com',
             'phone_number' => '+51900112844',
+            'clinic_id' => $this->clinic->id,
+            'terms_accepted' => true,
         ]);
 
         $request->assertAccepted()->assertJsonPath('data.next_step', 'verify_otp');
@@ -196,6 +202,8 @@ class OtpAuthenticationTest extends TestCase
             'purpose' => 'registration',
             'name' => 'Ana Torres',
             'phone_number' => '+51900112844',
+            'clinic_id' => $this->clinic->id,
+            'terms_accepted' => true,
         ]);
 
         $response

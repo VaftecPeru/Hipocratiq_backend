@@ -36,7 +36,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: 8.4
-          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_sqlite, pdo_pgsql
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_sqlite, pdo_pgsql, redis
           coverage: none
 
       - name: Get Composer cache directory

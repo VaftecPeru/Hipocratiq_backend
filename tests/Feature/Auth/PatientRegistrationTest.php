@@ -6,6 +6,7 @@ use App\Enums\OnboardingStatus;
 use App\Enums\UserStatus;
 use App\Models\AuthenticationEvent;
 use App\Models\AuthenticationSession;
+use App\Models\Clinic;
 use App\Models\OtpChallenge;
 use App\Models\User;
 use App\Services\Auth\AuthenticationSessionKey;
@@ -20,12 +21,15 @@ class PatientRegistrationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
+    private Clinic $clinic;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->app->instance(OtpCodeGenerator::class, new FixedOtpCodeGenerator);
         $this->app->make(ArraySmsSender::class)->clear();
+        $this->clinic = Clinic::factory()->create(['name' => 'Clínica para pacientes']);
     }
 
     public function test_patient_can_register_verify_phone_and_start_session(): void
@@ -44,6 +48,7 @@ class PatientRegistrationTest extends TestCase
         $this->assertSame(UserStatus::PendingVerification, $user->status);
         $this->assertTrue(Hash::check('SecurePass123', $user->password));
         $this->assertModelExists($user->patientProfile);
+        $this->assertSame($this->clinic->id, $user->patientProfile->clinic_id);
         $messages = $this->app->make(ArraySmsSender::class)->messages();
 
         $this->assertCount(1, $messages);
@@ -98,6 +103,20 @@ class PatientRegistrationTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('phone_number');
     }
 
+    public function test_registration_requires_an_active_registered_clinic(): void
+    {
+        $this->withSpaOrigin()->postJson('/api/v1/auth/register/patient', [
+            ...$this->payload(),
+            'clinic_id' => null,
+        ])->assertUnprocessable()->assertJsonValidationErrors('clinic_id');
+
+        $inactiveClinic = Clinic::factory()->create(['status' => 'suspended']);
+        $this->withSpaOrigin()->postJson('/api/v1/auth/register/patient', [
+            ...$this->payload(),
+            'clinic_id' => $inactiveClinic->id,
+        ])->assertUnprocessable()->assertJsonValidationErrors('clinic_id');
+    }
+
     public function test_wrong_otp_increments_attempts_without_starting_session(): void
     {
         $registration = $this->withSpaOrigin()->postJson('/api/v1/auth/register/patient', $this->payload());
@@ -132,6 +151,41 @@ class PatientRegistrationTest extends TestCase
         $this->assertCount(2, $this->app->make(ArraySmsSender::class)->messages());
     }
 
+    public function test_patient_otp_expires_at_exactly_five_minutes(): void
+    {
+        $registration = $this->withSpaOrigin()->postJson('/api/v1/auth/register/patient', $this->payload());
+        $this->travel(5)->minutes();
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/register/verify-otp', [
+            'challenge_id' => $registration->json('data.challenge_id'),
+            'code' => '123456',
+        ])->assertUnprocessable()->assertJsonValidationErrors('code');
+
+        $this->assertGuest();
+        $this->assertSame(UserStatus::PendingVerification, User::query()->sole()->status);
+    }
+
+    public function test_patient_allows_only_five_otp_resends(): void
+    {
+        $registration = $this->withSpaOrigin()->postJson('/api/v1/auth/register/patient', $this->payload());
+        $challengeId = $registration->json('data.challenge_id');
+
+        for ($resend = 1; $resend <= 5; $resend++) {
+            $this->travel(61)->seconds();
+            $response = $this->withSpaOrigin()->postJson('/api/v1/auth/otp/resend', [
+                'challenge_id' => $challengeId,
+            ]);
+            $response->assertAccepted()->assertJsonPath('data.resends_remaining', 5 - $resend);
+            $challengeId = $response->json('data.challenge_id');
+        }
+
+        $this->travel(61)->seconds();
+        $this->withSpaOrigin()->postJson('/api/v1/auth/otp/resend', [
+            'challenge_id' => $challengeId,
+        ])->assertUnprocessable()->assertJsonValidationErrors('challenge_id');
+        $this->assertCount(6, $this->app->make(ArraySmsSender::class)->messages());
+    }
+
     public function test_registration_limits_password_length(): void
     {
         $password = str_repeat('Aa1', 25);
@@ -164,9 +218,11 @@ class PatientRegistrationTest extends TestCase
             'name' => 'Ana Martínez',
             'email' => 'ana@example.com',
             'country_code' => 'MX',
+            'clinic_id' => $this->clinic->id,
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
             'password_confirmation' => 'SecurePass123',
+            'terms_accepted' => true,
         ];
     }
 }

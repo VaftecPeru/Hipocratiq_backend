@@ -25,7 +25,7 @@ final class DoctorRegistrationDraftStore
     public function create(array $data): string
     {
         $token = Str::random(64);
-        $this->put($token, ['data' => $data, 'plan' => null, 'otp' => null]);
+        $this->put($token, ['data' => $data, 'plan' => null, 'otp' => null, 'resend_count' => 0]);
 
         return $token;
     }
@@ -63,9 +63,9 @@ final class DoctorRegistrationDraftStore
     }
 
     /** @return array{challenge_id: string, expires_in: int, resend_after: int} */
-    public function issueOtp(string $token): array
+    public function issueOtp(string $token, bool $isResend = false): array
     {
-        return $this->withLock($token, function () use ($token): array {
+        return $this->withLock($token, function () use ($token, $isResend): array {
             $draft = $this->get($token);
             $isIndependent = ($draft['data']['practice_type'] ?? null) === DoctorPracticeType::Independent->value;
 
@@ -76,6 +76,11 @@ final class DoctorRegistrationDraftStore
             $currentOtp = $draft['otp'] ?? null;
             if (is_array($currentOtp) && isset($currentOtp['resend_at']) && now()->timestamp < $currentOtp['resend_at']) {
                 throw ValidationException::withMessages(['otp' => ['Espera antes de solicitar otro código.']]);
+            }
+
+            $resendCount = (int) ($draft['resend_count'] ?? 0);
+            if ($isResend && $resendCount >= config('authentication.otp.max_resends')) {
+                throw ValidationException::withMessages(['otp' => ['Alcanzaste el límite de 5 reenvíos para este registro.']]);
             }
 
             $challengeId = (string) Str::uuid();
@@ -89,6 +94,7 @@ final class DoctorRegistrationDraftStore
                 'expires_at' => $expiresAt->timestamp,
                 'resend_at' => $resendAt->timestamp,
             ];
+            $draft['resend_count'] = $isResend ? $resendCount + 1 : $resendCount;
             $this->put($token, $draft);
 
             try {
@@ -97,7 +103,8 @@ final class DoctorRegistrationDraftStore
                     "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
                 );
             } catch (Throwable) {
-                $draft['otp'] = null;
+                $draft['otp'] = $currentOtp;
+                $draft['resend_count'] = $resendCount;
                 $this->put($token, $draft);
 
                 throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.');
@@ -107,6 +114,7 @@ final class DoctorRegistrationDraftStore
                 'challenge_id' => $challengeId,
                 'expires_in' => max(0, $expiresAt->timestamp - now()->timestamp),
                 'resend_after' => config('authentication.otp.resend_seconds'),
+                'resends_remaining' => max(0, config('authentication.otp.max_resends') - $draft['resend_count']),
             ];
         });
     }
@@ -118,7 +126,7 @@ final class DoctorRegistrationDraftStore
             $draft = $this->get($token);
             $otp = $draft['otp'] ?? null;
 
-            if (! is_array($otp) || $otp['challenge_id'] !== $challengeId || $otp['expires_at'] < now()->timestamp) {
+            if (! is_array($otp) || $otp['challenge_id'] !== $challengeId || $otp['expires_at'] <= now()->timestamp) {
                 throw ValidationException::withMessages(['code' => ['El código no es válido o ha expirado.']]);
             }
 

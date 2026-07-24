@@ -35,11 +35,15 @@ final class ResendOtpChallenge
                 ]);
             }
 
+            $flowId = $challenge->flow_id ?? $challenge->id;
             $latestChallenge = OtpChallenge::query()
                 ->whereBelongsTo($user)
                 ->where('purpose', $challenge->purpose->value)
+                ->where(function ($query) use ($flowId): void {
+                    $query->where('flow_id', $flowId)->orWhere('id', $flowId);
+                })
                 ->latest('sent_at')
-                ->first();
+                ->firstOrFail();
 
             if ($latestChallenge?->sent_at->addSeconds(config('authentication.otp.resend_seconds'))->isFuture()) {
                 throw ValidationException::withMessages([
@@ -47,14 +51,22 @@ final class ResendOtpChallenge
                 ]);
             }
 
+            if ($latestChallenge->resend_count >= config('authentication.otp.max_resends')) {
+                throw ValidationException::withMessages([
+                    'challenge_id' => ['Alcanzaste el límite de 5 reenvíos para este desafío.'],
+                ]);
+            }
+
             return $this->issueOtpChallenge->handle(
                 $user,
-                $challenge->purpose,
-                $challenge->client_type,
-                $challenge->actor_context,
-                $challenge->device_name,
+                $latestChallenge->purpose,
+                $latestChallenge->client_type,
+                $latestChallenge->actor_context,
+                $latestChallenge->device_name,
                 null,
-                $challenge->device_id_hash,
+                $latestChallenge->device_id_hash,
+                $flowId,
+                $latestChallenge->resend_count + 1,
             );
         });
     }
