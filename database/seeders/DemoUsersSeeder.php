@@ -1,0 +1,210 @@
+<?php
+
+namespace Database\Seeders;
+
+use App\Enums\DoctorPracticeType;
+use App\Enums\OnboardingStatus;
+use App\Enums\RoleKey;
+use App\Enums\UserStatus;
+use App\Models\Clinic;
+use App\Models\ClinicMembership;
+use App\Models\ClinicSubscription;
+use App\Models\DoctorProfile;
+use App\Models\DoctorSubscription;
+use App\Models\PatientProfile;
+use App\Models\Plan;
+use App\Models\Role;
+use App\Models\User;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+
+/**
+ * Creates demo users for every role with deterministic credentials.
+ *
+ * Local:      php artisan db:seed --class=DemoUsersSeeder
+ * Production: php artisan db:seed --class=DemoUsersSeeder --force
+ *
+ * All users share the password: Hipocratiq2026!
+ */
+class DemoUsersSeeder extends Seeder
+{
+    private const PASSWORD = 'Hipocratiq2026!';
+
+    public function run(): void
+    {
+        // Ensure base roles and plans exist
+        $this->call(DatabaseSeeder::class);
+
+        $password = Hash::make(self::PASSWORD);
+        $plan = Plan::query()->where('key', 'professional')->firstOrFail();
+        $clinicAdminRole = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
+        $doctorRole = Role::query()->where('key', RoleKey::Doctor->value)->firstOrFail();
+
+        // ─── 1. Clinic + Clinic Admin ───
+        $clinic = Clinic::query()->updateOrCreate(
+            ['slug' => 'clinica-demo-salud'],
+            [
+                'name' => 'Clínica Demo Salud',
+                'tax_id' => 'RUC-20612345678',
+                'country_code' => 'PE',
+                'contact_phone' => '+51912345678',
+                'address' => 'Av. Javier Prado Este 4321, San Isidro, Lima',
+                'status' => 'active',
+            ],
+        );
+
+        ClinicSubscription::query()->updateOrCreate(
+            ['clinic_id' => $clinic->id, 'status' => 'active'],
+            [
+                'plan_id' => $plan->id,
+                'billing_cycle' => 'monthly',
+                'starts_at' => now(),
+                'ends_at' => null,
+                'provider' => 'demo',
+                'provider_reference' => 'demo-clinic-sub-001',
+            ],
+        );
+
+        $adminUser = User::query()->updateOrCreate(
+            ['email' => 'admin@demo.hipocratiq.com'],
+            [
+                'name' => 'Carmen Vega Rodríguez',
+                'phone_number' => '+51987654321',
+                'country_code' => 'PE',
+                'password' => $password,
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+                'last_login_at' => now(),
+            ],
+        );
+
+        $adminUser->roles()->syncWithoutDetaching([$clinicAdminRole->id]);
+
+        ClinicMembership::query()->updateOrCreate(
+            ['clinic_id' => $clinic->id, 'user_id' => $adminUser->id],
+            ['role_id' => $clinicAdminRole->id, 'status' => 'active'],
+        );
+
+        // ─── 2. Doctor (affiliated to clinic) ───
+        $doctorUser = User::query()->updateOrCreate(
+            ['email' => 'doctor@demo.hipocratiq.com'],
+            [
+                'name' => 'Dr. Andrés Montoya Quiroz',
+                'phone_number' => '+51976543210',
+                'country_code' => 'PE',
+                'password' => $password,
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+                'last_login_at' => now(),
+            ],
+        );
+
+        $doctorUser->roles()->syncWithoutDetaching([$doctorRole->id]);
+
+        DoctorProfile::query()->updateOrCreate(
+            ['user_id' => $doctorUser->id],
+            [
+                'clinic_id' => $clinic->id,
+                'medical_license' => 'CMP-074521',
+                'specialty' => 'Cardiología',
+                'practice_type' => DoctorPracticeType::Clinic,
+            ],
+        );
+
+        ClinicMembership::query()->updateOrCreate(
+            ['clinic_id' => $clinic->id, 'user_id' => $doctorUser->id],
+            ['role_id' => $doctorRole->id, 'status' => 'active'],
+        );
+
+        // ─── 3. Doctor (independent with own subscription) ───
+        $independentDoctor = User::query()->updateOrCreate(
+            ['email' => 'independiente@demo.hipocratiq.com'],
+            [
+                'name' => 'Dra. Lucía Paredes Silva',
+                'phone_number' => '+51965432109',
+                'country_code' => 'PE',
+                'password' => $password,
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+                'last_login_at' => now(),
+            ],
+        );
+
+        $independentDoctor->roles()->syncWithoutDetaching([$doctorRole->id]);
+
+        $independentProfile = DoctorProfile::query()->updateOrCreate(
+            ['user_id' => $independentDoctor->id],
+            [
+                'clinic_id' => null,
+                'medical_license' => 'CMP-089312',
+                'specialty' => 'Dermatología',
+                'practice_type' => DoctorPracticeType::Independent,
+            ],
+        );
+
+        DoctorSubscription::query()->updateOrCreate(
+            ['doctor_profile_id' => $independentProfile->id, 'status' => 'active'],
+            [
+                'plan_id' => $plan->id,
+                'billing_cycle' => 'monthly',
+                'starts_at' => now(),
+                'ends_at' => null,
+                'provider' => 'demo',
+                'provider_reference' => 'demo-doctor-sub-001',
+            ],
+        );
+
+        // ─── 4. Patient ───
+        $patientUser = User::query()->updateOrCreate(
+            ['email' => 'paciente@demo.hipocratiq.com'],
+            [
+                'name' => 'Valentina Ríos Mendoza',
+                'phone_number' => '+51954321098',
+                'country_code' => 'PE',
+                'password' => $password,
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+                'last_login_at' => now(),
+            ],
+        );
+
+        PatientProfile::query()->updateOrCreate(
+            ['user_id' => $patientUser->id],
+            ['clinic_id' => $clinic->id],
+        );
+
+        // ─── 5. Super Admin (platform) ───
+        $superAdmin = User::query()->updateOrCreate(
+            ['email' => 'superadmin@demo.hipocratiq.com'],
+            [
+                'name' => 'Rafael Torres Administrador',
+                'phone_number' => '+51943210987',
+                'country_code' => 'PE',
+                'password' => $password,
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+                'last_login_at' => now(),
+            ],
+        );
+
+        $superAdminRole = Role::query()->where('key', RoleKey::SuperAdmin->value)->firstOrFail();
+        $superAdmin->roles()->syncWithoutDetaching([$superAdminRole->id]);
+
+        $this->command->info('Demo users created successfully. Password: '.self::PASSWORD);
+        $this->command->table(
+            ['Rol', 'Email', 'Teléfono', 'Nombre'],
+            [
+                ['Super Admin', 'superadmin@demo.hipocratiq.com', '+51943210987', 'Rafael Torres Administrador'],
+                ['Clinic Admin', 'admin@demo.hipocratiq.com', '+51987654321', 'Carmen Vega Rodríguez'],
+                ['Doctor (clínica)', 'doctor@demo.hipocratiq.com', '+51976543210', 'Dr. Andrés Montoya Quiroz'],
+                ['Doctor (independiente)', 'independiente@demo.hipocratiq.com', '+51965432109', 'Dra. Lucía Paredes Silva'],
+                ['Paciente', 'paciente@demo.hipocratiq.com', '+51954321098', 'Valentina Ríos Mendoza'],
+            ],
+        );
+    }
+}
