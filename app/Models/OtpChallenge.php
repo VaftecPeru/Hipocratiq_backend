@@ -16,6 +16,7 @@ class OtpChallenge extends Model
 
     protected $fillable = [
         'id',
+        'flow_id',
         'user_id',
         'purpose',
         'client_type',
@@ -25,6 +26,7 @@ class OtpChallenge extends Model
         'code_hash',
         'attempts',
         'max_attempts',
+        'resend_count',
         'sent_at',
         'expires_at',
         'consumed_at',
@@ -42,6 +44,7 @@ class OtpChallenge extends Model
             'purpose' => OtpPurpose::class,
             'client_type' => AuthenticationClient::class,
             'actor_context' => AuthenticationContext::class,
+            'resend_count' => 'integer',
             'sent_at' => 'datetime',
             'expires_at' => 'datetime',
             'consumed_at' => 'datetime',

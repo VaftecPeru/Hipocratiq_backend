@@ -90,7 +90,7 @@ class DoctorRegistrationController extends Controller
 
     public function resend(Request $request, DoctorRegistrationDraftStore $store): JsonResponse
     {
-        $challenge = $store->issueOtp($this->token($request));
+        $challenge = $store->issueOtp($this->token($request), true);
 
         return response()->json(['success' => true, 'data' => [...$challenge, 'next_step' => 'verify_otp']]);
     }

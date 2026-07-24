@@ -86,9 +86,14 @@ class AppServiceProvider extends ServiceProvider
             Limit::perHour(3)->by('clinic-registration-identity:'.$this->authenticationIdentityRateLimitKey($request)),
         ]);
 
+        RateLimiter::for('registration-plan', fn (Request $request) => [
+            Limit::perMinute(10)->by('registration-plan-ip:'.$request->ip()),
+            Limit::perHour(5)->by('registration-plan-draft:'.$this->registrationDraftRateLimitKey($request)),
+        ]);
+
         RateLimiter::for('clinic-registration-otp', fn (Request $request) => [
             Limit::perMinute(10)->by('clinic-registration-otp-ip:'.$request->ip()),
-            Limit::perHour(5)->by('clinic-registration-otp-draft:'.hash('sha256', (string) ($request->cookie('clinic_registration') ?? $request->cookie('doctor_registration')))),
+            Limit::perHour(5)->by('clinic-registration-otp-draft:'.$this->registrationDraftRateLimitKey($request)),
         ]);
     }
 
@@ -128,5 +133,14 @@ class AppServiceProvider extends ServiceProvider
         }
 
         return hash('sha256', $phoneNumber);
+    }
+
+    private function registrationDraftRateLimitKey(Request $request): string
+    {
+        $draftId = $request->cookie('clinic_registration') ?? $request->cookie('doctor_registration');
+
+        return is_string($draftId) && $draftId !== ''
+            ? hash('sha256', $draftId)
+            : 'ip:'.$request->ip();
     }
 }

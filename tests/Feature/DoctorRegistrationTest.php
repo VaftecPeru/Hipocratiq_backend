@@ -11,6 +11,7 @@ use App\Models\Role;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Sms\ArraySmsSender;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
 
@@ -134,6 +135,51 @@ class DoctorRegistrationTest extends TestCase
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('doctor_profiles', 0);
         $this->assertDatabaseCount('doctor_subscriptions', 0);
+    }
+
+    public function test_doctor_otp_expires_at_exactly_five_minutes(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/draft', $this->payload());
+        $cookie = $draft->getCookie('doctor_registration');
+        $plan = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/plan', [
+            'plan' => 'basic',
+            'billing_cycle' => 'monthly',
+        ]);
+
+        $this->travel(5)->minutes();
+        $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/verify-otp', [
+            'challenge_id' => $plan->json('data.challenge_id'),
+            'code' => '123456',
+        ])->assertUnprocessable()->assertJsonValidationErrors('code');
+
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('doctor_profiles', 0);
+    }
+
+    public function test_doctor_registration_allows_only_five_otp_resends(): void
+    {
+        $this->withoutMiddleware(ThrottleRequests::class);
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/draft', $this->payload());
+        $cookie = $draft->getCookie('doctor_registration');
+        $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/plan', [
+            'plan' => 'basic',
+            'billing_cycle' => 'monthly',
+        ])->assertJsonPath('data.resends_remaining', 5);
+
+        for ($resend = 1; $resend <= 5; $resend++) {
+            $this->travel(61)->seconds();
+            $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()
+                ->postJson('/api/v1/auth/register/doctor/resend-otp')
+                ->assertOk()
+                ->assertJsonPath('data.resends_remaining', 5 - $resend);
+        }
+
+        $this->travel(61)->seconds();
+        $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()
+            ->postJson('/api/v1/auth/register/doctor/resend-otp')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('otp');
+        $this->assertCount(6, $this->app->make(ArraySmsSender::class)->messages());
     }
 
     private function payload(array $overrides = []): array

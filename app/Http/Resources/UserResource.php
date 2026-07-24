@@ -11,6 +11,7 @@ class UserResource extends JsonResource
     public function toArray(Request $request): array
     {
         $this->resource->loadMissing('roles');
+        $patientProfile = $this->patientProfile()->with('clinic')->first();
         $clinicMembership = $this->clinicMemberships()
             ->where('status', 'active')
             ->with(['clinic.subscriptions' => fn ($query) => $query->where('status', 'active')->with('plan')->latest('starts_at')])
@@ -29,11 +30,15 @@ class UserResource extends JsonResource
             'status' => $this->status,
             'onboarding_status' => $this->onboarding_status,
             'profiles' => [
-                'patient' => $this->patientProfile()->exists(),
+                'patient' => $patientProfile !== null,
                 'doctor' => $doctorProfile !== null,
             ],
             'roles' => $this->roles->pluck('key')->all(),
             'is_global' => $this->hasRole(RoleKey::SuperAdmin),
+            'patient' => $patientProfile === null ? null : [
+                'clinic' => $patientProfile->clinic?->only(['id', 'name']),
+                'plan' => null,
+            ],
             'clinic' => $clinicMembership === null ? null : [
                 'id' => $clinicMembership->clinic->id,
                 'name' => $clinicMembership->clinic->name,

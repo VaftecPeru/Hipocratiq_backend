@@ -15,7 +15,9 @@ return [
     |
     */
 
-    'default' => env('CACHE_STORE', 'database'),
+    'default' => env('CACHE_STORE', 'redis'),
+
+    'limiter' => env('CACHE_LIMITER_STORE', 'redis_limiter'),
 
     /*
     |--------------------------------------------------------------------------
@@ -81,7 +83,19 @@ return [
         'redis' => [
             'driver' => 'redis',
             'connection' => env('REDIS_CACHE_CONNECTION', 'cache'),
-            'lock_connection' => env('REDIS_CACHE_LOCK_CONNECTION', 'default'),
+            'lock_connection' => env('REDIS_CACHE_LOCK_CONNECTION', 'locks'),
+        ],
+
+        'redis_limiter' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_LIMITER_CONNECTION', 'limiter'),
+            'lock_connection' => env('REDIS_LIMITER_CONNECTION', 'limiter'),
+        ],
+
+        'redis_session' => [
+            'driver' => 'redis',
+            'connection' => env('SESSION_CONNECTION', 'session'),
+            'lock_connection' => env('SESSION_CONNECTION', 'session'),
         ],
 
         'dynamodb' => [

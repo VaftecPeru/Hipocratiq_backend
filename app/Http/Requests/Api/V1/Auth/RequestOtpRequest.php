@@ -38,10 +38,17 @@ class RequestOtpRequest extends FormRequest
             'name' => [Rule::requiredIf($isRegistration), 'nullable', 'string', 'max:120'],
             'email' => ['nullable', 'email:rfc', 'max:255', 'unique:users,email'],
             'country_code' => ['nullable', 'string', 'in:PE,MX,US'],
+            'clinic_id' => [
+                Rule::requiredIf($isRegistration),
+                'nullable',
+                'integer',
+                Rule::exists('clinics', 'id')->where('status', 'active'),
+            ],
             'phone_number' => [Rule::requiredIf($isRegistration), 'nullable', 'string', 'max:30', $this->phoneRule()],
             'password' => $passwordRules,
             'device_name' => [Rule::requiredIf($isMobile), 'nullable', 'string', 'max:100'],
             'device_id' => [Rule::requiredIf($isMobile), 'nullable', 'string', 'max:255'],
+            'terms_accepted' => [$isRegistration ? 'accepted' : 'prohibited'],
         ];
     }
 

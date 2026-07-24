@@ -42,7 +42,7 @@ final class VerifyOtpChallenge
                 return ['user' => $challenge->user, 'error' => 'El código ya no está disponible.'];
             }
 
-            if ($challenge->expires_at->isPast()) {
+            if ($challenge->expires_at->lessThanOrEqualTo(now())) {
                 $challenge->update(['invalidated_at' => now()]);
 
                 return ['user' => $challenge->user, 'error' => 'El código ha expirado.'];

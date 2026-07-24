@@ -33,8 +33,10 @@ final class IssueOtpChallenge
         ?string $deviceName = null,
         ?string $deviceId = null,
         ?string $deviceIdHash = null,
+        ?string $flowId = null,
+        int $resendCount = 0,
     ): OtpChallenge {
-        return DB::transaction(function () use ($user, $purpose, $client, $context, $deviceName, $deviceId, $deviceIdHash): OtpChallenge {
+        return DB::transaction(function () use ($user, $purpose, $client, $context, $deviceName, $deviceId, $deviceIdHash, $flowId, $resendCount): OtpChallenge {
             $lockedUser = User::query()->lockForUpdate()->findOrFail($user->id);
             $id = (string) Str::uuid();
             $code = $this->codeGenerator->generate();
@@ -48,6 +50,7 @@ final class IssueOtpChallenge
 
             $challenge = $lockedUser->otpChallenges()->create([
                 'id' => $id,
+                'flow_id' => $flowId ?? $id,
                 'purpose' => $purpose,
                 'client_type' => $client,
                 'actor_context' => $context,
@@ -56,6 +59,7 @@ final class IssueOtpChallenge
                 'code_hash' => $this->hasher->make($id, $code),
                 'attempts' => 0,
                 'max_attempts' => config('authentication.otp.max_attempts'),
+                'resend_count' => $resendCount,
                 'sent_at' => now(),
                 'expires_at' => now()->addMinutes(config('authentication.otp.ttl_minutes')),
             ]);

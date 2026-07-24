@@ -1,58 +1,135 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Hipocratiq API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Backend Laravel 13 para autenticación, registro de clínicas, médicos y pacientes, sesiones web/móviles y administración de clínicas.
 
-## About Laravel
+La referencia completa de endpoints está en [docs/API.md](docs/API.md).
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Requisitos
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- PHP 8.4 o superior.
+- Composer 2.
+- Extensión PHP `redis` (PhpRedis).
+- Docker Desktop para PostgreSQL y Redis.
+- Node.js solo si se ejecutan herramientas frontend del monorepo.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Inicio local
 
-## Learning Laravel
+Desde `back_api`:
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```powershell
+Copy-Item .env.example .env
+composer install
+php artisan key:generate
+docker compose up -d
+php artisan migrate --seed
+php artisan serve --host=127.0.0.1 --port=8000
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+La API queda disponible en `http://127.0.0.1:8000`. Comprueba el estado con:
 
-## Contributing
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Depth 5
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+La configuración local de Docker utiliza PostgreSQL en `127.0.0.1:5433` y Redis en `127.0.0.1:6379`. El frontend usa `/backend` como proxy; las rutas directas del backend siempre empiezan por `/api`.
 
-## Code of Conduct
+## Servicios de infraestructura
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+`docker compose up -d` inicia:
 
-## Security Vulnerabilities
+| Servicio | Uso | Persistencia |
+| --- | --- | --- |
+| PostgreSQL 17 | Datos de aplicación | Volumen `postgres-data` |
+| Redis 8.2.7 | Caché, drafts, sesiones, locks y rate limiting | AOF + volumen `redis-data` |
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Redis utiliza bases lógicas separadas para evitar interferencias:
 
-## License
+| Base | Conexión | Uso |
+| ---: | --- | --- |
+| 0 | `default` | Reserva para integraciones generales |
+| 1 | `cache` | Caché y drafts de registro |
+| 2 | `session` | Sesiones Laravel |
+| 3 | `limiter` | Rate limiting distribuido |
+| 4 | `locks` | Locks de concurrencia |
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Verificación rápida de Redis:
+
+```powershell
+docker compose ps redis
+docker compose exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping'
+```
+
+Debe responder `PONG` y el contenedor debe aparecer como `healthy`.
+
+No se utiliza fallback automático a base de datos para drafts, locks ni limitadores: en esos flujos es preferible fallar y no crear estados inconsistentes.
+
+## Configuración importante
+
+Las variables de ejemplo están en [.env.example](.env.example). En producción deben inyectarse como secretos o variables del entorno, no copiarse desde el ejemplo.
+
+| Variable | Valor local | Función |
+| --- | --- | --- |
+| `CACHE_STORE` | `redis` | Caché y locks de drafts |
+| `CACHE_LIMITER_STORE` | `redis_limiter` | Rate limiting distribuido |
+| `SESSION_DRIVER` | `redis` | Sesiones compartidas entre réplicas |
+| `SESSION_STORE` | `redis_session` | Store aislado para sesiones |
+| `SESSION_ENCRYPT` | `true` | Cifra los datos de sesión |
+| `OTP_TTL_MINUTES` | `5` | Expiración del código OTP |
+| `OTP_MAX_ATTEMPTS` | `5` | Intentos de verificación por desafío |
+| `OTP_MAX_RESENDS` | `5` | Reenvíos máximos por desafío |
+| `OTP_RESEND_SECONDS` | `60` | Cooldown entre reenvíos |
+| `SMS_DRIVER` | `array` | Simulador local; usar `twilio` en producción |
+| `OTP_HASH_KEY` | — | Clave dedicada recomendada para hash OTP |
+
+`OTP_FIXED_CODE` solo debe usarse en pruebas locales y nunca en producción. En producción se requiere `APP_DEBUG=false`, `SMS_DRIVER=twilio`, una `OTP_HASH_KEY` dedicada y secretos Twilio válidos.
+
+## Flujos principales
+
+- Clínica: crear draft → seleccionar plan → verificar OTP. Sin plan o sin OTP correcto no se crean usuario, clínica ni suscripción.
+- Médico de clínica: crear draft con una clínica activa que tenga cobertura → verificar OTP. La cobertura de la clínica determina el plan.
+- Médico independiente: crear draft → seleccionar plan → verificar OTP. El plan es obligatorio antes de finalizar.
+- Paciente: elegir una clínica activa → crear registro → verificar OTP. El plan no se muestra ni se elige durante el registro; queda diferido para el apartado posterior.
+- Login: contraseña → OTP → sesión web o token móvil.
+
+Los detalles de payloads, estados HTTP, errores y límites están en [docs/API.md](docs/API.md).
+
+## Pruebas y calidad
+
+```powershell
+php artisan test --compact
+vendor/bin/pint --dirty --format agent
+composer validate --strict --no-check-publish
+composer check-platform-reqs --no-dev
+composer audit --locked --no-dev
+```
+
+Las pruebas de aplicación fuerzan `array` para caché, limitador y sesión, de modo que la suite sea reproducible. `RedisInfrastructureTest` valida adicionalmente, cuando Redis está disponible, round-trip, aislamiento de stores, locks, limiter, sesiones y health check.
+
+Pruebas focalizadas:
+
+```powershell
+php artisan test --compact tests/Feature/ClinicRegistrationTest.php
+php artisan test --compact tests/Feature/DoctorRegistrationTest.php
+php artisan test --compact tests/Feature/Auth/PatientRegistrationTest.php
+php artisan test --compact tests/Feature/Auth/OtpAuthenticationTest.php
+php artisan test --compact tests/Feature/RedisInfrastructureTest.php
+```
+
+## Comandos operativos
+
+```powershell
+php artisan route:list --path=api --except-vendor
+php artisan config:clear
+php artisan cache:clear
+docker compose logs -f redis
+```
+
+Antes de desplegar una nueva versión, ejecuta las migraciones y verifica `/api/health`. En producción Redis debe estar en una red privada, con ACL/TLS y una política de memoria monitorizada.
+
+## Documentación relacionada
+
+- [Referencia de API](docs/API.md)
+- [Especificación OpenAPI 3.1](../documentacion/openapi.yaml)
+- [Laravel](https://laravel.com/docs/13.x)
+- [Redis en Laravel](https://laravel.com/docs/13.x/redis)
+- [Rate limiting](https://laravel.com/docs/13.x/rate-limiting)
