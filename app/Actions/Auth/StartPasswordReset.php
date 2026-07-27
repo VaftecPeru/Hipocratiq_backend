@@ -5,7 +5,6 @@ namespace App\Actions\Auth;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
 use App\Enums\OtpPurpose;
-use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
 use App\Models\User;
@@ -29,7 +28,6 @@ final class StartPasswordReset
         if (
             $user === null
             || $user->password === null
-            || ! $user->hasRole(RoleKey::SuperAdmin)
             || $user->phone_verified_at === null
             || $user->status !== UserStatus::Active
         ) {

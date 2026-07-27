@@ -168,6 +168,33 @@ class OtpAuthenticationTest extends TestCase
         ]);
     }
 
+    public function test_non_admin_user_can_reset_password_with_otp(): void
+    {
+        User::factory()->create([
+            'email' => 'clinicuser@example.com',
+            'phone_number' => '+51900223355',
+            'country_code' => 'PE',
+            'password' => 'OldPassword1!',
+        ]);
+
+        $request = $this->postJson('/api/v1/auth/otp/request', [
+            'purpose' => 'password_reset',
+            'identifier' => 'clinicuser@example.com',
+        ]);
+
+        $request->assertAccepted();
+
+        $this->postJson('/api/v1/auth/otp/verify', [
+            'purpose' => 'password_reset',
+            'challenge_id' => $request->json('data.challenge_id'),
+            'code' => '123456',
+            'password' => 'NewPassword2!',
+            'password_confirmation' => 'NewPassword2!',
+        ])->assertOk()->assertJsonPath('data.next_step', 'login');
+
+        $this->assertTrue(Hash::check('NewPassword2!', User::query()->where('email', 'clinicuser@example.com')->sole()->password));
+    }
+
     public function test_twilio_sender_uses_messaging_service_without_exposing_credentials(): void
     {
         config()->set('sms.twilio', [
