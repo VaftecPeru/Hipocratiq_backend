@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['name', 'slug', 'tax_id', 'country_code', 'contact_phone', 'address', 'status'])]
 class Clinic extends Model
@@ -33,9 +34,19 @@ class Clinic extends Model
         return $this->hasMany(ClinicSubscription::class);
     }
 
+    public function latestSubscription(): HasOne
+    {
+        return $this->hasOne(ClinicSubscription::class)->latestOfMany('starts_at');
+    }
+
     public function doctorProfiles(): HasMany
     {
         return $this->hasMany(DoctorProfile::class);
+    }
+
+    public function patientProfiles(): HasMany
+    {
+        return $this->hasMany(PatientProfile::class);
     }
 
     protected function casts(): array

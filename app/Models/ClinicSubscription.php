@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['clinic_id', 'plan_id', 'billing_cycle', 'status', 'starts_at', 'ends_at', 'provider', 'provider_reference'])]
 class ClinicSubscription extends Model
@@ -30,6 +31,14 @@ class ClinicSubscription extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(SubscriptionPayment::class);
+    }
+
+    public function latestSuccessfulPayment(): HasOne
+    {
+        return $this->hasOne(SubscriptionPayment::class)
+            ->where('status', 'succeeded')
+            ->whereNotNull('paid_at')
+            ->latestOfMany('paid_at');
     }
 
     protected function casts(): array

@@ -33,7 +33,13 @@ class RequestOtpRequest extends FormRequest
         return [
             'purpose' => ['required', Rule::enum(OtpPurpose::class)],
             'client_type' => ['required', Rule::enum(AuthenticationClient::class)],
-            'actor_context' => ['required', Rule::enum(AuthenticationContext::class)],
+            'actor_context' => [
+                'required',
+                Rule::enum(AuthenticationContext::class)->only([
+                    AuthenticationContext::Patient,
+                    AuthenticationContext::Staff,
+                ]),
+            ],
             'identifier' => [Rule::requiredIf(! $isRegistration), 'nullable', 'string', 'max:255', $this->identifierRule()],
             'name' => [Rule::requiredIf($isRegistration), 'nullable', 'string', 'max:120'],
             'email' => ['nullable', 'email:rfc', 'max:255', 'unique:users,email'],

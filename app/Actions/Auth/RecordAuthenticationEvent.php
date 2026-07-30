@@ -5,6 +5,7 @@ namespace App\Actions\Auth;
 use App\Models\AuthenticationEvent;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Throwable;
 
 final class RecordAuthenticationEvent
 {
@@ -30,5 +31,18 @@ final class RecordAuthenticationEvent
             'metadata' => $metadata,
             'occurred_at' => now(),
         ]);
+    }
+
+    public function handleSafely(
+        ?User $user,
+        string $event,
+        string $outcome = 'success',
+        array $metadata = [],
+    ): void {
+        try {
+            $this->handle($user, $event, $outcome, $metadata);
+        } catch (Throwable $exception) {
+            report($exception);
+        }
     }
 }

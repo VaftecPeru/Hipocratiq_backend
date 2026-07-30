@@ -68,11 +68,68 @@ class ClinicRegistrationTest extends TestCase
             'password' => 'SecurePass123',
         ]);
         $login->assertAccepted();
-        $this->withSpaOrigin()->postJson('/api/v1/auth/otp/verify', [
+        $relogin = $this->withSpaOrigin()->postJson('/api/v1/auth/otp/verify', [
             'purpose' => 'login',
             'challenge_id' => $login->json('data.challenge_id'),
             'code' => '123456',
-        ])->assertOk()->assertJsonPath('data.actor_context', 'clinic_admin');
+        ]);
+        $relogin->assertOk()->assertJsonPath('data.actor_context', 'clinic_admin');
+        $reloginCookie = $relogin->getCookie(config('session.cookie'));
+        $this->withCookie($reloginCookie->getName(), $reloginCookie->getValue())
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertOk();
+
+        $this->withCookie($reloginCookie->getName(), $reloginCookie->getValue())
+            ->withSpaOrigin()
+            ->postJson('/api/v1/auth/logout')
+            ->assertNoContent();
+        $legacyLogin = $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 8765 4321',
+            'password' => 'SecurePass123',
+        ]);
+        $legacyLogin->assertAccepted();
+        $legacyVerification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
+            'challenge_id' => $legacyLogin->json('data.challenge_id'),
+            'code' => '123456',
+        ]);
+        $legacyVerification->assertOk()->assertJsonPath('data.actor_context', 'clinic_admin');
+        $legacyCookie = $legacyVerification->getCookie(config('session.cookie'));
+        $this->withCookie($legacyCookie->getName(), $legacyCookie->getValue())
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertOk();
+    }
+
+    public function test_clinic_admin_cannot_bypass_password_using_patient_context(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/draft', $this->payload());
+        $cookie = $draft->getCookie('clinic_registration');
+        $plan = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/plan', [
+            'plan' => 'basic',
+            'billing_cycle' => 'monthly',
+        ]);
+        $verification = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/verify-otp', [
+            'challenge_id' => $plan->json('data.challenge_id'),
+            'code' => '123456',
+        ]);
+        $sessionCookie = $verification->getCookie(config('session.cookie'));
+        $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/logout')->assertNoContent();
+
+        $user = User::query()->sole();
+        $user->patientProfile()->create();
+
+        $this->postJson('/api/v1/auth/otp/request', [
+            'purpose' => 'login',
+            'identifier' => 'ana@clinica.test',
+            'actor_context' => 'patient',
+            'client_type' => 'mobile',
+            'device_name' => 'Untrusted device',
+            'device_id' => 'untrusted-installation',
+        ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
     }
 
     public function test_registration_without_plan_does_not_create_domain_records(): void

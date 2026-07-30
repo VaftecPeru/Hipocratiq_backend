@@ -8,6 +8,7 @@ use App\Models\Clinic;
 use App\Models\ClinicSubscription;
 use App\Models\Plan;
 use App\Models\Role;
+use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Sms\ArraySmsSender;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -119,6 +120,33 @@ class DoctorRegistrationTest extends TestCase
             'challenge_id' => $login->json('data.challenge_id'),
             'code' => '123456',
         ])->assertOk()->assertJsonPath('data.actor_context', 'doctor');
+    }
+
+    public function test_doctor_cannot_bypass_password_using_patient_context(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/draft', $this->payload());
+        $cookie = $draft->getCookie('doctor_registration');
+        $plan = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/plan', ['plan' => 'basic', 'billing_cycle' => 'monthly']);
+        $verification = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/verify-otp', [
+            'challenge_id' => $plan->json('data.challenge_id'),
+            'code' => '123456',
+        ]);
+        $sessionCookie = $verification->getCookie(config('session.cookie'));
+        $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/logout')->assertNoContent();
+
+        $user = User::query()->sole();
+        $user->patientProfile()->create();
+
+        $this->postJson('/api/v1/auth/otp/request', [
+            'purpose' => 'login',
+            'identifier' => 'medico@example.test',
+            'actor_context' => 'patient',
+            'client_type' => 'mobile',
+            'device_name' => 'Untrusted device',
+            'device_id' => 'untrusted-installation',
+        ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
     }
 
     public function test_wrong_otp_does_not_create_doctor(): void

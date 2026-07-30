@@ -120,10 +120,10 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
 
         Route::get('/clinic/dashboard', [ClinicDashboardController::class, 'show'])
-            ->middleware('clinic.access')
+            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
             ->name('clinic.dashboard');
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
-            ->middleware('can:manage-platform')
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');
     });
 });

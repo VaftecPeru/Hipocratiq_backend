@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -27,6 +28,8 @@ class OtpChallenge extends Model
         'attempts',
         'max_attempts',
         'resend_count',
+        'delivery_status',
+        'delivery_sequence',
         'sent_at',
         'expires_at',
         'consumed_at',
@@ -45,6 +48,8 @@ class OtpChallenge extends Model
             'client_type' => AuthenticationClient::class,
             'actor_context' => AuthenticationContext::class,
             'resend_count' => 'integer',
+            'delivery_status' => OtpDeliveryStatus::class,
+            'delivery_sequence' => 'integer',
             'sent_at' => 'datetime',
             'expires_at' => 'datetime',
             'consumed_at' => 'datetime',
