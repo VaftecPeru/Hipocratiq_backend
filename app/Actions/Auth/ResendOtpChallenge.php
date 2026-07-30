@@ -2,6 +2,7 @@
 
 namespace App\Actions\Auth;
 
+use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
@@ -15,8 +16,8 @@ final class ResendOtpChallenge
 
     public function handle(string $challengeId): OtpChallenge
     {
-        return DB::transaction(function () use ($challengeId): OtpChallenge {
-            $challenge = OtpChallenge::query()->with('user')->find($challengeId);
+        $reservation = DB::transaction(function () use ($challengeId): array {
+            $challenge = OtpChallenge::query()->find($challengeId);
 
             if ($challenge === null || $challenge->consumed_at !== null) {
                 throw ValidationException::withMessages([
@@ -42,10 +43,15 @@ final class ResendOtpChallenge
                 ->where(function ($query) use ($flowId): void {
                     $query->where('flow_id', $flowId)->orWhere('id', $flowId);
                 })
-                ->latest('sent_at')
+                ->orderByDesc('delivery_sequence')
                 ->firstOrFail();
 
-            if ($latestChallenge?->sent_at->addSeconds(config('authentication.otp.resend_seconds'))->isFuture()) {
+            if (
+                $latestChallenge->delivery_status === OtpDeliveryStatus::Pending
+                || $latestChallenge->sent_at
+                    ->addSeconds(config('authentication.otp.resend_seconds'))
+                    ->isFuture()
+            ) {
                 throw ValidationException::withMessages([
                     'challenge_id' => ['Espera antes de solicitar otro código.'],
                 ]);
@@ -57,17 +63,29 @@ final class ResendOtpChallenge
                 ]);
             }
 
-            return $this->issueOtpChallenge->handle(
-                $user,
-                $latestChallenge->purpose,
-                $latestChallenge->client_type,
-                $latestChallenge->actor_context,
-                $latestChallenge->device_name,
-                null,
-                $latestChallenge->device_id_hash,
-                $flowId,
-                $latestChallenge->resend_count + 1,
-            );
+            return [
+                'user' => $user,
+                'challenge' => $latestChallenge,
+                'flow_id' => $flowId,
+            ];
         });
+
+        /** @var User $user */
+        $user = $reservation['user'];
+        /** @var OtpChallenge $latestChallenge */
+        $latestChallenge = $reservation['challenge'];
+
+        return $this->issueOtpChallenge->handle(
+            $user,
+            $latestChallenge->purpose,
+            $latestChallenge->client_type,
+            $latestChallenge->actor_context,
+            $latestChallenge->device_name,
+            null,
+            $latestChallenge->device_id_hash,
+            $reservation['flow_id'],
+            $latestChallenge->resend_count + 1,
+            $latestChallenge->id,
+        );
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Contracts\BillingGateway;
 use App\Contracts\SmsSender;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
@@ -9,6 +10,8 @@ use App\Models\User;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\RandomOtpCodeGenerator;
+use App\Services\Billing\SimulatedBillingGateway;
+use App\Services\Billing\UnavailableBillingGateway;
 use App\Services\Sms\ArraySmsSender;
 use App\Services\Sms\TwilioSmsSender;
 use App\Support\PhoneNumber;
@@ -41,6 +44,14 @@ class AppServiceProvider extends ServiceProvider
                 default => throw new LogicException('El proveedor SMS configurado no está disponible.'),
             },
         );
+        $this->app->singleton(
+            BillingGateway::class,
+            fn () => match (config('billing.driver')) {
+                'simulated' => $this->app->make(SimulatedBillingGateway::class),
+                'unavailable' => $this->app->make(UnavailableBillingGateway::class),
+                default => throw new LogicException('El proveedor de facturación configurado no está disponible.'),
+            },
+        );
     }
 
     public function boot(): void
@@ -52,6 +63,10 @@ class AppServiceProvider extends ServiceProvider
 
             if ($this->app->isProduction() && config('authentication.otp.fixed_code')) {
                 throw new LogicException('OTP_FIXED_CODE no puede usarse en producción.');
+            }
+
+            if ($this->app->isProduction() && config('billing.driver') === 'simulated') {
+                throw new LogicException('BILLING_DRIVER=simulated no puede usarse en producción.');
             }
         }
 

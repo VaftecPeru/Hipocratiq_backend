@@ -28,6 +28,7 @@ final class StartLogin
         $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
         $isDoctor = $user?->hasActiveDoctorAccess() ?? false;
         $resolvedContext = match (true) {
+            $context === AuthenticationContext::Patient => AuthenticationContext::Patient,
             $isClinicAdmin => AuthenticationContext::ClinicAdmin,
             $isDoctor => AuthenticationContext::Doctor,
             default => $context,
@@ -35,11 +36,14 @@ final class StartLogin
 
         if (
             $user === null
+            || ! in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
             || $user->phone_verified_at === null
             || $user->status !== UserStatus::Active
             || ($context === AuthenticationContext::Patient && (
                 ! $user->patientProfile()->exists()
                 || $user->hasRole(RoleKey::SuperAdmin)
+                || $isClinicAdmin
+                || $isDoctor
             ))
             || ($context === AuthenticationContext::Staff && (
                 (! $user->hasRole(RoleKey::SuperAdmin) && ! $isClinicAdmin && ! $isDoctor)

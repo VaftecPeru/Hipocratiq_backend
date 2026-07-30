@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Actions\Auth\RecordAuthenticationEvent;
+use App\Enums\AuthenticationContext;
 use App\Enums\UserStatus;
 use App\Models\AuthenticationSession;
 use App\Services\Auth\AuthenticationSessionKey;
@@ -40,6 +41,7 @@ class EnsureAuthenticationSessionIsActive
 
             $user->withAccessToken($accessToken);
             $request->setUserResolver(fn () => $user);
+            $request->attributes->set('actor_context', $this->mobileActorContext($accessToken));
 
             return $next($request);
         }
@@ -100,6 +102,15 @@ class EnsureAuthenticationSessionIsActive
             $session->update(['last_seen_at' => now()]);
         }
 
+        $request->attributes->set('actor_context', $session->actor_context);
+
         return $next($request);
+    }
+
+    private function mobileActorContext(PersonalAccessToken $accessToken): ?string
+    {
+        return $accessToken->abilities === [AuthenticationContext::Patient->value]
+            ? AuthenticationContext::Patient->value
+            : null;
     }
 }

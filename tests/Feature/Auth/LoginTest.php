@@ -9,6 +9,7 @@ use App\Models\AuthenticationSession;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use RuntimeException;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
@@ -54,6 +55,7 @@ class LoginTest extends TestCase
 
         $sessionCookie = $verification->getCookie(config('session.cookie'));
         $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue());
+        $this->withSpaOrigin()->getJson('/api/v1/auth/admin/clinics')->assertOk();
 
         $logout = $this->withSpaOrigin()->postJson('/api/v1/auth/logout');
 
@@ -84,6 +86,35 @@ class LoginTest extends TestCase
         $this->assertGuest();
         $this->assertDatabaseCount('otp_challenges', 0);
         $this->assertSame('login_failed', AuthenticationEvent::query()->sole()->event);
+    }
+
+    public function test_audit_failure_does_not_interrupt_logout(): void
+    {
+        [$user, $cookieName, $cookieValue] = $this->authenticatedUser();
+
+        Event::listen(
+            'eloquent.creating: '.AuthenticationEvent::class,
+            function (AuthenticationEvent $event): void {
+                if ($event->event === 'logout') {
+                    throw new RuntimeException('Authentication audit unavailable.');
+                }
+            },
+        );
+
+        $this->withCookie($cookieName, $cookieValue)
+            ->withSpaOrigin()
+            ->postJson('/api/v1/auth/logout')
+            ->assertNoContent();
+
+        $this->withCookie($cookieName, $cookieValue)
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/me')
+            ->assertUnauthorized();
+        $this->assertSame('logout', AuthenticationSession::query()->sole()->revoked_reason);
+        $this->assertDatabaseMissing('authentication_events', [
+            'user_id' => $user->id,
+            'event' => 'logout',
+        ]);
     }
 
     public function test_otp_delivery_failure_returns_service_unavailable_without_persisting_challenge(): void

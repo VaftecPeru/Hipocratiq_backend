@@ -3,6 +3,7 @@
 namespace App\Actions\Auth;
 
 use App\Enums\OnboardingStatus;
+use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
@@ -36,6 +37,10 @@ final class VerifyOtpChallenge
 
             if ($challenge->user->status !== $expectedStatus) {
                 return ['user' => $challenge->user, 'error' => 'La cuenta no está disponible.'];
+            }
+
+            if ($challenge->delivery_status !== OtpDeliveryStatus::Sent) {
+                return ['user' => $challenge->user, 'error' => 'El código aún no está disponible.'];
             }
 
             if ($challenge->consumed_at !== null || $challenge->invalidated_at !== null) {

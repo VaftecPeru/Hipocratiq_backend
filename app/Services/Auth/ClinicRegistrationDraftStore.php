@@ -60,10 +60,10 @@ final class ClinicRegistrationDraftStore
         });
     }
 
-    /** @return array{challenge_id: string, expires_in: int, resend_after: int} */
+    /** @return array{challenge_id: string, expires_in: int, resend_after: int, resends_remaining: int} */
     public function issueOtp(string $token, bool $isResend = false): array
     {
-        return $this->withLock($token, function () use ($token, $isResend): array {
+        $reservation = $this->withLock($token, function () use ($token, $isResend): array {
             $draft = $this->get($token);
             $plan = $draft['plan'] ?? null;
 
@@ -85,6 +85,11 @@ final class ClinicRegistrationDraftStore
             $code = $this->codeGenerator->generate();
             $expiresAt = now()->addMinutes(config('authentication.otp.ttl_minutes'));
             $resendAt = now()->addSeconds(config('authentication.otp.resend_seconds'));
+            $previousOtp = is_array($currentOtp)
+                && ($currentOtp['delivery_status'] ?? 'sent') === 'pending'
+                ? ($currentOtp['previous_otp'] ?? null)
+                : $currentOtp;
+            $nextResendCount = $isResend ? $resendCount + 1 : $resendCount;
 
             $draft['otp'] = [
                 'challenge_id' => $challengeId,
@@ -92,28 +97,69 @@ final class ClinicRegistrationDraftStore
                 'attempts' => 0,
                 'expires_at' => $expiresAt->timestamp,
                 'resend_at' => $resendAt->timestamp,
+                'delivery_status' => 'pending',
+                'previous_otp' => $previousOtp,
             ];
-            $draft['resend_count'] = $isResend ? $resendCount + 1 : $resendCount;
+            $draft['resend_count'] = $nextResendCount;
             $this->put($token, $draft);
-
-            try {
-                $this->smsSender->send(
-                    $draft['data']['admin_phone_number'],
-                    "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
-                );
-            } catch (Throwable) {
-                $draft['otp'] = $currentOtp;
-                $draft['resend_count'] = $resendCount;
-                $this->put($token, $draft);
-
-                throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.');
-            }
 
             return [
                 'challenge_id' => $challengeId,
-                'expires_in' => max(0, $expiresAt->timestamp - now()->timestamp),
+                'code' => $code,
+                'phone_number' => $draft['data']['admin_phone_number'],
+                'expires_at' => $expiresAt->timestamp,
+                'previous_resend_count' => $resendCount,
+                'next_resend_count' => $nextResendCount,
+            ];
+        });
+
+        try {
+            $this->smsSender->send(
+                $reservation['phone_number'],
+                "Tu código Hipocratiq es {$reservation['code']}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
+            );
+        } catch (Throwable $exception) {
+            $this->restorePreviousOtp(
+                $token,
+                $reservation['challenge_id'],
+                $reservation['previous_resend_count'],
+            );
+
+            throw new ServiceUnavailableHttpException(
+                null,
+                'No se pudo enviar el código OTP.',
+                $exception,
+            );
+        }
+
+        return $this->withLock($token, function () use ($token, $reservation): array {
+            $draft = $this->get($token);
+            $otp = $draft['otp'] ?? null;
+
+            if (
+                ! is_array($otp)
+                || $otp['challenge_id'] !== $reservation['challenge_id']
+                || ($otp['delivery_status'] ?? null) !== 'pending'
+            ) {
+                throw new ServiceUnavailableHttpException(
+                    null,
+                    'El código OTP fue reemplazado antes de confirmar su entrega.',
+                );
+            }
+
+            $otp['delivery_status'] = 'sent';
+            unset($otp['previous_otp']);
+            $draft['otp'] = $otp;
+            $this->put($token, $draft);
+
+            return [
+                'challenge_id' => $reservation['challenge_id'],
+                'expires_in' => max(0, $reservation['expires_at'] - now()->timestamp),
                 'resend_after' => config('authentication.otp.resend_seconds'),
-                'resends_remaining' => max(0, config('authentication.otp.max_resends') - $draft['resend_count']),
+                'resends_remaining' => max(
+                    0,
+                    config('authentication.otp.max_resends') - $reservation['next_resend_count'],
+                ),
             ];
         });
     }
@@ -129,6 +175,10 @@ final class ClinicRegistrationDraftStore
                 throw ValidationException::withMessages(['code' => ['El código no es válido o ha expirado.']]);
             }
 
+            if (($otp['delivery_status'] ?? 'sent') !== 'sent') {
+                throw ValidationException::withMessages(['code' => ['El código aún no está disponible.']]);
+            }
+
             if ($otp['attempts'] >= config('authentication.otp.max_attempts')) {
                 throw ValidationException::withMessages(['code' => ['Se excedió el máximo de intentos. Solicita un nuevo código.']]);
             }
@@ -141,10 +191,41 @@ final class ClinicRegistrationDraftStore
                 throw ValidationException::withMessages(['code' => ['El código no es válido.']]);
             }
 
+            return $draft;
+        });
+    }
+
+    public function consumeVerifiedOtp(string $token, string $challengeId): void
+    {
+        $this->withLock($token, function () use ($token, $challengeId): void {
+            $draft = $this->get($token);
+            $otp = $draft['otp'] ?? null;
+
+            if (
+                ! is_array($otp)
+                || $otp['challenge_id'] !== $challengeId
+                || ($otp['delivery_status'] ?? 'sent') !== 'sent'
+            ) {
+                throw ValidationException::withMessages([
+                    'code' => ['El código ya está siendo procesado o no está disponible.'],
+                ]);
+            }
+
             $draft['otp'] = null;
             $this->put($token, $draft);
+        });
+    }
 
-            return $draft;
+    /** @param array<string, mixed> $otp */
+    public function restoreVerifiedOtp(string $token, array $otp): void
+    {
+        $this->withLock($token, function () use ($token, $otp): void {
+            $draft = $this->get($token);
+
+            if (($draft['otp'] ?? null) === null) {
+                $draft['otp'] = $otp;
+                $this->put($token, $draft);
+            }
         });
     }
 
@@ -165,6 +246,27 @@ final class ClinicRegistrationDraftStore
             Crypt::encryptString(json_encode($draft, JSON_THROW_ON_ERROR)),
             self::DraftTtlSeconds,
         );
+    }
+
+    private function restorePreviousOtp(
+        string $token,
+        string $challengeId,
+        int $previousResendCount,
+    ): void {
+        $this->withLock($token, function () use ($token, $challengeId, $previousResendCount): void {
+            $draft = $this->get($token);
+            $otp = $draft['otp'] ?? null;
+
+            if (
+                is_array($otp)
+                && $otp['challenge_id'] === $challengeId
+                && ($otp['delivery_status'] ?? null) === 'pending'
+            ) {
+                $draft['otp'] = $otp['previous_otp'] ?? null;
+                $draft['resend_count'] = $previousResendCount;
+                $this->put($token, $draft);
+            }
+        });
     }
 
     private function withLock(string $token, callable $callback): mixed

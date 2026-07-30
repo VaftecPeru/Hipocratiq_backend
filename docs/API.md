@@ -56,7 +56,7 @@ Estados relevantes:
 | Estado | Uso |
 | ---: | --- |
 | `201` | Draft de clínica o médico creado |
-| `202` | OTP solicitado o reenviado; el envío continúa como desafío |
+| `202` | OTP solicitado o reenviado después de confirmar la entrega con el proveedor |
 | `200` | Operación exitosa |
 | `204` | Logout exitoso sin contenido |
 | `401` | No autenticado (`UNAUTHENTICATED`) |
@@ -64,7 +64,7 @@ Estados relevantes:
 | `419` | CSRF inválido (`CSRF_TOKEN_MISMATCH`) |
 | `422` | Payload inválido, draft expirado, plan faltante u OTP inválido |
 | `429` | Rate limit excedido; respeta `Retry-After` |
-| `503` | Proveedor OTP no disponible (`OTP_DELIVERY_UNAVAILABLE`) o Redis requerido no disponible en health |
+| `503` | Proveedor OTP (`OTP_DELIVERY_UNAVAILABLE`), facturación (`BILLING_UNAVAILABLE`) o Redis requerido no disponible |
 
 ## Política OTP
 
@@ -89,6 +89,8 @@ Al solicitar o reenviar un desafío, `data` incluye:
 ```
 
 `expires_in`, `resend_after` y `resends_remaining` son valores dinámicos; el cliente no debe asumir que permanecen constantes después de un reenvío.
+
+La reserva del desafío y la llamada al proveedor SMS se ejecutan en fases separadas. El proveedor nunca se invoca mientras exista una transacción de base de datos o un lock de draft; el desafío nuevo solo queda activo cuando la entrega se confirma. Si un reenvío falla, el OTP anterior permanece disponible.
 
 ## Endpoints públicos
 
@@ -154,7 +156,7 @@ Requiere la cookie del paso anterior:
 }
 ```
 
-Solo después de plan válido y OTP correcto se crean la cuenta, clínica, membresía y suscripción. La cookie `clinic_registration` se elimina al finalizar.
+Solo después de plan válido, OTP correcto y cobro confirmado se crean la cuenta, clínica, membresía y suscripción. La cookie `clinic_registration` se elimina al finalizar. Si facturación devuelve `503 BILLING_UNAVAILABLE`, no se crean registros y el mismo OTP puede reintentarse.
 
 ### Reenviar OTP
 
@@ -220,7 +222,7 @@ POST /api/v1/auth/register/doctor/verify-otp
 POST /api/v1/auth/register/doctor/resend-otp
 ```
 
-La verificación usa `challenge_id` y `code` como en el registro de clínica.
+La verificación usa `challenge_id` y `code` como en el registro de clínica. Para médicos independientes, la activación requiere facturación disponible y un fallo `BILLING_UNAVAILABLE` conserva el OTP. Los médicos cubiertos por una clínica no invocan el gateway de cobro.
 
 ## Registro de paciente
 
@@ -292,7 +294,7 @@ La respuesta es `202` con `challenge_id`; finaliza con `POST /api/v1/auth/login/
 
 `POST /api/v1/auth/otp/request`
 
-Los propósitos son `registration`, `login` y `password_reset`. El cliente puede ser `web` o `mobile`; el contexto puede ser `patient`, `staff`, `clinic_admin` o `doctor`.
+Los propósitos son `registration`, `login` y `password_reset`. El cliente puede ser `web` o `mobile`. El request solo acepta los contextos públicos `patient` y `staff`; `clinic_admin` y `doctor` son contextos internos resueltos por el backend después de validar credenciales y relaciones.
 
 Ejemplo de registro móvil:
 
@@ -342,6 +344,22 @@ Todas estas rutas requieren autenticación:
 
 `/me` devuelve usuario, roles, perfiles, contexto y clínica/plan relacionados. `logout-all` revoca tokens móviles y sesiones activas.
 
+### Listado administrativo de clínicas
+
+`GET /api/v1/auth/admin/clinics` requiere una sesión web con contexto `staff` y permiso `manage-platform`. Acepta:
+
+| Parámetro | Regla |
+| --- | --- |
+| `page` | Entero desde 1 |
+| `per_page` | Entero entre 1 y 100; predeterminado 10 |
+| `search` | Nombre o dirección, máximo 100 caracteres |
+| `country_code` | `MX`, `PE` o `US` |
+| `plan` | `basic`, `professional` o `enterprise` |
+| `status` | `active` o `suspended` |
+| `city` | Coincidencia parcial sobre dirección, máximo 255 caracteres |
+
+La respuesta contiene únicamente la página solicitada en `data`, metadatos en `meta` (`current_page`, `from`, `last_page`, `per_page`, `to`, `total`) y agregados globales reales en `summary` (`totals`, `plan_distribution`, `recent_activity`). Una página vacía devuelve `data: []`; nunca se sustituye por fixtures.
+
 ## Límites de tráfico
 
 Los limitadores son distribuidos mediante Redis y devuelven `429` con `Retry-After` cuando corresponde.
@@ -378,6 +396,8 @@ curl.exe -c cookies.txt -b cookies.txt -H "Accept: application/json" -H "Content
 
 Para pruebas locales con `SMS_DRIVER=array`, los tests usan un generador OTP fijo. No habilites `OTP_FIXED_CODE` en producción.
 
+La facturación usa `BILLING_DRIVER`. El valor seguro predeterminado es `unavailable`; `simulated` solo está permitido en desarrollo y tests, y la aplicación lo rechaza en producción. Hasta implementar y seleccionar un adapter real, los registros que requieren cobro responden `503 BILLING_UNAVAILABLE` sin activar suscripciones.
+
 ## Operación y troubleshooting
 
 ```powershell
@@ -397,6 +417,7 @@ Si `/api/health` devuelve `503`, comprueba primero el estado del contenedor Redi
 - [Configuración de caché](../config/cache.php)
 - [Conexiones Redis](../config/database.php)
 - [Configuración de sesiones](../config/session.php)
+- [Configuración de facturación](../config/billing.php)
 - [Rutas](../routes/api.php)
 - [Pruebas Redis](../tests/Feature/RedisInfrastructureTest.php)
 
@@ -404,9 +425,12 @@ Si `/api/health` devuelve `503`, comprueba primero el estado del contenedor Redi
 
 La API pública se versiona con el prefijo `/v1`. Los cambios de validación, límites OTP, autenticación o forma de respuesta deben actualizar simultáneamente este documento, [openapi.yaml](../../documentacion/openapi.yaml) y las pruebas de `tests/Feature`.
 
-### Versión 1.1.0
+### Versión 1.2.0
 
 - Redis distribuido para caché, sesiones, locks y rate limiting.
 - Registro de paciente con clínica obligatoria y plan diferido.
 - Registro independiente de médico condicionado a selección de plan.
 - OTP con expiración, cooldown, intentos y máximo de reenvíos documentados.
+- Entrega OTP en dos fases, sin I/O de red dentro de transacciones o locks.
+- Listado administrativo paginado con filtros y agregados reales.
+- Gateway de facturación fail-closed; simulación prohibida en producción.

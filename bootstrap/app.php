@@ -1,5 +1,7 @@
 <?php
 
+use App\Exceptions\BillingUnavailableException;
+use App\Http\Middleware\EnsureActorContext;
 use App\Http\Middleware\EnsureAuthenticationSessionIsActive;
 use App\Http\Middleware\EnsureClinicAccess;
 use Illuminate\Auth\AuthenticationException;
@@ -23,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->redirectGuestsTo(fn (Request $request): ?string => $request->is('api/*') ? null : '/');
         $middleware->alias([
             'auth.session' => EnsureAuthenticationSessionIsActive::class,
+            'actor.context' => EnsureActorContext::class,
             'clinic.access' => EnsureClinicAccess::class,
         ]);
     })
@@ -35,6 +38,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'code' => 'UNAUTHENTICATED',
             'message' => 'No autenticado.',
         ], 401));
+        $exceptions->render(fn (BillingUnavailableException $exception): JsonResponse => response()->json([
+            'success' => false,
+            'code' => 'BILLING_UNAVAILABLE',
+            'message' => $exception->getMessage(),
+        ], 503));
         $exceptions->render(fn (ServiceUnavailableHttpException $exception): JsonResponse => response()->json([
             'success' => false,
             'code' => 'OTP_DELIVERY_UNAVAILABLE',

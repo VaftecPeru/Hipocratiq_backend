@@ -2,9 +2,15 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Actions\Auth\StartLogin;
 use App\Contracts\SmsSender;
+use App\Enums\RoleKey;
+use App\Enums\RoleScope;
 use App\Models\Clinic;
+use App\Models\ClinicMembership;
+use App\Models\ClinicSubscription;
 use App\Models\OtpChallenge;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Sms\TwilioSmsSender;
@@ -13,6 +19,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
@@ -61,6 +68,13 @@ class OtpAuthenticationTest extends TestCase
             ->assertJsonPath('data.next_step', 'select_plan');
         $this->assertAuthenticatedAs($user);
         $this->assertNull(OtpChallenge::query()->sole()->code_hash);
+
+        $sessionCookie = $verification->getCookie(config('session.cookie'));
+        $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue())
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
     }
 
     public function test_patient_can_login_on_mobile_and_revoke_device_token(): void
@@ -100,6 +114,33 @@ class OtpAuthenticationTest extends TestCase
             ->assertJsonPath('data.client_type', 'mobile')
             ->assertJsonPath('data.actor_context', 'patient');
 
+        $this->withToken($token)->postJson('/api/v1/auth/session/renew')
+            ->assertBadRequest()
+            ->assertJsonPath('code', 'WEB_SESSION_REQUIRED');
+
+        $clinicAdminRole = Role::factory()->create([
+            'key' => RoleKey::ClinicAdmin->value,
+            'scope' => RoleScope::Organization,
+        ]);
+        ClinicMembership::factory()->create([
+            'clinic_id' => $this->clinic->id,
+            'user_id' => $user->id,
+            'role_id' => $clinicAdminRole->id,
+        ]);
+        ClinicSubscription::factory()->create(['clinic_id' => $this->clinic->id]);
+
+        $this->withToken($token)->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
+
+        $legacyPrivilegedToken = $user->createToken('legacy-privileged', [
+            RoleKey::ClinicAdmin->value,
+        ])->plainTextToken;
+        $this->withToken($legacyPrivilegedToken)->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
+        $user->tokens()->where('name', 'legacy-privileged')->delete();
+
         $this->withToken($token)->postJson('/api/v1/auth/logout')->assertNoContent();
         $this->assertDatabaseCount('personal_access_tokens', 0);
         $this->withToken($token)->getJson('/api/v1/auth/me')->assertUnauthorized();
@@ -131,6 +172,50 @@ class OtpAuthenticationTest extends TestCase
             'actor_context' => 'staff',
             'password' => 'SecurePass123',
         ])->assertAccepted();
+    }
+
+    public function test_client_cannot_select_a_privileged_actor_context(): void
+    {
+        foreach (['clinic_admin', 'doctor'] as $actorContext) {
+            $this->postJson('/api/v1/auth/otp/request', [
+                'purpose' => 'login',
+                'identifier' => 'staff@example.com',
+                'actor_context' => $actorContext,
+                'client_type' => 'mobile',
+                'device_name' => 'Untrusted device',
+                'device_id' => 'untrusted-installation',
+            ])->assertUnprocessable()->assertJsonValidationErrors('actor_context');
+        }
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+    }
+
+    public function test_start_login_action_rejects_internal_actor_contexts(): void
+    {
+        User::factory()->superAdmin()->create([
+            'email' => 'staff@example.com',
+            'password' => 'SecurePass123',
+        ]);
+        $startLogin = $this->app->make(StartLogin::class);
+
+        foreach (['clinic_admin', 'doctor'] as $actorContext) {
+            try {
+                $startLogin->handle([
+                    'purpose' => 'login',
+                    'identifier' => 'staff@example.com',
+                    'actor_context' => $actorContext,
+                    'client_type' => 'mobile',
+                    'device_name' => 'Untrusted device',
+                    'device_id' => 'untrusted-installation',
+                ]);
+                $this->fail("The {$actorContext} context was accepted.");
+            } catch (ValidationException $exception) {
+                $this->assertArrayHasKey('identifier', $exception->errors());
+            }
+        }
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseCount('authentication_events', 2);
     }
 
     public function test_staff_can_reset_password_with_otp_and_existing_tokens_are_revoked(): void
