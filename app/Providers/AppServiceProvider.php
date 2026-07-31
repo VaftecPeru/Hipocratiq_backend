@@ -76,6 +76,16 @@ class AppServiceProvider extends ServiceProvider
             $user->status === UserStatus::Active && $user->hasRole(RoleKey::SuperAdmin)
         ) ? true : null);
 
+        // En modo demo aflojamos los throttles: las corridas repetidas de la
+        // demo desde la misma IP/teléfono no deben quedar bloqueadas hasta una
+        // hora. En producción real (demo_mode=false) se mantienen los límites
+        // estrictos definidos más abajo.
+        if (config('authentication.demo_mode') === true) {
+            $this->configureDemoRateLimiters();
+
+            return;
+        }
+
         RateLimiter::for('auth-register', fn (Request $request) => [
             Limit::perMinute(10)->by('register-ip:'.$request->ip()),
             Limit::perHour(5)->by('register-phone:'.$this->phoneRateLimitKey($request)),
@@ -110,6 +120,30 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(10)->by('clinic-registration-otp-ip:'.$request->ip()),
             Limit::perHour(5)->by('clinic-registration-otp-draft:'.$this->registrationDraftRateLimitKey($request)),
         ]);
+    }
+
+    /**
+     * Límites relajados solo para el modo demo. Mantenemos un techo por minuto
+     * y por IP suficiente para frenar abusos evidentes, pero eliminamos los
+     * bloqueos por hora que dejaban la demo inutilizable tras varias corridas.
+     */
+    private function configureDemoRateLimiters(): void
+    {
+        $names = [
+            'auth-register',
+            'auth-login',
+            'auth-otp',
+            'auth-otp-request',
+            'clinic-registration',
+            'registration-plan',
+            'clinic-registration-otp',
+        ];
+
+        foreach ($names as $name) {
+            RateLimiter::for($name, fn (Request $request) => [
+                Limit::perMinute(120)->by('demo-'.$name.'-ip:'.$request->ip()),
+            ]);
+        }
     }
 
     private function phoneRateLimitKey(Request $request): string
