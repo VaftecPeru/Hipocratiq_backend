@@ -18,7 +18,6 @@ RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
 COPY . .
 
 RUN composer dump-autoload --optimize \
-    && php artisan config:cache \
     && php artisan route:cache \
     && php artisan view:cache \
     && php artisan event:cache
@@ -30,4 +29,4 @@ ENV SERVER_NAME=:8000
 
 EXPOSE 8000
 
-CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
+CMD php artisan config:cache && php artisan migrate --force && frankenphp run --config /etc/caddy/Caddyfile
