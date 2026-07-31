@@ -182,7 +182,7 @@ class DemoUsersSeeder extends Seeder
             ['email' => 'superadmin@demo.hipocratiq.com'],
             [
                 'name' => 'Rafael Torres Administrador',
-                'phone_number' => '+51943210987',
+                'phone_number' => '+51994845979',
                 'country_code' => 'PE',
                 'password' => $password,
                 'status' => UserStatus::Active,
