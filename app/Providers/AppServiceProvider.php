@@ -56,7 +56,7 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if ($this->app->runningInConsole() === false) {
+        if ($this->app->runningInConsole() === false && config('authentication.demo_mode') !== true) {
             if ($this->app->isProduction() && config('sms.driver') === 'array') {
                 throw new LogicException('Configura un proveedor SMS antes de ejecutar en producción.');
             }

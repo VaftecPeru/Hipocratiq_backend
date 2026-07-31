@@ -11,7 +11,7 @@ final class SimulatedBillingGateway implements BillingGateway
 {
     public function purchase(SubscriptionPurchase $purchase): BillingReceipt
     {
-        if (app()->isProduction()) {
+        if (app()->isProduction() && config('authentication.demo_mode') !== true) {
             throw new BillingUnavailableException;
         }
 
