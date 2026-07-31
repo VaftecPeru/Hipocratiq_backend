@@ -26,6 +26,8 @@ RUN composer dump-autoload --optimize \
 RUN mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
     && chmod -R a+rw storage bootstrap/cache
 
+ENV SERVER_NAME=:8000
+
 EXPOSE 8000
 
-CMD ["php", "artisan", "octane:frankenphp", "--port=8000"]
+CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
