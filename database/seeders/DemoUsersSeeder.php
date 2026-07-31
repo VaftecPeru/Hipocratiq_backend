@@ -35,6 +35,12 @@ class DemoUsersSeeder extends Seeder
         // Ensure base roles and plans exist
         $this->call(DatabaseSeeder::class);
 
+        // Reset demo data: remove existing clinic admins, doctors, and patients
+        // so the demo starts from a clean, deterministic state. User deletes
+        // cascade to profiles, memberships, subscriptions, OTP challenges, and
+        // sessions (all FKs are cascadeOnDelete on user_id).
+        $this->purgeExistingRoleUsers();
+
         $password = Hash::make(self::PASSWORD);
         $plan = Plan::query()->where('key', 'professional')->firstOrFail();
         $clinicAdminRole = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
@@ -66,7 +72,7 @@ class DemoUsersSeeder extends Seeder
         );
 
         $adminUser = User::query()->updateOrCreate(
-            ['email' => 'admin@demo.hipocratiq.com'],
+            ['email' => 'clinica@hipocratiq.test'],
             [
                 'name' => 'Carmen Vega Rodríguez',
                 'phone_number' => '+51987654321',
@@ -88,7 +94,7 @@ class DemoUsersSeeder extends Seeder
 
         // ─── 2. Doctor (affiliated to clinic) ───
         $doctorUser = User::query()->updateOrCreate(
-            ['email' => 'doctor@demo.hipocratiq.com'],
+            ['email' => 'medico@hipocratiq.test'],
             [
                 'name' => 'Dr. Andrés Montoya Quiroz',
                 'phone_number' => '+51976543210',
@@ -120,7 +126,7 @@ class DemoUsersSeeder extends Seeder
 
         // ─── 3. Doctor (independent with own subscription) ───
         $independentDoctor = User::query()->updateOrCreate(
-            ['email' => 'independiente@demo.hipocratiq.com'],
+            ['email' => 'independiente@hipocratiq.test'],
             [
                 'name' => 'Dra. Lucía Paredes Silva',
                 'phone_number' => '+51965432109',
@@ -159,7 +165,7 @@ class DemoUsersSeeder extends Seeder
 
         // ─── 4. Patient ───
         $patientUser = User::query()->updateOrCreate(
-            ['email' => 'paciente@demo.hipocratiq.com'],
+            ['email' => 'paciente@hipocratiq.test'],
             [
                 'name' => 'Valentina Ríos Mendoza',
                 'phone_number' => '+51954321098',
@@ -179,7 +185,7 @@ class DemoUsersSeeder extends Seeder
 
         // ─── 5. Super Admin (platform) ───
         $superAdmin = User::query()->updateOrCreate(
-            ['email' => 'superadmin@demo.hipocratiq.com'],
+            ['email' => 'superadmin@hipocratiq.test'],
             [
                 'name' => 'Rafael Torres Administrador',
                 'phone_number' => '+51943210987',
@@ -199,12 +205,57 @@ class DemoUsersSeeder extends Seeder
         $this->command->table(
             ['Rol', 'Email', 'Teléfono', 'Nombre'],
             [
-                ['Super Admin', 'superadmin@demo.hipocratiq.com', '+51943210987', 'Rafael Torres Administrador'],
-                ['Clinic Admin', 'admin@demo.hipocratiq.com', '+51987654321', 'Carmen Vega Rodríguez'],
-                ['Doctor (clínica)', 'doctor@demo.hipocratiq.com', '+51976543210', 'Dr. Andrés Montoya Quiroz'],
-                ['Doctor (independiente)', 'independiente@demo.hipocratiq.com', '+51965432109', 'Dra. Lucía Paredes Silva'],
-                ['Paciente', 'paciente@demo.hipocratiq.com', '+51954321098', 'Valentina Ríos Mendoza'],
+                ['Super Admin', 'superadmin@hipocratiq.test', '+51943210987', 'Rafael Torres Administrador'],
+                ['Clinic Admin', 'clinica@hipocratiq.test', '+51987654321', 'Carmen Vega Rodríguez'],
+                ['Doctor (clínica)', 'medico@hipocratiq.test', '+51976543210', 'Dr. Andrés Montoya Quiroz'],
+                ['Doctor (independiente)', 'independiente@hipocratiq.test', '+51965432109', 'Dra. Lucía Paredes Silva'],
+                ['Paciente', 'paciente@hipocratiq.test', '+51954321098', 'Valentina Ríos Mendoza'],
             ],
         );
+    }
+
+    /**
+     * Delete every user that is a clinic admin, doctor, or patient so the demo
+     * seed is deterministic. Super admins are preserved. Cascading foreign keys
+     * remove the associated profiles, memberships, subscriptions, OTP
+     * challenges, and authentication sessions automatically.
+     */
+    private function purgeExistingRoleUsers(): void
+    {
+        $roleUserIds = User::query()
+            ->whereHas('roles', function ($query): void {
+                $query->whereIn('key', [
+                    RoleKey::ClinicAdmin->value,
+                    RoleKey::Doctor->value,
+                ]);
+            })
+            ->whereDoesntHave('roles', function ($query): void {
+                $query->where('key', RoleKey::SuperAdmin->value);
+            })
+            ->pluck('id');
+
+        // Patients have no role row — they are identified by their profile.
+        $patientUserIds = User::query()
+            ->whereHas('patientProfile')
+            ->whereDoesntHave('roles', function ($query): void {
+                $query->where('key', RoleKey::SuperAdmin->value);
+            })
+            ->pluck('id');
+
+        $userIds = $roleUserIds->merge($patientUserIds)->unique()->values();
+
+        if ($userIds->isEmpty()) {
+            $this->command->info('No existing clinic admin, doctor, or patient users to purge.');
+
+            return;
+        }
+
+        // Delete the demo clinic explicitly so its subscription and any dangling
+        // rows are removed even if no membership references it anymore.
+        Clinic::query()->where('slug', 'clinica-demo-salud')->delete();
+
+        $deleted = User::query()->whereIn('id', $userIds)->delete();
+
+        $this->command->info("Purged {$deleted} existing clinic admin / doctor / patient user(s).");
     }
 }

@@ -29,4 +29,4 @@ ENV SERVER_NAME=:8000
 
 EXPOSE 8000
 
-CMD php artisan config:cache && php artisan migrate --force && php artisan db:seed --force && frankenphp run --config /etc/caddy/Caddyfile
+CMD php artisan config:cache && php artisan migrate --force && php artisan db:seed --class=DemoUsersSeeder --force && frankenphp run --config /etc/caddy/Caddyfile
