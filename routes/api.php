@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AdminClinicController;
+use App\Http\Controllers\Api\V1\AdminMembershipController;
+use App\Http\Controllers\Api\V1\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\ClinicRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\DoctorRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\LoginController;
@@ -125,6 +127,27 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');
+        Route::get('/admin/users', [AdminUserController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.users.index');
+        Route::get('/admin/memberships', [AdminMembershipController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.memberships.index');
+        Route::post('/admin/memberships/plans', [AdminMembershipController::class, 'storePlan'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.memberships.plans.store');
+        Route::patch('/admin/memberships/plans/{plan}', [AdminMembershipController::class, 'updatePlan'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.memberships.plans.update');
+        Route::post('/admin/memberships/subscriptions', [AdminMembershipController::class, 'storeSubscription'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.memberships.subscriptions.store');
+        Route::post('/admin/memberships/subscriptions/{subscription}/upgrade', [AdminMembershipController::class, 'upgradeSubscription'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.memberships.subscriptions.upgrade');
+        Route::post('/admin/memberships/subscriptions/{subscription}/cancel', [AdminMembershipController::class, 'cancelSubscription'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.memberships.subscriptions.cancel');
     });
 });
 

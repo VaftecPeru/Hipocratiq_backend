@@ -24,16 +24,9 @@ class AdminClinicController extends Controller
         $clinics = Clinic::query()
             ->withCount(['memberships', 'patientProfiles'])
             ->with(['latestSubscription.plan', 'latestSubscription.latestSuccessfulPayment'])
-            ->when($filters['search'] ?? null, function ($query, string $search): void {
-                $query->where(function ($query) use ($search): void {
-                    $query
-                        ->where('name', 'like', "%{$search}%")
-                        ->orWhere('address', 'like', "%{$search}%");
-                });
-            })
+            ->when($filters['search'] ?? null, fn ($query, string $search) => $query->where('name', 'like', "%{$search}%"))
             ->when($filters['country_code'] ?? null, fn ($query, string $countryCode) => $query->where('country_code', $countryCode))
             ->when($filters['status'] ?? null, fn ($query, string $status) => $query->where('status', $status))
-            ->when($filters['city'] ?? null, fn ($query, string $city) => $query->where('address', 'like', "%{$city}%"))
             ->when($filters['plan'] ?? null, function ($query, string $plan): void {
                 $query->whereHas(
                     'latestSubscription.plan',
@@ -78,7 +71,7 @@ class AdminClinicController extends Controller
             'name' => $clinic->name,
             'country_code' => $clinic->country_code,
             'address' => $clinic->address,
-            'plan' => $plan?->key?->value ?? PlanKey::Basic->value,
+            'plan' => $plan?->key ?? PlanKey::Basic->value,
             'users' => $clinic->memberships_count,
             'patients' => $clinic->patient_profiles_count,
             'status' => $clinic->status->value,

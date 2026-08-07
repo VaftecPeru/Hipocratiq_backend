@@ -71,7 +71,7 @@ final class CompleteDoctorRegistration
                 amountCents: $amount,
                 currency: $plan->currency,
                 subjectType: 'doctor',
-                planKey: $plan->key->value,
+                planKey: $plan->key,
                 billingCycle: $billingCycle,
             ));
         }
@@ -96,7 +96,7 @@ final class CompleteDoctorRegistration
                 }
 
                 $lockedClinic = $clinic === null ? null : $this->coveredClinic($clinic->id, true);
-                $lockedPlan = $plan === null ? null : $this->selectedPlan($plan->key->value, true);
+                $lockedPlan = $plan === null ? null : $this->selectedPlan($plan->key, true);
                 $user = User::query()->create([
                     'name' => $data['doctor_name'],
                     'email' => $data['doctor_email'],

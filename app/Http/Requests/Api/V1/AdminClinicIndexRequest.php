@@ -32,7 +32,6 @@ class AdminClinicIndexRequest extends FormRequest
             'country_code' => ['sometimes', Rule::in(['MX', 'PE', 'US'])],
             'plan' => ['sometimes', Rule::enum(PlanKey::class)],
             'status' => ['sometimes', Rule::enum(ClinicStatus::class)],
-            'city' => ['sometimes', 'string', 'max:255'],
         ];
     }
 }

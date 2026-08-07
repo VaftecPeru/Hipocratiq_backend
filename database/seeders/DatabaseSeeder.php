@@ -46,9 +46,9 @@ class DatabaseSeeder extends Seeder
         );
 
         foreach ([
-            ['key' => 'basic', 'name' => 'Básico', 'monthly_price_cents' => 4900, 'annual_price_cents' => 47000, 'features' => ['Hasta 3 especialistas', 'Gestión de pacientes ilimitada', 'Citas y calendario básico', 'Soporte vía email']],
-            ['key' => 'professional', 'name' => 'Profesional', 'monthly_price_cents' => 9900, 'annual_price_cents' => 95000, 'features' => ['Hasta 15 especialistas', 'Reportes avanzados y analítica', 'Receta electrónica', 'Soporte prioritario 24/7']],
-            ['key' => 'enterprise', 'name' => 'Enterprise', 'monthly_price_cents' => 0, 'annual_price_cents' => 0, 'features' => ['Especialistas ilimitados', 'Infraestructura dedicada', 'API personalizada', 'Account Manager dedicado'], 'publicly_selectable' => false],
+            ['key' => 'basic', 'name' => 'Básico', 'description' => 'Para clínicas pequeñas que inician su digitalización.', 'monthly_price_cents' => 4900, 'annual_price_cents' => 47000, 'features' => ['Hasta 3 especialistas', 'Gestión de pacientes ilimitada', 'Citas y calendario básico', 'Soporte vía email']],
+            ['key' => 'professional', 'name' => 'Profesional', 'description' => 'Para clínicas en crecimiento que necesitan más alcance.', 'monthly_price_cents' => 9900, 'annual_price_cents' => 95000, 'features' => ['Hasta 15 especialistas', 'Reportes avanzados y analítica', 'Receta electrónica', 'Soporte prioritario 24/7']],
+            ['key' => 'enterprise', 'name' => 'Enterprise', 'description' => 'Para redes hospitalarias y grupos multi-sede.', 'monthly_price_cents' => 0, 'annual_price_cents' => 0, 'features' => ['Especialistas ilimitados', 'Infraestructura dedicada', 'API personalizada', 'Account Manager dedicado'], 'publicly_selectable' => false],
         ] as $plan) {
             Plan::query()->updateOrCreate(
                 ['key' => $plan['key']],

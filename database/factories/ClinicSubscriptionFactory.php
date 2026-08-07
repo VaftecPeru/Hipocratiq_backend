@@ -24,6 +24,7 @@ class ClinicSubscriptionFactory extends Factory
             'plan_id' => Plan::factory(),
             'billing_cycle' => 'monthly',
             'status' => 'active',
+            'auto_renew' => fake()->boolean(85),
             'starts_at' => now(),
             'ends_at' => null,
             'provider' => 'simulated',

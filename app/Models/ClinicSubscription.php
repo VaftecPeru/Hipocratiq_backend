@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['clinic_id', 'plan_id', 'billing_cycle', 'status', 'starts_at', 'ends_at', 'provider', 'provider_reference'])]
+#[Fillable(['clinic_id', 'plan_id', 'billing_cycle', 'status', 'auto_renew', 'starts_at', 'ends_at', 'provider', 'provider_reference'])]
 class ClinicSubscription extends Model
 {
     /** @use HasFactory<ClinicSubscriptionFactory> */
@@ -46,6 +46,7 @@ class ClinicSubscription extends Model
         return [
             'billing_cycle' => BillingCycle::class,
             'status' => SubscriptionStatus::class,
+            'auto_renew' => 'boolean',
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
         ];
