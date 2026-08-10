@@ -49,6 +49,11 @@ class Clinic extends Model
         return $this->hasMany(PatientProfile::class);
     }
 
+    public function supportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class);
+    }
+
     protected function casts(): array
     {
         return ['status' => ClinicStatus::class];

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['clinic_subscription_id', 'idempotency_key', 'amount_cents', 'currency', 'status', 'provider', 'provider_reference', 'paid_at'])]
+#[Fillable(['clinic_subscription_id', 'idempotency_key', 'amount_cents', 'currency', 'status', 'provider', 'provider_reference', 'reconciliation_note', 'refund_reference', 'paid_at', 'refunded_at'])]
 class SubscriptionPayment extends Model
 {
     /** @use HasFactory<SubscriptionPaymentFactory> */
@@ -21,6 +21,6 @@ class SubscriptionPayment extends Model
 
     protected function casts(): array
     {
-        return ['amount_cents' => 'integer', 'paid_at' => 'datetime'];
+        return ['amount_cents' => 'integer', 'paid_at' => 'datetime', 'refunded_at' => 'datetime'];
     }
 }

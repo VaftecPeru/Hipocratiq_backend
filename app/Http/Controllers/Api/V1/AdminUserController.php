@@ -2,18 +2,98 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
+use App\Actions\Admin\UpdateAdminUserAccess;
+use App\Enums\AdminAssignableRole;
+use App\Enums\OnboardingStatus;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AdminUserIndexRequest;
+use App\Http\Requests\Api\V1\AdminUserMessageRequest;
+use App\Http\Requests\Api\V1\AdminUserStoreRequest;
+use App\Http\Requests\Api\V1\AdminUserUpdateRequest;
 use App\Models\Clinic;
 use App\Models\User;
+use App\Notifications\AdminUserMessageNotification;
+use App\Support\PhoneNumber;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 class AdminUserController extends Controller
 {
+    public function store(
+        AdminUserStoreRequest $request,
+        UpdateAdminUserAccess $updateAccess,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $data = $request->validated();
+
+        try {
+            $phone = PhoneNumber::from($data['phone_number'], $data['country_code']);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['phone_number' => [$exception->getMessage()]]);
+        }
+
+        $email = isset($data['email']) ? mb_strtolower(trim($data['email'])) : null;
+        if (User::query()->where('phone_number', $phone->value)->when(
+            $email !== null,
+            fn (Builder $query) => $query->orWhere('email', $email),
+        )->exists()) {
+            throw ValidationException::withMessages([
+                'phone_number' => ['El correo o teléfono ya pertenece a otro usuario.'],
+            ]);
+        }
+
+        $clinic = isset($data['clinic_id']) ? Clinic::query()->findOrFail($data['clinic_id']) : null;
+        $role = AdminAssignableRole::from($data['role']);
+        $user = DB::transaction(function () use ($request, $data, $phone, $email, $clinic, $role, $updateAccess): User {
+            $user = User::query()->create([
+                'name' => trim($data['name']),
+                'email' => $email,
+                'phone_number' => $phone->value,
+                'country_code' => $phone->countryCode,
+                'password' => Str::password(48),
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+            ]);
+
+            return $updateAccess->handle($request->user(), $user, $role, $clinic)['user'];
+        });
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'users',
+            'user_created',
+            User::class,
+            $user->id,
+            $user->name,
+            clinic: $clinic,
+            countryCode: $user->country_code,
+            metadata: [
+                'role' => $role->value,
+                'clinic_id' => $clinic?->id,
+                'requires_password_reset' => true,
+            ],
+            critical: true,
+        );
+
+        $user->load(['roles:id,key,name', 'clinicMemberships.clinic:id,name,address', 'doctorProfile.clinic:id,name,address', 'patientProfile.clinic:id,name,address']);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializeUser($user),
+            'meta' => ['requires_password_reset' => true],
+        ], 201);
+    }
+
     public function index(AdminUserIndexRequest $request): JsonResponse
     {
         $filters = $request->validated();
@@ -38,9 +118,88 @@ class AdminUserController extends Controller
             ],
             'summary' => $this->summary(),
             'filter_options' => [
-                'clinics' => Clinic::query()->orderBy('name')->get(['id', 'name']),
+                'clinics' => Clinic::query()->orderBy('name')->get(['id', 'name', 'country_code', 'status']),
             ],
         ]);
+    }
+
+    public function update(
+        AdminUserUpdateRequest $request,
+        User $user,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $actor = $request->user();
+        $data = $request->validated();
+
+        if ($actor?->is($user) && isset($data['status']) && $data['status'] !== UserStatus::Active->value) {
+            throw ValidationException::withMessages(['status' => ['No puedes suspender o deshabilitar tu propia cuenta.']]);
+        }
+
+        $before = $user->only(['name', 'email', 'phone_number', 'country_code', 'status']);
+        DB::transaction(function () use ($user, $data): void {
+            if (array_key_exists('email', $data) && $data['email'] !== null) {
+                $data['email'] = mb_strtolower(trim($data['email']));
+            }
+            $user->fill($data)->save();
+
+            if (isset($data['status']) && $data['status'] !== UserStatus::Active->value) {
+                $user->authenticationSessions()->delete();
+                $user->tokens()->delete();
+            }
+        });
+        $user->load(['roles:id,key,name', 'clinicMemberships.clinic:id,name,address', 'doctorProfile.clinic:id,name,address', 'patientProfile.clinic:id,name,address']);
+        $audit->handle(
+            $actor,
+            $request,
+            'users',
+            'user_updated',
+            User::class,
+            $user->id,
+            $user->name,
+            countryCode: $user->country_code,
+            metadata: ['before' => $before, 'after' => $user->only(array_keys($before))],
+            critical: isset($data['status']),
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeUser($user)]);
+    }
+
+    public function message(
+        AdminUserMessageRequest $request,
+        User $user,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        if ($user->email === null) {
+            throw ValidationException::withMessages([
+                'email' => ['Este usuario no tiene un correo registrado para recibir mensajes.'],
+            ]);
+        }
+
+        $actor = $request->user();
+        $data = $request->validated();
+        $notification = new AdminUserMessageNotification($data['subject'], $data['body'], $actor);
+
+        $user->notify($notification);
+        if (($data['send_copy'] ?? false) && $actor->email !== null && ! $actor->is($user)) {
+            $actor->notify($notification);
+        }
+
+        $audit->handle(
+            $actor,
+            $request,
+            'users',
+            'user_message_sent',
+            User::class,
+            $user->id,
+            $user->name,
+            countryCode: $user->country_code,
+            metadata: ['subject' => $data['subject'], 'copy_sent' => (bool) ($data['send_copy'] ?? false)],
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Mensaje programado para envío.',
+        ], 202);
     }
 
     private function adminUserQuery(): Builder
@@ -125,6 +284,12 @@ class AdminUserController extends Controller
             'phone_number' => $user->phone_number,
             'country_code' => $user->country_code,
             'role' => $this->effectiveRole($roleKeys, $user->patientProfile !== null),
+            'assignable_roles' => collect([
+                AdminAssignableRole::SuperAdmin->value,
+                AdminAssignableRole::ClinicAdmin->value,
+                $user->doctorProfile !== null ? AdminAssignableRole::Doctor->value : null,
+                $user->patientProfile !== null ? AdminAssignableRole::Patient->value : null,
+            ])->filter()->values(),
             'clinic' => $clinic?->only(['id', 'name', 'address']),
             'last_login_at' => $user->last_login_at?->toIso8601String(),
             'status' => $user->status->value,

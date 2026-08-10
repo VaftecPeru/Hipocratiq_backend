@@ -1,7 +1,17 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AdminAccessControlController;
+use App\Http\Controllers\Api\V1\AdminAuditController;
+use App\Http\Controllers\Api\V1\AdminBillingController;
 use App\Http\Controllers\Api\V1\AdminClinicController;
+use App\Http\Controllers\Api\V1\AdminDashboardController;
+use App\Http\Controllers\Api\V1\AdminEmergencyController;
+use App\Http\Controllers\Api\V1\AdminInfrastructureController;
 use App\Http\Controllers\Api\V1\AdminMembershipController;
+use App\Http\Controllers\Api\V1\AdminNotificationController;
+use App\Http\Controllers\Api\V1\AdminPlatformSettingsController;
+use App\Http\Controllers\Api\V1\AdminSupportTicketController;
+use App\Http\Controllers\Api\V1\AdminSystemIncidentController;
 use App\Http\Controllers\Api\V1\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\ClinicRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\DoctorRegistrationController;
@@ -127,9 +137,102 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');
+        Route::post('/admin/clinics', [AdminClinicController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.clinics.store');
+        Route::get('/admin/dashboard', [AdminDashboardController::class, 'show'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.dashboard.show');
+        Route::get('/admin/billing', [AdminBillingController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.billing.index');
+        Route::get('/admin/billing/export', [AdminBillingController::class, 'export'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.billing.export');
+        Route::post('/admin/billing/manual-payments', [AdminBillingController::class, 'storeManualPayment'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.billing.manual-payments.store');
+        Route::post('/admin/billing/payments/{payment}/refund', [AdminBillingController::class, 'refundManualPayment'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.billing.payments.refund');
+        Route::get('/admin/reports/export', [AdminBillingController::class, 'reportExport'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.reports.export');
+        Route::get('/admin/monitoring', [AdminDashboardController::class, 'monitoring'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.monitoring.show');
+        Route::get('/admin/notifications', [AdminNotificationController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.notifications.index');
+        Route::post('/admin/notifications/read', [AdminNotificationController::class, 'read'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.notifications.read');
+        Route::post('/admin/notifications/read-all', [AdminNotificationController::class, 'readAll'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.notifications.read-all');
+        Route::post('/admin/system-incidents', [AdminSystemIncidentController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.system-incidents.store');
+        Route::patch('/admin/system-incidents/{systemIncident}', [AdminSystemIncidentController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.system-incidents.update');
+        Route::get('/admin/emergency', [AdminEmergencyController::class, 'show'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.emergency.show');
+        Route::patch('/admin/emergency', [AdminEmergencyController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.emergency.update');
+        Route::post('/admin/emergency/publish', [AdminEmergencyController::class, 'publish'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.emergency.publish');
+        Route::patch('/admin/clinics/{clinic}', [AdminClinicController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.clinics.update');
+        Route::get('/admin/audit-events', [AdminAuditController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.audit-events.index');
         Route::get('/admin/users', [AdminUserController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.users.index');
+        Route::post('/admin/users', [AdminUserController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.users.store');
+        Route::get('/admin/access-control', [AdminAccessControlController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.access-control.index');
+        Route::patch('/admin/users/{user}/access', [AdminAccessControlController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.users.access.update');
+        Route::patch('/admin/users/{user}', [AdminUserController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.users.update');
+        Route::post('/admin/users/{user}/messages', [AdminUserController::class, 'message'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.users.messages.store');
+        Route::get('/admin/platform-settings', [AdminPlatformSettingsController::class, 'show'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.platform-settings.show');
+        Route::patch('/admin/platform-settings', [AdminPlatformSettingsController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.platform-settings.update');
+        Route::get('/admin/infrastructure', [AdminInfrastructureController::class, 'show'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.infrastructure.show');
+        Route::get('/admin/support-tickets', [AdminSupportTicketController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.support-tickets.index');
+        Route::post('/admin/support-tickets', [AdminSupportTicketController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.support-tickets.store');
+        Route::get('/admin/support-tickets/{supportTicket}', [AdminSupportTicketController::class, 'show'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.support-tickets.show');
+        Route::patch('/admin/support-tickets/{supportTicket}', [AdminSupportTicketController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.support-tickets.update');
+        Route::post('/admin/support-tickets/{supportTicket}/comments', [AdminSupportTicketController::class, 'comment'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.support-tickets.comments.store');
         Route::get('/admin/memberships', [AdminMembershipController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.memberships.index');

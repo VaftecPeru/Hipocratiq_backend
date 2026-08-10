@@ -55,6 +55,16 @@ class User extends Authenticatable
         return $this->hasMany(AuthenticationSession::class);
     }
 
+    public function requestedSupportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class, 'requested_by_user_id');
+    }
+
+    public function assignedSupportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class, 'assigned_to_user_id');
+    }
+
     public function roles(): BelongsToMany
     {
         return $this->belongsToMany(Role::class)->withTimestamps();

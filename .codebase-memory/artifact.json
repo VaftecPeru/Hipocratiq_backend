@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "5478c5c67884a0d4b32c99fcbf9140c804d21505",
-    "indexed_at": "2026-07-30T17:37:40Z",
-    "project": "saas-hip-backend",
-    "nodes": 1337,
-    "edges": 3256,
-    "original_size": 3342336,
-    "compressed_size": 520638,
-    "compression_level": 9
+    "commit": "86d8f5484687d26a8a14249b0d7b020e31a58c78",
+    "indexed_at": "2026-08-10T23:13:58Z",
+    "project": "saas-hip-back-api",
+    "nodes": 1757,
+    "edges": 5714,
+    "original_size": 6488064,
+    "compressed_size": 1044565,
+    "compression_level": 3
 }

@@ -341,6 +341,10 @@ Todas estas rutas requieren autenticación:
 | `POST` | `/api/v1/auth/logout-all` | Revoca sesiones y tokens |
 | `GET` | `/api/v1/auth/clinic/dashboard` | Acceso a clínica activa |
 | `GET` | `/api/v1/auth/admin/clinics` | Permiso `manage-platform` |
+| `PATCH` | `/api/v1/auth/admin/clinics/{clinic}` | Actualiza datos, plan o estado de una clínica |
+| `GET` | `/api/v1/auth/admin/users` | Lista y resume usuarios de todos los países |
+| `PATCH` | `/api/v1/auth/admin/users/{user}` | Actualiza perfil o estado; revoca sesiones al bloquear |
+| `POST` | `/api/v1/auth/admin/users/{user}/messages` | Envía un correo de soporte y registra auditoría |
 
 `/me` devuelve usuario, roles, perfiles, contexto y clínica/plan relacionados. `logout-all` revoca tokens móviles y sesiones activas.
 
@@ -420,6 +424,39 @@ Si `/api/health` devuelve `503`, comprueba primero el estado del contenedor Redi
 - [Configuración de facturación](../config/billing.php)
 - [Rutas](../routes/api.php)
 - [Pruebas Redis](../tests/Feature/RedisInfrastructureTest.php)
+
+## Operación administrativa global
+
+Todas las rutas siguientes requieren sesión web `staff` y permiso `manage-platform`.
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/api/v1/auth/admin/support-tickets` | Lista tickets y devuelve métricas globales, países, agentes, SLA y escalaciones |
+| `POST` | `/api/v1/auth/admin/support-tickets` | Crea ticket, Ticket ID, vencimiento SLA, actividad inicial y notificación opcional |
+| `GET` | `/api/v1/auth/admin/support-tickets/{ticket}` | Devuelve ticket e historial completo |
+| `PATCH` | `/api/v1/auth/admin/support-tickets/{ticket}` | Actualiza estado, prioridad o responsable Superadmin |
+| `POST` | `/api/v1/auth/admin/support-tickets/{ticket}/comments` | Agrega una nota interna o comentario |
+| `GET` | `/api/v1/auth/admin/audit-events` | Unifica eventos administrativos y de autenticación |
+| `GET` | `/api/v1/auth/admin/dashboard` | Consolida KPIs, pagos, países, soporte, actividad y salud de dependencias |
+| `GET` | `/api/v1/auth/admin/monitoring` | Comprueba dependencias y resume sesiones, colas, eventos y señales críticas |
+| `GET` | `/api/v1/auth/admin/billing` | Lista pagos reales con filtros, recaudación y distribución por país |
+| `GET` | `/api/v1/auth/admin/billing/export` | Exporta el resultado filtrado en CSV y registra auditoría |
+| `GET` | `/api/v1/auth/admin/reports/export` | Exporta el resumen ejecutivo global en CSV y registra auditoría |
+| `GET` | `/api/v1/auth/admin/emergency` | Consulta política global, responsables y cobertura efectiva |
+| `PATCH` | `/api/v1/auth/admin/emergency` | Persiste la política y plantilla de responsables |
+| `POST` | `/api/v1/auth/admin/emergency/publish` | Publica por país o globalmente y registra auditoría crítica |
+| `PATCH` | `/api/v1/auth/admin/clinics/{clinic}` | Actualiza nombre, país, dirección, plan o estado |
+| `GET` | `/api/v1/auth/admin/users` | Lista usuarios globales con filtros, distribuciones y actividad |
+| `PATCH` | `/api/v1/auth/admin/users/{user}` | Actualiza datos y controla acceso del usuario |
+| `POST` | `/api/v1/auth/admin/users/{user}/messages` | Programa un mensaje por correo y copia opcional al operador |
+
+El listado de soporte acepta `search`, `clinic_id`, `country_code`, `category`, `priority`, `status`, `assigned_to_user_id`, `overdue`, `page` y `per_page`. Los SLA por prioridad son: urgente 2 horas, alta 8 horas, normal 24 horas y baja 72 horas.
+
+Auditoría acepta `search`, `user_id`, `module`, `action`, `country_code`, `critical`, `date_from`, `date_to`, `page` y `per_page`. Devuelve totales, usuarios únicos, países afectados, eventos críticos, cambios recientes y módulos con mayor actividad. Las escrituras de soporte, membresías y configuración regional registran actor, IP, país, tenant, recurso y metadatos antes/después cuando corresponde.
+
+La actualización de usuarios no modifica roles ni membresías: esos permisos se administran en su flujo dedicado. Suspender o deshabilitar revoca sesiones y tokens, y el Superadmin no puede bloquear su propia cuenta. Los mensajes requieren correo del destinatario y nunca almacenan el cuerpo en auditoría.
+
+Dashboard y monitoreo no inventan telemetría. Exponen agregados de la base transaccional y comprobaciones ejecutadas al solicitar la vista (API, base de datos, caché, cola y almacenamiento). CPU, memoria, uptime histórico, latencia p95 y deployments deben incorporarse posteriormente desde un proveedor de observabilidad.
 
 ## Versionado y mantenimiento
 

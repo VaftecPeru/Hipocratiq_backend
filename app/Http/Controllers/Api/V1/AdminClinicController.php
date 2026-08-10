@@ -2,22 +2,58 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\CreateAdminClinic;
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Enums\BillingCycle;
 use App\Enums\ClinicStatus;
 use App\Enums\PlanKey;
 use App\Enums\SubscriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AdminClinicIndexRequest;
+use App\Http\Requests\Api\V1\AdminClinicStoreRequest;
+use App\Http\Requests\Api\V1\AdminClinicUpdateRequest;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicSubscription;
 use App\Models\PatientProfile;
+use App\Models\Plan;
 use App\Models\SubscriptionPayment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class AdminClinicController extends Controller
 {
+    public function store(
+        AdminClinicStoreRequest $request,
+        CreateAdminClinic $createClinic,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $createClinic->handle($request->validated());
+        $clinic->loadCount(['memberships', 'patientProfiles'])
+            ->load(['latestSubscription.plan', 'latestSubscription.latestSuccessfulPayment']);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinics',
+            'clinic_created',
+            Clinic::class,
+            $clinic->id,
+            $clinic->name,
+            $clinic,
+            metadata: [
+                'plan' => $clinic->latestSubscription?->plan?->key,
+                'billing_cycle' => $clinic->latestSubscription?->billing_cycle?->value,
+                'source' => 'admin_manual',
+            ],
+            critical: true,
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeClinic($clinic)], 201);
+    }
+
     public function index(AdminClinicIndexRequest $request): JsonResponse
     {
         $filters = $request->validated();
@@ -52,6 +88,49 @@ class AdminClinicController extends Controller
             ],
             'summary' => $this->summary(),
         ]);
+    }
+
+    public function update(
+        AdminClinicUpdateRequest $request,
+        Clinic $clinic,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $data = $request->validated();
+        $before = $clinic->only(['name', 'country_code', 'address', 'status']);
+        $previousPlan = $clinic->latestSubscription?->plan?->key;
+
+        DB::transaction(function () use ($clinic, $data): void {
+            $clinic->fill(collect($data)->only(['name', 'country_code', 'address', 'status'])->all());
+            $clinic->save();
+
+            if (isset($data['plan'])) {
+                $subscription = $clinic->latestSubscription;
+                if ($subscription === null) {
+                    throw ValidationException::withMessages(['plan' => ['La clínica no tiene una suscripción para actualizar.']]);
+                }
+
+                $subscription->update(['plan_id' => Plan::query()->where('key', $data['plan'])->value('id')]);
+            }
+        });
+
+        $clinic->loadCount(['memberships', 'patientProfiles'])->load(['latestSubscription.plan', 'latestSubscription.latestSuccessfulPayment']);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinics',
+            'clinic_updated',
+            Clinic::class,
+            $clinic->id,
+            $clinic->name,
+            $clinic,
+            metadata: [
+                'before' => [...$before, 'plan' => $previousPlan],
+                'after' => [...$clinic->only(['name', 'country_code', 'address', 'status']), 'plan' => $clinic->latestSubscription?->plan?->key],
+            ],
+            critical: isset($data['status']) || isset($data['plan']),
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeClinic($clinic)]);
     }
 
     /**

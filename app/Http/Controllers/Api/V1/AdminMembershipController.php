@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Enums\BillingCycle;
 use App\Enums\PlanKey;
 use App\Enums\SubscriptionStatus;
@@ -15,6 +16,7 @@ use App\Models\Plan;
 use App\Models\SubscriptionPayment;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -70,7 +72,7 @@ class AdminMembershipController extends Controller
         ]);
     }
 
-    public function storePlan(MembershipPlanStoreRequest $request): JsonResponse
+    public function storePlan(MembershipPlanStoreRequest $request, RecordAdminAuditEvent $audit): JsonResponse
     {
         $data = $request->validated();
         $plan = Plan::create([
@@ -84,6 +86,17 @@ class AdminMembershipController extends Controller
             'publicly_selectable' => $data['publicly_selectable'] ?? true,
             'is_active' => $data['is_active'] ?? true,
         ]);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'memberships',
+            'plan_created',
+            Plan::class,
+            $plan->id,
+            $plan->name,
+            metadata: ['key' => $plan->key, 'monthly_price_cents' => $plan->monthly_price_cents],
+            critical: true,
+        );
 
         return response()->json([
             'success' => true,
@@ -91,9 +104,10 @@ class AdminMembershipController extends Controller
         ], 201);
     }
 
-    public function updatePlan(Plan $plan, MembershipPlanUpdateRequest $request): JsonResponse
+    public function updatePlan(Plan $plan, MembershipPlanUpdateRequest $request, RecordAdminAuditEvent $audit): JsonResponse
     {
         $data = $request->validated();
+        $before = $plan->only(['key', 'name', 'monthly_price_cents', 'annual_price_cents', 'publicly_selectable', 'is_active']);
         $plan->update([
             'key' => $data['key'] ?? $plan->key,
             'name' => $data['name'] ?? $plan->name,
@@ -110,6 +124,20 @@ class AdminMembershipController extends Controller
             'publicly_selectable' => $data['publicly_selectable'] ?? $plan->publicly_selectable,
             'is_active' => $data['is_active'] ?? $plan->is_active,
         ]);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'memberships',
+            'plan_updated',
+            Plan::class,
+            $plan->id,
+            $plan->name,
+            metadata: [
+                'before' => $before,
+                'after' => $plan->only(array_keys($before)),
+            ],
+            critical: true,
+        );
 
         return response()->json([
             'success' => true,
@@ -117,7 +145,7 @@ class AdminMembershipController extends Controller
         ]);
     }
 
-    public function storeSubscription(MembershipSubscriptionCreateRequest $request): JsonResponse
+    public function storeSubscription(MembershipSubscriptionCreateRequest $request, RecordAdminAuditEvent $audit): JsonResponse
     {
         $data = $request->validated();
         $startsAt = Carbon::parse($data['starts_at'])->startOfDay();
@@ -130,10 +158,22 @@ class AdminMembershipController extends Controller
             'auto_renew' => $data['auto_renew'] ?? true,
             'starts_at' => $startsAt,
             'ends_at' => $this->cycleEndDate($startsAt, $data['billing_cycle']),
-            'provider' => 'simulated',
-            'provider_reference' => Str::uuid()->toString(),
+            'provider' => 'admin_manual',
+            'provider_reference' => 'admin-subscription-'.Str::uuid(),
         ]);
         $subscription->load(['clinic', 'plan']);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'memberships',
+            'subscription_created',
+            ClinicSubscription::class,
+            $subscription->id,
+            $subscription->clinic?->name,
+            $subscription->clinic,
+            metadata: ['plan' => $subscription->plan?->key, 'billing_cycle' => $subscription->billing_cycle->value],
+            critical: true,
+        );
 
         return response()->json([
             'success' => true,
@@ -141,9 +181,13 @@ class AdminMembershipController extends Controller
         ], 201);
     }
 
-    public function upgradeSubscription(ClinicSubscription $subscription, MembershipUpgradeRequest $request): JsonResponse
-    {
+    public function upgradeSubscription(
+        ClinicSubscription $subscription,
+        MembershipUpgradeRequest $request,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
         $data = $request->validated();
+        $previousPlanId = $subscription->plan_id;
         $upgradeAt = isset($data['upgrade_at'])
             ? Carbon::parse($data['upgrade_at'])->startOfDay()
             : now()->startOfDay();
@@ -154,6 +198,18 @@ class AdminMembershipController extends Controller
             'ends_at' => $this->cycleEndDate($upgradeAt, $subscription->billing_cycle->value),
         ]);
         $subscription->load(['clinic', 'plan']);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'memberships',
+            'subscription_upgraded',
+            ClinicSubscription::class,
+            $subscription->id,
+            $subscription->clinic?->name,
+            $subscription->clinic,
+            metadata: ['previous_plan_id' => $previousPlanId, 'new_plan_id' => $subscription->plan_id],
+            critical: true,
+        );
 
         return response()->json([
             'success' => true,
@@ -161,12 +217,28 @@ class AdminMembershipController extends Controller
         ]);
     }
 
-    public function cancelSubscription(ClinicSubscription $subscription): JsonResponse
-    {
+    public function cancelSubscription(
+        ClinicSubscription $subscription,
+        Request $request,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
         $subscription->update([
             'status' => SubscriptionStatus::Canceled->value,
             'auto_renew' => false,
         ]);
+        $subscription->loadMissing(['clinic', 'plan']);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'memberships',
+            'subscription_canceled',
+            ClinicSubscription::class,
+            $subscription->id,
+            $subscription->clinic?->name,
+            $subscription->clinic,
+            metadata: ['plan' => $subscription->plan?->key],
+            critical: true,
+        );
 
         return response()->json([
             'success' => true,
