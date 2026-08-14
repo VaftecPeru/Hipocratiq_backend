@@ -14,6 +14,7 @@ use App\Models\DoctorSubscription;
 use App\Models\PatientProfile;
 use App\Models\Plan;
 use App\Models\Role;
+use App\Models\SupportTicket;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -252,7 +253,14 @@ class DemoUsersSeeder extends Seeder
 
         // Delete the demo clinic explicitly so its subscription and any dangling
         // rows are removed even if no membership references it anymore.
-        Clinic::query()->where('slug', 'clinica-demo-salud')->delete();
+        // Support tickets restrict clinic deletion, so purge them first.
+        $demoClinic = Clinic::query()->where('slug', 'clinica-demo-salud')->first();
+
+        if ($demoClinic !== null) {
+            SupportTicket::query()->where('clinic_id', $demoClinic->id)->delete();
+
+            $demoClinic->delete();
+        }
 
         $deleted = User::query()->whereIn('id', $userIds)->delete();
 
