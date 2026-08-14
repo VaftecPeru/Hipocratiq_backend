@@ -22,6 +22,21 @@ class AdminPlatformSettingsController extends Controller
         ]);
     }
 
+    public function publicShow(): JsonResponse
+    {
+        $settings = $this->settings();
+        $defaultCountryCode = in_array($settings->default_country_code, self::SUPPORTED_COUNTRY_CODES, true)
+            ? $settings->default_country_code
+            : self::DEFAULT_COUNTRY_CODE;
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'default_country_code' => $defaultCountryCode,
+            ],
+        ]);
+    }
+
     public function update(AdminPlatformSettingsUpdateRequest $request, RecordAdminAuditEvent $audit): JsonResponse
     {
         $settings = $this->settings();

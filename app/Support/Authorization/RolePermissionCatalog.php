@@ -27,6 +27,9 @@ final class RolePermissionCatalog
             ['key' => 'platform.settings.manage', 'label' => 'Administrar configuración global', 'group' => 'Plataforma'],
             ['key' => 'platform.countries.manage', 'label' => 'Administrar países habilitados', 'group' => 'Plataforma'],
             ['key' => 'clinic.dashboard.view', 'label' => 'Ver panel de la clínica', 'group' => 'Clínica'],
+            ['key' => 'reception.dashboard.view', 'label' => 'Ver panel de recepción', 'group' => 'Recepción'],
+            ['key' => 'reception.patients.manage', 'label' => 'Gestionar pacientes', 'group' => 'Recepción'],
+            ['key' => 'reception.agenda.manage', 'label' => 'Gestionar agenda', 'group' => 'Recepción'],
             ['key' => 'doctor.dashboard.view', 'label' => 'Ver panel médico', 'group' => 'Médico'],
             ['key' => 'patient.dashboard.view', 'label' => 'Ver portal del paciente', 'group' => 'Paciente'],
         ];
@@ -51,6 +54,13 @@ final class RolePermissionCatalog
                 'scope' => RoleScope::Organization->value,
                 'description' => 'Administra la operación de una clínica específica sin acceso global.',
                 'permissions' => self::permissionKeysWithPrefix('clinic.'),
+            ],
+            [
+                'key' => AdminAssignableRole::Receptionist->value,
+                'name' => 'Recepcionista',
+                'scope' => RoleScope::Organization->value,
+                'description' => 'Gestiona la recepción, pacientes y agenda de la clínica asignada.',
+                'permissions' => self::permissionKeysWithPrefix('reception.'),
             ],
             [
                 'key' => AdminAssignableRole::Doctor->value,

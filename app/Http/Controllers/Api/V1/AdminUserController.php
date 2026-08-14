@@ -247,8 +247,9 @@ class AdminUserController extends Controller
     {
         $higherPriorityRoles = match ($role) {
             RoleKey::ClinicAdmin->value => [RoleKey::SuperAdmin->value],
+            RoleKey::Receptionist->value => [RoleKey::SuperAdmin->value, RoleKey::ClinicAdmin->value],
             RoleKey::Doctor->value => [RoleKey::SuperAdmin->value, RoleKey::ClinicAdmin->value],
-            'patient' => [RoleKey::SuperAdmin->value, RoleKey::ClinicAdmin->value, RoleKey::Doctor->value],
+            'patient' => [RoleKey::SuperAdmin->value, RoleKey::ClinicAdmin->value, RoleKey::Receptionist->value, RoleKey::Doctor->value],
             default => [],
         };
 
@@ -287,6 +288,7 @@ class AdminUserController extends Controller
             'assignable_roles' => collect([
                 AdminAssignableRole::SuperAdmin->value,
                 AdminAssignableRole::ClinicAdmin->value,
+                AdminAssignableRole::Receptionist->value,
                 $user->doctorProfile !== null ? AdminAssignableRole::Doctor->value : null,
                 $user->patientProfile !== null ? AdminAssignableRole::Patient->value : null,
             ])->filter()->values(),
@@ -302,7 +304,7 @@ class AdminUserController extends Controller
      */
     private function effectiveRole(Collection $roleKeys, bool $isPatient): string
     {
-        foreach ([RoleKey::SuperAdmin, RoleKey::ClinicAdmin, RoleKey::Doctor] as $role) {
+        foreach ([RoleKey::SuperAdmin, RoleKey::ClinicAdmin, RoleKey::Receptionist, RoleKey::Doctor] as $role) {
             if ($roleKeys->contains($role->value)) {
                 return $role->value;
             }
@@ -320,6 +322,7 @@ class AdminUserController extends Controller
         $roleCounts = Collection::make([
             RoleKey::SuperAdmin->value,
             RoleKey::ClinicAdmin->value,
+            RoleKey::Receptionist->value,
             RoleKey::Doctor->value,
             'patient',
             'unassigned',
@@ -339,6 +342,7 @@ class AdminUserController extends Controller
                 'users' => $totalUsers,
                 'active_users' => User::query()->where('status', UserStatus::Active->value)->count(),
                 'administrators' => $roleCounts->get(RoleKey::SuperAdmin->value, 0) + $roleCounts->get(RoleKey::ClinicAdmin->value, 0),
+                'receptionists' => $roleCounts->get(RoleKey::Receptionist->value, 0),
                 'doctors' => $roleCounts->get(RoleKey::Doctor->value, 0),
                 'patients' => $roleCounts->get('patient', 0),
             ],

@@ -25,7 +25,7 @@ class AdminUserIndexRequest extends FormRequest
             'search' => ['sometimes', 'string', 'max:100'],
             'country_code' => ['sometimes', Rule::in(['MX', 'PE', 'US'])],
             'clinic_id' => ['sometimes', 'integer', Rule::exists('clinics', 'id')],
-            'role' => ['sometimes', Rule::in(['super_admin', 'clinic_admin', 'doctor', 'patient', 'unassigned'])],
+            'role' => ['sometimes', Rule::in(['super_admin', 'clinic_admin', 'receptionist', 'doctor', 'patient', 'unassigned'])],
             'status' => ['sometimes', Rule::enum(UserStatus::class)],
         ];
     }

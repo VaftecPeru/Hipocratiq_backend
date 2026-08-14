@@ -19,6 +19,19 @@ class AdminPlatformSettingsTest extends TestCase
         $this->app->instance(OtpCodeGenerator::class, new FixedOtpCodeGenerator);
     }
 
+    public function test_guest_can_read_the_default_country_for_login(): void
+    {
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/platform-settings')
+            ->assertOk()
+            ->assertExactJson([
+                'success' => true,
+                'data' => [
+                    'default_country_code' => 'MX',
+                ],
+            ]);
+    }
+
     public function test_super_admin_can_read_default_platform_country_settings(): void
     {
         $this->authenticateAdmin();

@@ -86,7 +86,11 @@ final class UpdateAdminUserAccess
             return;
         }
 
-        $roleKey = $role === AdminAssignableRole::ClinicAdmin ? RoleKey::ClinicAdmin : RoleKey::Doctor;
+        $roleKey = match ($role) {
+            AdminAssignableRole::ClinicAdmin => RoleKey::ClinicAdmin,
+            AdminAssignableRole::Receptionist => RoleKey::Receptionist,
+            default => RoleKey::Doctor,
+        };
         $systemRole = $this->systemRole($roleKey);
 
         if ($role === AdminAssignableRole::Doctor) {
@@ -150,7 +154,7 @@ final class UpdateAdminUserAccess
     {
         $user->loadMissing(['roles:id,key', 'clinicMemberships.clinic:id', 'doctorProfile.clinic:id', 'patientProfile.clinic:id']);
         $roleKeys = $user->roles->pluck('key');
-        $role = collect([RoleKey::SuperAdmin, RoleKey::ClinicAdmin, RoleKey::Doctor])
+        $role = collect([RoleKey::SuperAdmin, RoleKey::ClinicAdmin, RoleKey::Receptionist, RoleKey::Doctor])
             ->first(fn (RoleKey $candidate): bool => $roleKeys->contains($candidate->value));
         $activeMembership = $user->clinicMemberships
             ->first(fn ($membership): bool => $membership->status === ClinicMembershipStatus::Active);

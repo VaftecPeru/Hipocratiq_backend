@@ -120,12 +120,14 @@ class AdminAccessControlController extends Controller
                 ->whereDoesntHave('roles', fn (Builder $query) => $query->whereIn('key', [
                     RoleKey::SuperAdmin->value,
                     RoleKey::ClinicAdmin->value,
+                    RoleKey::Receptionist->value,
                     RoleKey::Doctor->value,
                 ]));
         }
 
         $higherPriorityRoles = match ($role) {
             AdminAssignableRole::ClinicAdmin => [RoleKey::SuperAdmin->value],
+            AdminAssignableRole::Receptionist => [RoleKey::SuperAdmin->value, RoleKey::ClinicAdmin->value],
             AdminAssignableRole::Doctor => [RoleKey::SuperAdmin->value, RoleKey::ClinicAdmin->value],
             default => [],
         };

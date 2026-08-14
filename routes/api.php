@@ -124,6 +124,8 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
     Route::post('/otp/resend', [OtpController::class, 'store'])
         ->middleware('throttle:auth-otp')
         ->name('otp.resend');
+    Route::get('/platform-settings', [AdminPlatformSettingsController::class, 'publicShow'])
+        ->name('platform-settings.show');
 
     Route::middleware(['auth:sanctum', 'auth.session'])->group(function (): void {
         Route::get('/me', [SessionController::class, 'show'])->name('me');
@@ -132,8 +134,23 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
 
         Route::get('/clinic/dashboard', [ClinicDashboardController::class, 'show'])
-            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.dashboard');
+        Route::get('/clinic/members', [ClinicDashboardController::class, 'members'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.members.index');
+        Route::post('/clinic/members', [ClinicDashboardController::class, 'storeMember'])
+            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->name('clinic.members.store');
+        Route::get('/clinic/patients', [ClinicDashboardController::class, 'patients'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.patients.index');
+        Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.settings.show');
+        Route::patch('/clinic/settings', [ClinicDashboardController::class, 'updateSettings'])
+            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->name('clinic.settings.update');
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');

@@ -26,11 +26,13 @@ class AdminUserStoreRequest extends FormRequest
             'role' => ['required', Rule::in([
                 AdminAssignableRole::SuperAdmin->value,
                 AdminAssignableRole::ClinicAdmin->value,
+                AdminAssignableRole::Receptionist->value,
             ])],
             'clinic_id' => [
                 'nullable',
                 'integer',
                 'required_if:role,'.AdminAssignableRole::ClinicAdmin->value,
+                'required_if:role,'.AdminAssignableRole::Receptionist->value,
                 'prohibited_if:role,'.AdminAssignableRole::SuperAdmin->value,
                 Rule::exists('clinics', 'id')->where('status', ClinicStatus::Active->value),
             ],

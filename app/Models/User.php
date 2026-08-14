@@ -92,6 +92,18 @@ class User extends Authenticatable
             ->exists();
     }
 
+    public function hasActiveReceptionistAccess(): bool
+    {
+        return $this->clinicMemberships()
+            ->where('status', 'active')
+            ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Receptionist->value))
+            ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+            }))
+            ->exists();
+    }
+
     public function hasActiveDoctorAccess(): bool
     {
         $profile = $this->doctorProfile()->first();

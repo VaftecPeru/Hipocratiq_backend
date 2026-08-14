@@ -38,7 +38,7 @@ class AdminAccessControlTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.actor_user_id', $admin->id)
             ->assertJsonPath('data.enforcement', 'actor_context')
-            ->assertJsonCount(4, 'data.roles')
+            ->assertJsonCount(5, 'data.roles')
             ->assertJsonPath('data.roles.0.key', 'super_admin')
             ->assertJsonPath('data.roles.0.scope', 'global')
             ->assertJsonPath('data.summary.total_users', 2)
@@ -167,6 +167,7 @@ class AdminAccessControlTest extends TestCase
         return collect([
             RoleKey::SuperAdmin->value => ['Super Administrador', RoleScope::Global],
             RoleKey::ClinicAdmin->value => ['Administrador Clínico', RoleScope::Organization],
+            RoleKey::Receptionist->value => ['Recepcionista', RoleScope::Organization],
             RoleKey::Doctor->value => ['Médico', RoleScope::Organization],
         ])->mapWithKeys(function (array $definition, string $key): array {
             return [$key => Role::query()->firstOrCreate(

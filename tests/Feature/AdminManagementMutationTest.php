@@ -160,6 +160,39 @@ class AdminManagementMutationTest extends TestCase
         ]);
     }
 
+    public function test_super_admin_can_create_a_receptionist_for_a_clinic(): void
+    {
+        $this->authenticateAdmin();
+        $clinic = Clinic::factory()->create();
+        $receptionistRole = Role::query()->create([
+            'key' => RoleKey::Receptionist->value,
+            'name' => 'Recepcionista',
+            'scope' => RoleScope::Organization,
+            'is_system' => true,
+        ]);
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/admin/users', [
+            'name' => 'Recepcionista Nueva',
+            'email' => 'receptionist@example.test',
+            'phone_number' => '55 8765 4322',
+            'country_code' => 'MX',
+            'role' => 'receptionist',
+            'clinic_id' => $clinic->id,
+        ])->assertCreated()
+            ->assertJsonPath('data.role', 'receptionist')
+            ->assertJsonPath('data.clinic.id', $clinic->id)
+            ->assertJsonPath('meta.requires_password_reset', true);
+
+        $user = User::query()->where('email', 'receptionist@example.test')->firstOrFail();
+        $this->assertDatabaseHas('role_user', ['user_id' => $user->id, 'role_id' => $receptionistRole->id]);
+        $this->assertDatabaseHas('clinic_memberships', [
+            'user_id' => $user->id,
+            'clinic_id' => $clinic->id,
+            'role_id' => $receptionistRole->id,
+            'status' => 'active',
+        ]);
+    }
+
     public function test_admin_user_creation_rejects_specialized_roles(): void
     {
         $this->authenticateAdmin();

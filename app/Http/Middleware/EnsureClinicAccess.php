@@ -16,7 +16,10 @@ class EnsureClinicAccess
     {
         $membership = $request->user()->clinicMemberships()
             ->where('status', ClinicMembershipStatus::Active)
-            ->whereHas('role', fn ($query) => $query->where('key', RoleKey::ClinicAdmin->value))
+            ->whereHas('role', fn ($query) => $query->whereIn('key', [
+                RoleKey::ClinicAdmin->value,
+                RoleKey::Receptionist->value,
+            ]))
             ->whereHas('clinic', fn ($query) => $query->where('status', ClinicStatus::Active))
             ->with(['clinic.subscriptions' => fn ($query) => $query->where('status', SubscriptionStatus::Active->value)->where(function ($query): void {
                 $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
