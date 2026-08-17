@@ -75,6 +75,11 @@ class User extends Authenticatable
         return $this->hasMany(ClinicMembership::class);
     }
 
+    public function doctorAppointments(): HasMany
+    {
+        return $this->hasMany(Appointment::class, 'doctor_user_id');
+    }
+
     public function hasActiveClinicMembership(): bool
     {
         return $this->clinicMemberships()->where('status', 'active')->exists();

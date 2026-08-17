@@ -2,10 +2,12 @@
 
 namespace Database\Seeders;
 
+use App\Enums\AppointmentStatus;
 use App\Enums\DoctorPracticeType;
 use App\Enums\OnboardingStatus;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
+use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicSubscription;
@@ -36,7 +38,7 @@ class DemoUsersSeeder extends Seeder
         // Ensure base roles and plans exist
         $this->call(DatabaseSeeder::class);
 
-        // Reset demo data: remove existing clinic admins, doctors, and patients
+        // Reset demo data: remove existing clinic staff and patients
         // so the demo starts from a clean, deterministic state. User deletes
         // cascade to profiles, memberships, subscriptions, OTP challenges, and
         // sessions (all FKs are cascadeOnDelete on user_id).
@@ -45,6 +47,7 @@ class DemoUsersSeeder extends Seeder
         $password = Hash::make(self::PASSWORD);
         $plan = Plan::query()->where('key', 'professional')->firstOrFail();
         $clinicAdminRole = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
+        $receptionistRole = Role::query()->where('key', RoleKey::Receptionist->value)->firstOrFail();
         $doctorRole = Role::query()->where('key', RoleKey::Doctor->value)->firstOrFail();
 
         // ─── 1. Clinic + Clinic Admin ───
@@ -93,7 +96,29 @@ class DemoUsersSeeder extends Seeder
             ['role_id' => $clinicAdminRole->id, 'status' => 'active'],
         );
 
-        // ─── 2. Doctor (affiliated to clinic) ───
+        // ─── 2. Receptionist ───
+        $receptionistUser = User::query()->updateOrCreate(
+            ['email' => 'recepcion@hipocratiq.test'],
+            [
+                'name' => 'Lucía Méndez',
+                'phone_number' => '+51987654322',
+                'country_code' => 'PE',
+                'password' => $password,
+                'status' => UserStatus::Active,
+                'onboarding_status' => OnboardingStatus::Completed,
+                'phone_verified_at' => now(),
+                'last_login_at' => now(),
+            ],
+        );
+
+        $receptionistUser->roles()->syncWithoutDetaching([$receptionistRole->id]);
+
+        ClinicMembership::query()->updateOrCreate(
+            ['clinic_id' => $clinic->id, 'user_id' => $receptionistUser->id],
+            ['role_id' => $receptionistRole->id, 'status' => 'active'],
+        );
+
+        // ─── 3. Doctor (affiliated to clinic) ───
         $doctorUser = User::query()->updateOrCreate(
             ['email' => 'medico@hipocratiq.test'],
             [
@@ -164,40 +189,79 @@ class DemoUsersSeeder extends Seeder
             ],
         );
 
-        // ─── 4. Patient ───
-        $patientUser = User::query()->updateOrCreate(
-            ['email' => 'paciente@hipocratiq.test'],
-            [
-                'name' => 'Valentina Ríos Mendoza',
-                'phone_number' => '+51954321098',
-                'country_code' => 'PE',
-                'password' => $password,
-                'status' => UserStatus::Active,
-                'onboarding_status' => OnboardingStatus::Completed,
-                'phone_verified_at' => now(),
-                'last_login_at' => now(),
-            ],
-        );
+        // ─── 4. Patients and appointments ───
+        $patientProfiles = [];
+        foreach ([
+            ['María López García', 'maria.lopez@hipocratiq.test', '+51954321098'],
+            ['Juan Pérez Ruiz', 'juan.perez@hipocratiq.test', '+51954321099'],
+            ['Ana Torres López', 'ana.torres@hipocratiq.test', '+51954321100'],
+            ['Roberto Juárez Martínez', 'roberto.juarez@hipocratiq.test', '+51954321101'],
+            ['Carmen Velásquez Díaz', 'carmen.velasquez@hipocratiq.test', '+51954321102'],
+            ['Luis Fernández Gómez', 'luis.fernandez@hipocratiq.test', '+51954321103'],
+        ] as [$name, $email, $phone]) {
+            $patientUser = User::query()->updateOrCreate(
+                ['email' => $email],
+                [
+                    'name' => $name,
+                    'phone_number' => $phone,
+                    'country_code' => 'PE',
+                    'password' => $password,
+                    'status' => UserStatus::Active,
+                    'onboarding_status' => OnboardingStatus::Completed,
+                    'phone_verified_at' => now(),
+                    'last_login_at' => now(),
+                ],
+            );
 
-        PatientProfile::query()->updateOrCreate(
-            ['user_id' => $patientUser->id],
-            ['clinic_id' => $clinic->id],
-        );
+            $patientProfiles[] = PatientProfile::query()->updateOrCreate(
+                ['user_id' => $patientUser->id],
+                ['clinic_id' => $clinic->id],
+            );
+        }
+
+        $today = now()->startOfDay();
+        foreach ([
+            [0, 9, 0, 0, AppointmentStatus::Confirmed, 'Consulta'],
+            [0, 9, 30, 1, AppointmentStatus::Waiting, 'Consulta'],
+            [0, 10, 0, 2, AppointmentStatus::InConsultation, 'Consulta'],
+            [0, 10, 30, 3, AppointmentStatus::Confirmed, 'Control'],
+            [0, 11, 0, 4, AppointmentStatus::Pending, 'Consulta'],
+            [0, 11, 30, 5, AppointmentStatus::NoShow, 'Consulta'],
+            [1, 9, 0, 1, AppointmentStatus::Confirmed, 'Consulta'],
+            [1, 10, 30, 2, AppointmentStatus::Pending, 'Control'],
+            [2, 11, 0, 0, AppointmentStatus::Confirmed, 'Consulta'],
+            [3, 14, 0, 4, AppointmentStatus::Confirmed, 'Control'],
+            [4, 15, 30, 5, AppointmentStatus::Canceled, 'Consulta'],
+        ] as [$dayOffset, $hour, $minute, $patientIndex, $status, $type]) {
+            Appointment::query()->create([
+                'clinic_id' => $clinic->id,
+                'patient_profile_id' => $patientProfiles[$patientIndex]->id,
+                'doctor_user_id' => $doctorUser->id,
+                'scheduled_at' => $today->copy()->addDays($dayOffset)->setTime($hour, $minute),
+                'status' => $status,
+                'appointment_type' => $type,
+            ]);
+        }
 
         // ─── 5. Super Admin (platform) ───
-        $superAdmin = User::query()->updateOrCreate(
-            ['email' => 'superadmin@hipocratiq.test'],
-            [
-                'name' => 'Rafael Torres Administrador',
-                'phone_number' => '+51943210987',
-                'country_code' => 'PE',
-                'password' => $password,
-                'status' => UserStatus::Active,
-                'onboarding_status' => OnboardingStatus::Completed,
-                'phone_verified_at' => now(),
-                'last_login_at' => now(),
-            ],
-        );
+        $superAdmin = User::query()
+            ->where(function ($query): void {
+                $query
+                    ->where('email', 'superadmin@hipocratiq.test')
+                    ->orWhere('phone_number', '+51943210987');
+            })
+            ->first() ?? new User;
+        $superAdmin->fill([
+            'name' => 'Rafael Torres Administrador',
+            'email' => 'superadmin@hipocratiq.test',
+            'phone_number' => '+51943210987',
+            'country_code' => 'PE',
+            'password' => $password,
+            'status' => UserStatus::Active,
+            'onboarding_status' => OnboardingStatus::Completed,
+            'phone_verified_at' => now(),
+            'last_login_at' => now(),
+        ])->save();
 
         $superAdminRole = Role::query()->where('key', RoleKey::SuperAdmin->value)->firstOrFail();
         $superAdmin->roles()->syncWithoutDetaching([$superAdminRole->id]);
@@ -208,9 +272,9 @@ class DemoUsersSeeder extends Seeder
             [
                 ['Super Admin', 'superadmin@hipocratiq.test', '+51943210987', 'Rafael Torres Administrador'],
                 ['Clinic Admin', 'clinica@hipocratiq.test', '+51987654321', 'Carmen Vega Rodríguez'],
+                ['Recepcionista', 'recepcion@hipocratiq.test', '+51987654322', 'Lucía Méndez'],
                 ['Doctor (clínica)', 'medico@hipocratiq.test', '+51976543210', 'Dr. Andrés Montoya Quiroz'],
                 ['Doctor (independiente)', 'independiente@hipocratiq.test', '+51965432109', 'Dra. Lucía Paredes Silva'],
-                ['Paciente', 'paciente@hipocratiq.test', '+51954321098', 'Valentina Ríos Mendoza'],
             ],
         );
     }
@@ -227,6 +291,7 @@ class DemoUsersSeeder extends Seeder
             ->whereHas('roles', function ($query): void {
                 $query->whereIn('key', [
                     RoleKey::ClinicAdmin->value,
+                    RoleKey::Receptionist->value,
                     RoleKey::Doctor->value,
                 ]);
             })
@@ -245,12 +310,6 @@ class DemoUsersSeeder extends Seeder
 
         $userIds = $roleUserIds->merge($patientUserIds)->unique()->values();
 
-        if ($userIds->isEmpty()) {
-            $this->command->info('No existing clinic admin, doctor, or patient users to purge.');
-
-            return;
-        }
-
         // Delete the demo clinic explicitly so its subscription and any dangling
         // rows are removed even if no membership references it anymore.
         // Support tickets restrict clinic deletion, so purge them first.
@@ -262,7 +321,7 @@ class DemoUsersSeeder extends Seeder
             $demoClinic->delete();
         }
 
-        $deleted = User::query()->whereIn('id', $userIds)->delete();
+        $deleted = $userIds->isEmpty() ? 0 : User::query()->whereIn('id', $userIds)->delete();
 
         $this->command->info("Purged {$deleted} existing clinic admin / doctor / patient user(s).");
     }

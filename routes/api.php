@@ -145,6 +145,12 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/clinic/patients', [ClinicDashboardController::class, 'patients'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.patients.index');
+        Route::post('/clinic/patients', [ClinicDashboardController::class, 'storePatient'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.patients.store');
+        Route::get('/clinic/appointments', [ClinicDashboardController::class, 'appointments'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.appointments.index');
         Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');

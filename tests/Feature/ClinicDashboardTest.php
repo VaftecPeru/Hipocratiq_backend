@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Enums\AppointmentStatus;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
+use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicSubscription;
@@ -89,6 +91,88 @@ class ClinicDashboardTest extends TestCase
             ->patchJson('/api/v1/auth/clinic/settings', ['name' => 'No autorizado'])
             ->assertForbidden()
             ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
+    }
+
+    public function test_receptionist_can_read_clinic_appointments_for_a_date_range(): void
+    {
+        [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $receptionist = User::factory()->create([
+            'phone_number' => '+525510000005',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $receptionist, $receptionistRole);
+
+        $patient = User::factory()->create(['name' => 'Paciente de Agenda']);
+        $patientProfile = PatientProfile::factory()->create([
+            'user_id' => $patient->id,
+            'clinic_id' => $clinic->id,
+        ]);
+        Appointment::query()->create([
+            'clinic_id' => $clinic->id,
+            'patient_profile_id' => $patientProfile->id,
+            'scheduled_at' => now()->startOfDay()->setTime(9, 30),
+            'status' => AppointmentStatus::Confirmed,
+            'appointment_type' => 'Consulta',
+        ]);
+
+        $this->authenticate($receptionist, '55 1000 0005');
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/appointments?from='.now()->toDateString().'&to='.now()->toDateString())
+            ->assertOk()
+            ->assertJsonPath('data.0.patient.name', 'Paciente de Agenda')
+            ->assertJsonPath('data.0.status', 'confirmed')
+            ->assertJsonPath('meta.summary.confirmed', 1);
+    }
+
+    public function test_receptionist_can_register_a_patient_inside_their_clinic(): void
+    {
+        [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $receptionist = User::factory()->create([
+            'phone_number' => '+525510000007',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $receptionist, $receptionistRole);
+        $this->authenticate($receptionist, '55 1000 0007');
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/patients', [
+                'name' => 'Paciente Registrado',
+                'email' => 'paciente.registrado@clinic.test',
+                'phone_number' => '55 1000 0008',
+                'country_code' => 'MX',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Paciente Registrado')
+            ->assertJsonPath('data.status', 'active');
+
+        $patient = User::query()->where('email', 'paciente.registrado@clinic.test')->firstOrFail();
+        $this->assertDatabaseHas('patient_profiles', [
+            'user_id' => $patient->id,
+            'clinic_id' => $clinic->id,
+        ]);
+    }
+
+    public function test_registering_a_patient_with_an_existing_phone_is_rejected(): void
+    {
+        [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $receptionist = User::factory()->create([
+            'phone_number' => '+525510000009',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $receptionist, $receptionistRole);
+        $existingPatient = User::factory()->create(['phone_number' => '+525510000010']);
+        PatientProfile::factory()->create(['user_id' => $existingPatient->id, 'clinic_id' => $clinic->id]);
+        $this->authenticate($receptionist, '55 1000 0009');
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/patients', [
+                'name' => 'Paciente Duplicado',
+                'phone_number' => '55 1000 0010',
+                'country_code' => 'MX',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('phone_number');
     }
 
     public function test_clinic_admin_can_create_a_receptionist_inside_their_clinic(): void

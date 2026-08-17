@@ -3,15 +3,21 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Admin\RecordAdminAuditEvent;
+use App\Actions\Clinic\CreateClinicPatient;
 use App\Actions\Clinic\CreateClinicReceptionist;
+use App\Enums\AppointmentStatus;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\RoleKey;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\ClinicMemberStoreRequest;
+use App\Http\Requests\Api\V1\ClinicPatientStoreRequest;
 use App\Http\Requests\Api\V1\ClinicSettingsUpdateRequest;
+use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\User;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -26,6 +32,7 @@ class ClinicDashboardController extends Controller
         $patients = $this->recentPatients($clinic, 6);
         $doctors = $members->where('role.key', RoleKey::Doctor->value)->values();
         $receptionists = $members->where('role.key', RoleKey::Receptionist->value)->values();
+        $todayAppointments = $this->appointmentsForDay($clinic, now());
 
         return response()->json([
             'success' => true,
@@ -42,6 +49,10 @@ class ClinicDashboardController extends Controller
                     'receptionists_total' => $receptionists->count(),
                     'patients_total' => $clinic->patientProfiles()->count(),
                 ],
+                'appointment_summary' => $this->appointmentSummary($todayAppointments),
+                'today_appointments' => $todayAppointments
+                    ->map(fn (Appointment $appointment): array => $this->serializeAppointment($appointment))
+                    ->values(),
                 'team' => $members->map(fn (ClinicMembership $membership): array => $this->serializeMember($membership))->values(),
                 'recent_patients' => $patients->map(fn ($patient): array => $this->serializePatient($patient))->values(),
             ],
@@ -128,6 +139,64 @@ class ClinicDashboardController extends Controller
         ]);
     }
 
+    public function storePatient(
+        ClinicPatientStoreRequest $request,
+        CreateClinicPatient $createPatient,
+    ): JsonResponse {
+        $patient = $createPatient
+            ->handle($request->validated(), $this->clinic($request))
+            ->load('user');
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializePatient($patient),
+        ], 201);
+    }
+
+    public function appointments(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
+        ]);
+        $from = isset($validated['from'])
+            ? Carbon::parse($validated['from'])->startOfDay()
+            : now()->startOfWeek(Carbon::MONDAY);
+        $to = isset($validated['to'])
+            ? Carbon::parse($validated['to'])->endOfDay()
+            : $from->copy()->addDays(6)->endOfDay();
+
+        if ($to->lessThan($from)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El rango de fechas no es válido.',
+            ], 422);
+        }
+
+        $appointments = $this->appointmentsQuery($this->clinic($request))
+            ->whereBetween('scheduled_at', [$from, $to])
+            ->orderBy('scheduled_at')
+            ->get();
+        $summary = $this->appointmentSummary($appointments);
+        $summary['today_total'] = $appointments
+            ->filter(fn (Appointment $appointment): bool => $appointment->scheduled_at?->isToday() === true)
+            ->count();
+        $summary['period_total'] = $appointments->count();
+
+        return response()->json([
+            'success' => true,
+            'data' => $appointments
+                ->map(fn (Appointment $appointment): array => $this->serializeAppointment($appointment))
+                ->values(),
+            'meta' => [
+                'from' => $from->toDateString(),
+                'to' => $to->toDateString(),
+                'total' => $appointments->count(),
+                'summary' => $summary,
+            ],
+        ]);
+    }
+
     public function settings(Request $request): JsonResponse
     {
         return response()->json([
@@ -192,6 +261,39 @@ class ClinicDashboardController extends Controller
             ->get();
     }
 
+    /** @return Collection<int, Appointment> */
+    private function appointmentsForDay(Clinic $clinic, Carbon $day): Collection
+    {
+        return $this->appointmentsQuery($clinic)
+            ->whereDate('scheduled_at', $day->toDateString())
+            ->orderBy('scheduled_at')
+            ->get();
+    }
+
+    /** @return array<string, int> */
+    private function appointmentSummary(Collection $appointments): array
+    {
+        return [
+            'today_total' => $appointments->count(),
+            'confirmed' => $appointments->where('status', AppointmentStatus::Confirmed)->count(),
+            'pending' => $appointments->where('status', AppointmentStatus::Pending)->count(),
+            'waiting' => $appointments->where('status', AppointmentStatus::Waiting)->count(),
+            'in_consultation' => $appointments->where('status', AppointmentStatus::InConsultation)->count(),
+            'no_show' => $appointments->where('status', AppointmentStatus::NoShow)->count(),
+            'canceled' => $appointments->where('status', AppointmentStatus::Canceled)->count(),
+        ];
+    }
+
+    /** @return Relation */
+    private function appointmentsQuery(Clinic $clinic)
+    {
+        return $clinic->appointments()->with([
+            'patientProfile.user:id,name,email,phone_number',
+            'doctor:id,name',
+            'doctor.doctorProfile:id,user_id,specialty',
+        ]);
+    }
+
     /** @return array<string, mixed> */
     private function serializeClinic(Clinic $clinic): array
     {
@@ -235,6 +337,34 @@ class ClinicDashboardController extends Controller
             'phone_number' => $patient->user?->phone_number,
             'status' => $patient->user?->status?->value,
             'created_at' => $patient->user?->created_at?->toIso8601String(),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializeAppointment(Appointment $appointment): array
+    {
+        $patient = $appointment->patientProfile?->user;
+        $doctor = $appointment->doctor;
+
+        return [
+            'id' => $appointment->id,
+            'scheduled_at' => $appointment->scheduled_at?->toIso8601String(),
+            'scheduled_date' => $appointment->scheduled_at?->toDateString(),
+            'time' => $appointment->scheduled_at?->format('H:i'),
+            'appointment_type' => $appointment->appointment_type,
+            'status' => $appointment->status->value,
+            'status_label' => $appointment->status->label(),
+            'patient' => [
+                'id' => $appointment->patient_profile_id,
+                'patient_code' => 'PAC-'.str_pad((string) $appointment->patient_profile_id, 6, '0', STR_PAD_LEFT),
+                'name' => $patient?->name,
+                'phone_number' => $patient?->phone_number,
+            ],
+            'doctor' => $doctor === null ? null : [
+                'id' => $doctor->id,
+                'name' => $doctor->name,
+                'specialty' => $doctor->doctorProfile?->specialty,
+            ],
         ];
     }
 }
