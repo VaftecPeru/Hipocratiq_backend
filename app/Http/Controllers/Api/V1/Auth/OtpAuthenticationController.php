@@ -81,6 +81,7 @@ class OtpAuthenticationController extends Controller
                     'access_token' => $token->plainTextToken,
                     'expires_at' => $token->accessToken->expires_at,
                     'user' => new UserResource($user),
+                    'actor_context' => $challenge->actor_context->value,
                     'next_step' => $purpose === OtpPurpose::Registration ? 'select_plan' : null,
                 ],
             ]);

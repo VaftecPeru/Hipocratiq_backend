@@ -174,6 +174,54 @@ class OtpAuthenticationTest extends TestCase
         ])->assertAccepted();
     }
 
+    public function test_staff_can_login_on_mobile_and_receive_actor_context(): void
+    {
+        $clinicAdminRole = Role::factory()->create([
+            'key' => RoleKey::ClinicAdmin->value,
+            'scope' => RoleScope::Organization,
+        ]);
+        $user = User::factory()->create([
+            'email' => 'mobile-staff@example.com',
+            'password' => 'SecurePass123',
+        ]);
+        ClinicMembership::factory()->create([
+            'clinic_id' => $this->clinic->id,
+            'user_id' => $user->id,
+            'role_id' => $clinicAdminRole->id,
+        ]);
+        ClinicSubscription::factory()->create(['clinic_id' => $this->clinic->id]);
+
+        $request = $this->postJson('/api/v1/auth/otp/request', [
+            'purpose' => 'login',
+            'identifier' => 'mobile-staff@example.com',
+            'actor_context' => 'staff',
+            'client_type' => 'mobile',
+            'password' => 'SecurePass123',
+            'device_name' => 'Pixel 10',
+            'device_id' => 'installation-staff-1',
+        ]);
+
+        $request->assertAccepted();
+
+        $verification = $this->postJson('/api/v1/auth/otp/verify', [
+            'purpose' => 'login',
+            'challenge_id' => $request->json('data.challenge_id'),
+            'code' => '123456',
+        ]);
+
+        $verification
+            ->assertOk()
+            ->assertJsonPath('data.token_type', 'Bearer')
+            ->assertJsonPath('data.user.id', $user->id)
+            ->assertJsonPath('data.actor_context', 'clinic_admin');
+
+        $this->withToken($verification->json('data.access_token'))
+            ->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.client_type', 'mobile')
+            ->assertJsonPath('data.actor_context', 'clinic_admin');
+    }
+
     public function test_client_cannot_select_a_privileged_actor_context(): void
     {
         foreach (['clinic_admin', 'doctor'] as $actorContext) {

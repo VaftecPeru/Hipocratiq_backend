@@ -109,8 +109,12 @@ class EnsureAuthenticationSessionIsActive
 
     private function mobileActorContext(PersonalAccessToken $accessToken): ?string
     {
-        return $accessToken->abilities === [AuthenticationContext::Patient->value]
-            ? AuthenticationContext::Patient->value
-            : null;
+        foreach ($accessToken->abilities as $ability) {
+            if (is_string($ability) && AuthenticationContext::tryFrom($ability) !== null) {
+                return $ability;
+            }
+        }
+
+        return null;
     }
 }

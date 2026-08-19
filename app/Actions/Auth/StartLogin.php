@@ -28,6 +28,7 @@ final class StartLogin
         $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
         $isReceptionist = $user?->hasActiveReceptionistAccess() ?? false;
         $isDoctor = $user?->hasActiveDoctorAccess() ?? false;
+        $isSuperAdmin = $user?->hasRole(RoleKey::SuperAdmin) ?? false;
         $resolvedContext = match (true) {
             $context === AuthenticationContext::Patient => AuthenticationContext::Patient,
             $isClinicAdmin => AuthenticationContext::ClinicAdmin,
@@ -50,7 +51,7 @@ final class StartLogin
             ))
             || ($context === AuthenticationContext::Staff && (
                 (! $user->hasRole(RoleKey::SuperAdmin) && ! $isClinicAdmin && ! $isReceptionist && ! $isDoctor)
-                || $client !== AuthenticationClient::Web
+                || ($client !== AuthenticationClient::Web && $isSuperAdmin)
                 || $user->password === null
                 || ! isset($data['password'])
                 || ! Hash::check($data['password'], $user->password)

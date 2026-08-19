@@ -198,6 +198,7 @@ class DemoUsersSeeder extends Seeder
             ['Roberto Juárez Martínez', 'roberto.juarez@hipocratiq.test', '+51954321101'],
             ['Carmen Velásquez Díaz', 'carmen.velasquez@hipocratiq.test', '+51954321102'],
             ['Luis Fernández Gómez', 'luis.fernandez@hipocratiq.test', '+51954321103'],
+            ['Paciente Demo', 'paciente@hipocratiq.test', '+51954321104'],
         ] as [$name, $email, $phone]) {
             $patientUser = User::query()->updateOrCreate(
                 ['email' => $email],
