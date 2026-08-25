@@ -31,7 +31,7 @@ class AdminAccessControlController extends Controller
             'success' => true,
             'data' => [
                 'actor_user_id' => $request->user()->getKey(),
-                'enforcement' => 'actor_context',
+                'enforcement' => 'catalog_gate',
                 'roles' => $roles,
                 'permissions' => RolePermissionCatalog::permissions(),
                 'clinics' => Clinic::query()

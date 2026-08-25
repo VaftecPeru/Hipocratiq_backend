@@ -11,6 +11,7 @@ use App\Http\Requests\Api\V1\Auth\SelectClinicPlanRequest;
 use App\Http\Requests\Api\V1\Auth\StartDoctorRegistrationRequest;
 use App\Http\Requests\Api\V1\Auth\VerifyClinicRegistrationRequest;
 use App\Models\Clinic;
+use App\Models\Specialty;
 use App\Services\Auth\DoctorRegistrationDraftStore;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
@@ -35,9 +36,35 @@ class DoctorRegistrationController extends Controller
         ]);
     }
 
+    public function specialties(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => Specialty::query()
+                ->whereNull('parent_id')
+                ->where('is_active', true)
+                ->with(['subspecialties' => fn ($query) => $query->where('is_active', true)->orderBy('name')])
+                ->orderBy('name')
+                ->get()
+                ->map(fn (Specialty $specialty): array => [
+                    'id' => $specialty->id,
+                    'code' => $specialty->code,
+                    'name' => $specialty->name,
+                    'subspecialties' => $specialty->subspecialties->map(fn (Specialty $subspecialty): array => [
+                        'id' => $subspecialty->id,
+                        'code' => $subspecialty->code,
+                        'name' => $subspecialty->name,
+                    ])->values(),
+                ])->values(),
+        ]);
+    }
+
     public function draft(StartDoctorRegistrationRequest $request, DoctorRegistrationDraftStore $store): JsonResponse
     {
         $data = $request->validated();
+        if (isset($data['specialty_id'])) {
+            $data['specialty'] = Specialty::query()->findOrFail($data['specialty_id'])->name;
+        }
 
         if ($data['practice_type'] === DoctorPracticeType::Clinic->value && ! Clinic::query()
             ->whereKey($data['clinic_id'])

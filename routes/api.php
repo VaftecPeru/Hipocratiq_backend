@@ -21,6 +21,9 @@ use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\ClinicDashboardController;
+use App\Http\Controllers\Api\V1\DoctorConsultationController;
+use App\Http\Controllers\Api\V1\DoctorPatientController;
+use App\Http\Controllers\Api\V1\DoctorProfileController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
@@ -96,6 +99,7 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
     });
     Route::prefix('register/doctor')->name('register.doctor.')->group(function (): void {
         Route::get('/clinics', [DoctorRegistrationController::class, 'clinics'])->name('clinics');
+        Route::get('/specialties', [DoctorRegistrationController::class, 'specialties'])->name('specialties');
         Route::post('/draft', [DoctorRegistrationController::class, 'draft'])->middleware('throttle:clinic-registration')->name('draft');
         Route::post('/plan', [DoctorRegistrationController::class, 'selectPlan'])->middleware('throttle:registration-plan')->name('plan');
         Route::post('/verify-otp', [DoctorRegistrationController::class, 'verify'])->middleware('throttle:auth-otp')->name('verify-otp');
@@ -132,6 +136,30 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/session/renew', [SessionController::class, 'renew'])->name('session.renew');
         Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
+        Route::get('/doctor/profile', [DoctorProfileController::class, 'show'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.profile.show');
+        Route::patch('/doctor/profile', [DoctorProfileController::class, 'update'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.profile.update');
+        Route::get('/doctor/patients', [DoctorPatientController::class, 'patients'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.patients.index');
+        Route::get('/doctor/patients/{patient}/clinical-history', [DoctorPatientController::class, 'clinicalHistory'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.patients.clinical-history');
+        Route::post('/doctor/patients/{patient}/consultations', [DoctorConsultationController::class, 'store'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.consultations.store');
+        Route::get('/doctor/consultations', [DoctorConsultationController::class, 'index'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.consultations.index');
+        Route::get('/doctor/consultations/{consultation}', [DoctorConsultationController::class, 'show'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.consultations.show');
+        Route::patch('/doctor/consultations/{consultation}', [DoctorConsultationController::class, 'update'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.consultations.update');
 
         Route::get('/clinic/dashboard', [ClinicDashboardController::class, 'show'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
@@ -140,13 +168,13 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.members.index');
         Route::post('/clinic/members', [ClinicDashboardController::class, 'storeMember'])
-            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.store');
         Route::get('/clinic/patients', [ClinicDashboardController::class, 'patients'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.patients.index');
         Route::post('/clinic/patients', [ClinicDashboardController::class, 'storePatient'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
             ->name('clinic.patients.store');
         Route::get('/clinic/appointments', [ClinicDashboardController::class, 'appointments'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
@@ -155,7 +183,7 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');
         Route::patch('/clinic/settings', [ClinicDashboardController::class, 'updateSettings'])
-            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.settings.manage'])
             ->name('clinic.settings.update');
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])

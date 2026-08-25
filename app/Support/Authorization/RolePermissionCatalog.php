@@ -27,6 +27,9 @@ final class RolePermissionCatalog
             ['key' => 'platform.settings.manage', 'label' => 'Administrar configuración global', 'group' => 'Plataforma'],
             ['key' => 'platform.countries.manage', 'label' => 'Administrar países habilitados', 'group' => 'Plataforma'],
             ['key' => 'clinic.dashboard.view', 'label' => 'Ver panel de la clínica', 'group' => 'Clínica'],
+            ['key' => 'clinic.members.manage', 'label' => 'Administrar integrantes de la clínica', 'group' => 'Clínica'],
+            ['key' => 'clinic.patients.manage', 'label' => 'Administrar pacientes de la clínica', 'group' => 'Clínica'],
+            ['key' => 'clinic.settings.manage', 'label' => 'Administrar configuración de la clínica', 'group' => 'Clínica'],
             ['key' => 'reception.dashboard.view', 'label' => 'Ver panel de recepción', 'group' => 'Recepción'],
             ['key' => 'reception.patients.manage', 'label' => 'Gestionar pacientes', 'group' => 'Recepción'],
             ['key' => 'reception.agenda.manage', 'label' => 'Gestionar agenda', 'group' => 'Recepción'],
@@ -60,7 +63,10 @@ final class RolePermissionCatalog
                 'name' => 'Recepcionista',
                 'scope' => RoleScope::Organization->value,
                 'description' => 'Gestiona la recepción, pacientes y agenda de la clínica asignada.',
-                'permissions' => self::permissionKeysWithPrefix('reception.'),
+                'permissions' => [
+                    ...self::permissionKeysWithPrefix('reception.'),
+                    'clinic.patients.manage',
+                ],
             ],
             [
                 'key' => AdminAssignableRole::Doctor->value,
@@ -77,6 +83,31 @@ final class RolePermissionCatalog
                 'permissions' => self::permissionKeysWithPrefix('patient.'),
             ],
         ];
+    }
+
+    /** @return array<int, string> */
+    public static function abilities(): array
+    {
+        return array_values(array_filter(
+            self::permissionKeysWithPrefix('clinic.'),
+            static fn (string $permission): bool => str_ends_with($permission, '.manage'),
+        ));
+    }
+
+    public static function definesAbility(string $ability): bool
+    {
+        return in_array($ability, self::abilities(), true);
+    }
+
+    public static function allows(string $roleKey, string $ability): bool
+    {
+        if (! self::definesAbility($ability)) {
+            return false;
+        }
+
+        $role = collect(self::roles())->firstWhere('key', $roleKey);
+
+        return is_array($role) && in_array($ability, $role['permissions'], true);
     }
 
     /** @return array<int, string> */

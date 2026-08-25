@@ -80,6 +80,26 @@ class User extends Authenticatable
         return $this->hasMany(Appointment::class, 'doctor_user_id');
     }
 
+    public function registeredPatientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class, 'registered_by_user_id');
+    }
+
+    public function requestedPatientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class, 'requested_doctor_user_id');
+    }
+
+    public function doctorConsultations(): HasMany
+    {
+        return $this->hasMany(Consultation::class, 'doctor_user_id');
+    }
+
+    public function doctorClinicalHistoryRecords(): HasMany
+    {
+        return $this->hasMany(ClinicalHistoryRecord::class, 'doctor_user_id');
+    }
+
     public function hasActiveClinicMembership(): bool
     {
         return $this->clinicMemberships()->where('status', 'active')->exists();

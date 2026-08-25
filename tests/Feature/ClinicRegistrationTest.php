@@ -10,6 +10,7 @@ use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Sms\ArraySmsSender;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Tests\Support\FixedOtpCodeGenerator;
@@ -54,6 +55,8 @@ class ClinicRegistrationTest extends TestCase
         $this->assertDatabaseCount('clinic_memberships', 1);
         $this->assertDatabaseCount('clinic_subscriptions', 1);
         $this->assertDatabaseCount('subscription_payments', 1);
+        $this->assertDatabaseCount('role_user', 1);
+        $this->assertTrue(User::query()->sole()->hasRole(RoleKey::ClinicAdmin));
         $this->assertAuthenticated();
         $sessionCookie = $verify->getCookie(config('session.cookie'));
         $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue())->withSpaOrigin()->getJson('/api/v1/auth/clinic/dashboard')
@@ -170,6 +173,34 @@ class ClinicRegistrationTest extends TestCase
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('clinics', 0);
         $this->assertDatabaseCount('clinic_subscriptions', 0);
+    }
+
+    public function test_missing_clinic_admin_role_rolls_back_registration_records(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/draft', $this->payload());
+        $cookie = $draft->getCookie('clinic_registration');
+        $plan = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/plan', [
+            'plan' => 'basic',
+            'billing_cycle' => 'monthly',
+        ]);
+
+        Role::query()->where('key', RoleKey::ClinicAdmin->value)->delete();
+
+        $this->withoutExceptionHandling();
+        $this->assertThrows(
+            fn () => $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/verify-otp', [
+                'challenge_id' => $plan->json('data.challenge_id'),
+                'code' => '123456',
+            ]),
+            ModelNotFoundException::class,
+        );
+
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('clinics', 0);
+        $this->assertDatabaseCount('clinic_memberships', 0);
+        $this->assertDatabaseCount('clinic_subscriptions', 0);
+        $this->assertDatabaseCount('subscription_payments', 0);
+        $this->assertDatabaseCount('role_user', 0);
     }
 
     public function test_clinic_otp_expires_at_exactly_five_minutes(): void

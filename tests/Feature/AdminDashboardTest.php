@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\ClinicStatus;
 use App\Enums\UserStatus;
 use App\Models\AdminAuditEvent;
+use App\Models\AuthenticationEvent;
 use App\Models\Clinic;
 use App\Models\PatientProfile;
 use App\Models\SubscriptionPayment;
@@ -61,6 +62,23 @@ class AdminDashboardTest extends TestCase
                 ],
             ])
             ->assertJsonFragment(['key' => 'database', 'status' => 'operational']);
+    }
+
+    public function test_super_admin_monitoring_counts_authentication_failures(): void
+    {
+        $this->authenticateAdmin();
+        AuthenticationEvent::query()->create([
+            'user_id' => null,
+            'event' => 'login_failed',
+            'outcome' => 'failure',
+            'metadata' => [],
+            'occurred_at' => now(),
+        ]);
+
+        $this->withSpaOrigin()->getJson('/api/v1/auth/admin/monitoring')
+            ->assertOk()
+            ->assertJsonPath('data.metrics.authentication_failures_24h', 1)
+            ->assertJsonPath('data.event_volume.failed_authentication', 1);
     }
 
     public function test_super_admin_can_manage_an_incident_from_detection_to_resolution(): void

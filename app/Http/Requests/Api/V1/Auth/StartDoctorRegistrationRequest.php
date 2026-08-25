@@ -3,10 +3,12 @@
 namespace App\Http\Requests\Api\V1\Auth;
 
 use App\Enums\DoctorPracticeType;
+use App\Models\Specialty;
 use App\Support\PhoneNumber;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\Validator;
 use InvalidArgumentException;
 
 class StartDoctorRegistrationRequest extends FormRequest
@@ -26,12 +28,38 @@ class StartDoctorRegistrationRequest extends FormRequest
             'country_code' => ['required', 'string', 'in:PE,MX,US'],
             'doctor_phone_number' => ['required', 'string', 'max:30', $this->phoneRule()],
             'medical_license' => ['required', 'string', 'max:80', 'unique:doctor_profiles,medical_license'],
-            'specialty' => ['required', 'string', 'max:120'],
+            'specialty' => ['nullable', 'string', 'max:120'],
+            'specialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)->whereNull('parent_id')],
+            'subspecialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)],
             'practice_type' => ['required', Rule::enum(DoctorPracticeType::class)],
             'clinic_id' => [Rule::requiredIf($isClinicDoctor), 'nullable', 'integer', Rule::exists('clinics', 'id')->where('status', 'active')],
             'password' => ['required', 'confirmed', 'max:72', Password::defaults()],
             'terms_accepted' => ['accepted'],
         ];
+    }
+
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            $specialtyId = $this->integer('specialty_id');
+            $subspecialtyId = $this->integer('subspecialty_id');
+
+            if ($specialtyId === 0 && trim((string) $this->input('specialty')) === '') {
+                $validator->errors()->add('specialty_id', 'Selecciona una especialidad o ingresa una especialidad válida.');
+            }
+
+            if ($subspecialtyId !== 0 && $specialtyId === 0) {
+                $validator->errors()->add('specialty_id', 'Selecciona la especialidad principal de la subespecialidad.');
+            }
+
+            if ($subspecialtyId !== 0 && $specialtyId !== 0 && ! Specialty::query()
+                ->whereKey($subspecialtyId)
+                ->where('parent_id', $specialtyId)
+                ->where('is_active', true)
+                ->exists()) {
+                $validator->errors()->add('subspecialty_id', 'La subespecialidad no pertenece a la especialidad seleccionada.');
+            }
+        }];
     }
 
     protected function prepareForValidation(): void

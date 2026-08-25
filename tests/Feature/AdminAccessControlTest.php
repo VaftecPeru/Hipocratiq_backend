@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Actions\Admin\UpdateAdminUserAccess;
+use App\Enums\AdminAssignableRole;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
@@ -12,6 +14,7 @@ use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
 
@@ -37,7 +40,7 @@ class AdminAccessControlTest extends TestCase
             ->getJson('/api/v1/auth/admin/access-control')
             ->assertOk()
             ->assertJsonPath('data.actor_user_id', $admin->id)
-            ->assertJsonPath('data.enforcement', 'actor_context')
+            ->assertJsonPath('data.enforcement', 'catalog_gate')
             ->assertJsonCount(5, 'data.roles')
             ->assertJsonPath('data.roles.0.key', 'super_admin')
             ->assertJsonPath('data.roles.0.scope', 'global')
@@ -159,6 +162,49 @@ class AdminAccessControlTest extends TestCase
             ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('clinic_id');
+    }
+
+    public function test_sole_active_super_admin_cannot_be_demoted(): void
+    {
+        $soleSuperAdmin = User::factory()->superAdmin()->create();
+        $clinic = Clinic::factory()->create();
+
+        try {
+            app(UpdateAdminUserAccess::class)->handle(
+                User::factory()->create(),
+                $soleSuperAdmin,
+                AdminAssignableRole::ClinicAdmin,
+                $clinic,
+            );
+            $this->fail('Expected the last active Superadministrator role removal to be rejected.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(
+                ['No puedes retirar el acceso al último Superadministrador activo.'],
+                $exception->errors()['role'],
+            );
+        }
+
+        $this->assertTrue($soleSuperAdmin->fresh()->hasRole(RoleKey::SuperAdmin));
+    }
+
+    public function test_one_of_two_active_super_admins_can_be_demoted(): void
+    {
+        $this->authenticateAdmin();
+        $target = User::factory()->superAdmin()->create();
+        $clinic = Clinic::factory()->create();
+
+        $this->withSpaOrigin()
+            ->patchJson("/api/v1/auth/admin/users/{$target->id}/access", [
+                'role' => AdminAssignableRole::ClinicAdmin->value,
+                'clinic_id' => $clinic->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.role', AdminAssignableRole::ClinicAdmin->value);
+
+        $this->assertSame(1, User::query()
+            ->where('status', 'active')
+            ->whereHas('roles', fn ($query) => $query->where('key', RoleKey::SuperAdmin->value))
+            ->count());
     }
 
     /** @return array<string, Role> */

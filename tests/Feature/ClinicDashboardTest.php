@@ -10,10 +10,13 @@ use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicSubscription;
 use App\Models\PatientProfile;
+use App\Models\Plan;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
+use App\Support\Authorization\RolePermissionCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
 
@@ -68,6 +71,16 @@ class ClinicDashboardTest extends TestCase
             'name' => 'Clínica Actualizada',
             'address' => 'Av. Nueva 123',
         ]);
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/patients', [
+                'name' => 'Paciente del Administrador',
+                'email' => 'paciente.admin@clinic.test',
+                'phone_number' => '55 1000 0014',
+                'country_code' => 'MX',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Paciente del Administrador');
     }
 
     public function test_receptionist_can_access_clinic_dashboard_but_cannot_update_clinic_settings(): void
@@ -89,8 +102,107 @@ class ClinicDashboardTest extends TestCase
 
         $this->withSpaOrigin()
             ->patchJson('/api/v1/auth/clinic/settings', ['name' => 'No autorizado'])
+            ->assertForbidden();
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/members', [
+                'name' => 'Integrante no autorizado',
+                'email' => 'integrante.no.autorizado@clinic.test',
+                'phone_number' => '55 1000 0015',
+                'country_code' => 'MX',
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_clinic_admin_session_uses_a_matching_clinic_admin_membership(): void
+    {
+        [$receptionistClinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        [$adminClinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $user = User::factory()->create([
+            'phone_number' => '+525510000011',
+            'password' => 'SecurePass123',
+        ]);
+
+        ClinicMembership::query()->create([
+            'clinic_id' => $receptionistClinic->id,
+            'user_id' => $user->id,
+            'role_id' => $receptionistRole->id,
+            'status' => 'active',
+        ]);
+        ClinicMembership::query()->create([
+            'clinic_id' => $adminClinic->id,
+            'user_id' => $user->id,
+            'role_id' => $adminRole->id,
+            'status' => 'active',
+        ]);
+        $user->roles()->sync([$receptionistRole->id, $adminRole->id]);
+
+        $this->authenticate($user, '55 1000 0011', RoleKey::ClinicAdmin);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.clinic.id', $adminClinic->id);
+
+        $this->withSpaOrigin()
+            ->patchJson('/api/v1/auth/clinic/settings', [
+                'name' => 'Admin Clinic Updated',
+                'address' => 'Admin Avenue 123',
+                'contact_phone' => '55 5555 5511',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.clinic.id', $adminClinic->id);
+
+        $this->assertDatabaseHas('clinics', [
+            'id' => $adminClinic->id,
+            'name' => 'Admin Clinic Updated',
+        ]);
+        $this->assertDatabaseHas('clinics', [
+            'id' => $receptionistClinic->id,
+            'name' => $receptionistClinic->name,
+        ]);
+    }
+
+    public function test_clinic_admin_session_skips_unsubscribed_memberships_and_selects_the_first_eligible_clinic(): void
+    {
+        $unsubscribedClinic = Clinic::factory()->create();
+        [$eligibleClinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $laterEligibleClinic = Clinic::factory()->create();
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $laterEligibleClinic->id,
+            'plan_id' => Plan::query()->value('id'),
+        ]);
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000013',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($unsubscribedClinic, $admin, $adminRole);
+        $this->attachMembership($eligibleClinic, $admin, $adminRole);
+        $this->attachMembership($laterEligibleClinic, $admin, $adminRole);
+
+        $this->authenticate($admin, '55 1000 0013');
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.clinic.id', $eligibleClinic->id);
+    }
+
+    public function test_clinic_admin_session_is_forbidden_when_its_matching_membership_is_no_longer_active(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000012',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0012');
+        $admin->clinicMemberships()->update(['status' => 'suspended']);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
             ->assertForbidden()
-            ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
+            ->assertJsonPath('code', 'CLINIC_ACCESS_REQUIRED');
     }
 
     public function test_receptionist_can_read_clinic_appointments_for_a_date_range(): void
@@ -220,11 +332,29 @@ class ClinicDashboardTest extends TestCase
         ]);
     }
 
+    public function test_clinic_write_catalog_and_gate_fail_closed_without_a_membership(): void
+    {
+        $user = User::factory()->create();
+
+        $this->assertTrue(RolePermissionCatalog::definesAbility('clinic.patients.manage'));
+        $this->assertTrue(RolePermissionCatalog::allows(RoleKey::ClinicAdmin->value, 'clinic.members.manage'));
+        $this->assertTrue(RolePermissionCatalog::allows(RoleKey::Receptionist->value, 'clinic.patients.manage'));
+        $this->assertFalse(RolePermissionCatalog::allows(RoleKey::Receptionist->value, 'clinic.members.manage'));
+        $this->assertFalse(RolePermissionCatalog::allows('unknown_role', 'clinic.patients.manage'));
+        $this->assertFalse(RolePermissionCatalog::definesAbility('clinic.unknown.manage'));
+        $this->assertFalse(RolePermissionCatalog::allows(RoleKey::ClinicAdmin->value, 'clinic.unknown.manage'));
+        $this->assertFalse(Gate::forUser($user)->allows('clinic.unknown.manage'));
+        $this->assertFalse(Gate::forUser($user)->allows('clinic.patients.manage'));
+    }
+
     /** @return array{0: Clinic, 1: Role} */
     private function createClinicRole(RoleKey $roleKey, string $name): array
     {
         $clinic = Clinic::factory()->create();
-        ClinicSubscription::factory()->create(['clinic_id' => $clinic->id]);
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'plan_id' => Plan::query()->value('id') ?? Plan::factory(),
+        ]);
         $role = Role::query()->create([
             'key' => $roleKey->value,
             'name' => $name,
@@ -246,7 +376,7 @@ class ClinicDashboardTest extends TestCase
         ]);
     }
 
-    private function authenticate(User $user, string $phone): void
+    private function authenticate(User $user, string $phone, ?RoleKey $expectedActorContext = null): void
     {
         $login = $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
             'country_code' => 'MX',
@@ -256,7 +386,7 @@ class ClinicDashboardTest extends TestCase
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),
             'code' => '123456',
-        ])->assertOk()->assertJsonPath('data.actor_context', $user->roles()->first()->key);
+        ])->assertOk()->assertJsonPath('data.actor_context', $expectedActorContext?->value ?? $user->roles()->firstOrFail()->key);
         $sessionCookie = $verification->getCookie(config('session.cookie'));
         $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue());
     }

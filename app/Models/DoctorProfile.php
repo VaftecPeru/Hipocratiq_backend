@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'clinic_id', 'medical_license', 'specialty', 'practice_type'])]
+#[Fillable(['user_id', 'clinic_id', 'medical_license', 'specialty', 'specialty_id', 'subspecialty_id', 'practice_type'])]
 class DoctorProfile extends Model
 {
     /** @use HasFactory<DoctorProfileFactory> */
@@ -29,6 +29,16 @@ class DoctorProfile extends Model
     public function subscriptions(): HasMany
     {
         return $this->hasMany(DoctorSubscription::class);
+    }
+
+    public function specialtyCatalog(): BelongsTo
+    {
+        return $this->belongsTo(Specialty::class, 'specialty_id');
+    }
+
+    public function subspecialtyCatalog(): BelongsTo
+    {
+        return $this->belongsTo(Specialty::class, 'subspecialty_id');
     }
 
     protected function casts(): array

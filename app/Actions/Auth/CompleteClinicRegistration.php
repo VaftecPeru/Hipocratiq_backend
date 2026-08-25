@@ -141,6 +141,7 @@ final class CompleteClinicRegistration
                 ]);
 
                 $role = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
+                $user->roles()->attach($role);
                 $user->clinicMemberships()->create([
                     'clinic_id' => $clinic->id,
                     'role_id' => $role->id,

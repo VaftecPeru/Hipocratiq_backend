@@ -114,6 +114,8 @@ final class CompleteDoctorRegistration
                     'clinic_id' => $lockedClinic?->id,
                     'medical_license' => $data['medical_license'],
                     'specialty' => $data['specialty'],
+                    'specialty_id' => $data['specialty_id'] ?? null,
+                    'subspecialty_id' => $data['subspecialty_id'] ?? null,
                     'practice_type' => $practiceType,
                 ]);
 

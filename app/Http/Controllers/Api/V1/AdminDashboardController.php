@@ -116,7 +116,7 @@ class AdminDashboardController extends Controller
                     'failed_jobs_24h' => Schema::hasTable('failed_jobs') ? DB::table('failed_jobs')->where('failed_at', '>=', $now->subDay())->count() : 0,
                     'audit_events_24h' => AdminAuditEvent::query()->where('occurred_at', '>=', $now->subDay())->count(),
                     'critical_events_24h' => AdminAuditEvent::query()->where('is_critical', true)->where('occurred_at', '>=', $now->subDay())->count(),
-                    'authentication_failures_24h' => AuthenticationEvent::query()->where('outcome', 'failed')->where('occurred_at', '>=', $now->subDay())->count(),
+                    'authentication_failures_24h' => AuthenticationEvent::query()->where('outcome', 'failure')->where('occurred_at', '>=', $now->subDay())->count(),
                     'open_support_tickets' => SupportTicket::query()->whereIn('status', $activeTicketStatuses)->count(),
                     'overdue_support_tickets' => SupportTicket::query()->whereIn('status', $activeTicketStatuses)->where('due_at', '<', $now)->count(),
                     'open_incidents' => SystemIncident::query()->where('status', '!=', SystemIncidentStatus::Resolved->value)->count(),
@@ -147,7 +147,7 @@ class AdminDashboardController extends Controller
                     'administrative' => AdminAuditEvent::query()->where('occurred_at', '>=', $now->subDay())->count(),
                     'authentication' => AuthenticationEvent::query()->where('occurred_at', '>=', $now->subDay())->count(),
                     'critical' => AdminAuditEvent::query()->where('is_critical', true)->where('occurred_at', '>=', $now->subDay())->count(),
-                    'failed_authentication' => AuthenticationEvent::query()->where('outcome', 'failed')->where('occurred_at', '>=', $now->subDay())->count(),
+                    'failed_authentication' => AuthenticationEvent::query()->where('outcome', 'failure')->where('occurred_at', '>=', $now->subDay())->count(),
                 ],
             ],
         ]);

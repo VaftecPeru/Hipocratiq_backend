@@ -54,6 +54,21 @@ class Clinic extends Model
         return $this->hasMany(Appointment::class);
     }
 
+    public function patientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class);
+    }
+
+    public function clinicalHistoryRecords(): HasMany
+    {
+        return $this->hasMany(ClinicalHistoryRecord::class);
+    }
+
+    public function consultations(): HasMany
+    {
+        return $this->hasMany(Consultation::class);
+    }
+
     public function supportTickets(): HasMany
     {
         return $this->hasMany(SupportTicket::class);

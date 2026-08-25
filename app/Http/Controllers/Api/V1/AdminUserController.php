@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\EnsureSuperAdminRemains;
 use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Actions\Admin\UpdateAdminUserAccess;
 use App\Enums\AdminAssignableRole;
@@ -127,6 +128,7 @@ class AdminUserController extends Controller
         AdminUserUpdateRequest $request,
         User $user,
         RecordAdminAuditEvent $audit,
+        EnsureSuperAdminRemains $ensureSuperAdminRemains,
     ): JsonResponse {
         $actor = $request->user();
         $data = $request->validated();
@@ -135,17 +137,38 @@ class AdminUserController extends Controller
             throw ValidationException::withMessages(['status' => ['No puedes suspender o deshabilitar tu propia cuenta.']]);
         }
 
-        $before = $user->only(['name', 'email', 'phone_number', 'country_code', 'status']);
-        DB::transaction(function () use ($user, $data): void {
+        [$user, $before] = DB::transaction(function () use ($user, $data, $ensureSuperAdminRemains): array {
+            $mayDeactivate = isset($data['status']) && $data['status'] !== UserStatus::Active->value;
+
+            if ($mayDeactivate) {
+                $ensureSuperAdminRemains->lockSentinel();
+            }
+
+            $lockedUser = User::query()
+                ->with('roles:id,key')
+                ->lockForUpdate()
+                ->findOrFail($user->getKey());
+
+            $before = $lockedUser->only(['name', 'email', 'phone_number', 'country_code', 'status']);
+
             if (array_key_exists('email', $data) && $data['email'] !== null) {
                 $data['email'] = mb_strtolower(trim($data['email']));
             }
-            $user->fill($data)->save();
+
+            if ($mayDeactivate
+                && $lockedUser->status === UserStatus::Active
+            ) {
+                $ensureSuperAdminRemains->handle($lockedUser, 'status');
+            }
+
+            $lockedUser->fill($data)->save();
 
             if (isset($data['status']) && $data['status'] !== UserStatus::Active->value) {
-                $user->authenticationSessions()->delete();
-                $user->tokens()->delete();
+                $lockedUser->authenticationSessions()->delete();
+                $lockedUser->tokens()->delete();
             }
+
+            return [$lockedUser, $before];
         });
         $user->load(['roles:id,key,name', 'clinicMemberships.clinic:id,name,address', 'doctorProfile.clinic:id,name,address', 'patientProfile.clinic:id,name,address']);
         $audit->handle(

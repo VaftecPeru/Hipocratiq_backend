@@ -15,6 +15,7 @@ use App\Http\Requests\Api\V1\ClinicSettingsUpdateRequest;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
+use App\Models\PatientIntake;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -110,7 +111,7 @@ class ClinicDashboardController extends Controller
     {
         $clinic = $this->clinic($request);
         $query = $clinic->patientProfiles()
-            ->with('user:id,name,email,phone_number,status,created_at')
+            ->with(['user:id,name,email,phone_number,status,created_at', 'latestIntake.registrar:id,name'])
             ->latest('id');
         $search = trim((string) $request->query('search', ''));
 
@@ -144,8 +145,8 @@ class ClinicDashboardController extends Controller
         CreateClinicPatient $createPatient,
     ): JsonResponse {
         $patient = $createPatient
-            ->handle($request->validated(), $this->clinic($request))
-            ->load('user');
+            ->handle($request->validated(), $this->clinic($request), $request->user())
+            ->load(['user', 'latestIntake.registrar:id,name']);
 
         return response()->json([
             'success' => true,
@@ -255,7 +256,7 @@ class ClinicDashboardController extends Controller
     private function recentPatients(Clinic $clinic, int $limit)
     {
         return $clinic->patientProfiles()
-            ->with('user:id,name,email,phone_number,status,created_at')
+            ->with(['user:id,name,email,phone_number,status,created_at', 'latestIntake.registrar:id,name'])
             ->latest('id')
             ->limit($limit)
             ->get();
@@ -337,6 +338,28 @@ class ClinicDashboardController extends Controller
             'phone_number' => $patient->user?->phone_number,
             'status' => $patient->user?->status?->value,
             'created_at' => $patient->user?->created_at?->toIso8601String(),
+            'triage' => $this->serializeTriage($patient->latestIntake),
+        ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function serializeTriage(?PatientIntake $intake): ?array
+    {
+        if ($intake === null) {
+            return null;
+        }
+
+        return [
+            'temperature_c' => $intake->temperature_c,
+            'systolic_bp' => $intake->systolic_bp,
+            'diastolic_bp' => $intake->diastolic_bp,
+            'heart_rate' => $intake->heart_rate,
+            'respiratory_rate' => $intake->respiratory_rate,
+            'oxygen_saturation' => $intake->oxygen_saturation,
+            'priority' => $intake->triage_priority,
+            'notes' => $intake->triage_notes,
+            'recorded_at' => $intake->created_at?->toIso8601String(),
+            'registrar_name' => $intake->registrar?->name,
         ];
     }
 

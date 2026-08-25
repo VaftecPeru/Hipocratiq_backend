@@ -6,7 +6,6 @@ use App\Enums\AdminAssignableRole;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\DoctorPracticeType;
 use App\Enums\RoleKey;
-use App\Enums\UserStatus;
 use App\Models\Clinic;
 use App\Models\Role;
 use App\Models\User;
@@ -15,6 +14,8 @@ use Illuminate\Validation\ValidationException;
 
 final class UpdateAdminUserAccess
 {
+    public function __construct(private EnsureSuperAdminRemains $ensureSuperAdminRemains) {}
+
     /**
      * @return array{user: User, before: array<string, mixed>, after: array<string, mixed>, changed: bool}
      */
@@ -31,13 +32,19 @@ final class UpdateAdminUserAccess
         }
 
         return DB::transaction(function () use ($user, $role, $clinic): array {
+            if ($role !== AdminAssignableRole::SuperAdmin) {
+                $this->ensureSuperAdminRemains->lockSentinel();
+            }
+
             $lockedUser = User::query()
                 ->with(['roles:id,key,name', 'clinicMemberships.clinic:id,name,address', 'doctorProfile.clinic:id,name,address', 'patientProfile.clinic:id,name,address'])
                 ->lockForUpdate()
                 ->findOrFail($user->getKey());
 
             $before = $this->snapshot($lockedUser);
-            $this->ensureLastSuperAdminIsPreserved($lockedUser, $role);
+            if ($role !== AdminAssignableRole::SuperAdmin) {
+                $this->ensureSuperAdminRemains->handle($lockedUser, 'role');
+            }
             $this->applyRole($lockedUser, $role, $clinic);
 
             $lockedUser->load(['roles:id,key,name', 'clinicMemberships.clinic:id,name,address', 'doctorProfile.clinic:id,name,address', 'patientProfile.clinic:id,name,address']);
@@ -127,26 +134,6 @@ final class UpdateAdminUserAccess
         }
 
         return $systemRole;
-    }
-
-    private function ensureLastSuperAdminIsPreserved(User $user, AdminAssignableRole $nextRole): void
-    {
-        if (! $user->hasRole(RoleKey::SuperAdmin) || $nextRole === AdminAssignableRole::SuperAdmin) {
-            return;
-        }
-
-        $activeSuperAdmins = User::query()
-            ->where('status', UserStatus::Active->value)
-            ->whereHas('roles', fn ($query) => $query->where('key', RoleKey::SuperAdmin->value))
-            ->lockForUpdate()
-            ->pluck('users.id')
-            ->count();
-
-        if ($activeSuperAdmins <= 1) {
-            throw ValidationException::withMessages([
-                'role' => ['No puedes retirar el rol al último Superadministrador activo.'],
-            ]);
-        }
     }
 
     /** @return array{role: string, clinic_id: int|null} */

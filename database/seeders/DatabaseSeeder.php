@@ -64,5 +64,7 @@ class DatabaseSeeder extends Seeder
                 $plan + ['currency' => 'USD', 'is_active' => true, 'publicly_selectable' => $plan['publicly_selectable'] ?? true],
             );
         }
+
+        $this->call(SpecialtySeeder::class);
     }
 }

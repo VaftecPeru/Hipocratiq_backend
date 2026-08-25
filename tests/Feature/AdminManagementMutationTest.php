@@ -215,6 +215,27 @@ class AdminManagementMutationTest extends TestCase
         $this->withSpaOrigin()->patchJson("/api/v1/auth/admin/users/{$admin->id}", [
             'status' => UserStatus::Disabled->value,
         ])->assertUnprocessable()->assertJsonValidationErrors('status');
+
+        $this->assertDatabaseHas('users', [
+            'id' => $admin->id,
+            'status' => UserStatus::Active->value,
+        ]);
+    }
+
+    public function test_one_of_two_active_super_admins_can_be_deactivated(): void
+    {
+        $this->authenticateAdmin();
+        $target = User::factory()->superAdmin()->create();
+
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/admin/users/{$target->id}", [
+            'status' => UserStatus::Disabled->value,
+        ])->assertOk()
+            ->assertJsonPath('data.status', UserStatus::Disabled->value);
+
+        $this->assertSame(1, User::query()
+            ->where('status', UserStatus::Active->value)
+            ->whereHas('roles', fn ($query) => $query->where('key', RoleKey::SuperAdmin->value))
+            ->count());
     }
 
     public function test_super_admin_can_send_an_audited_message_to_a_user(): void

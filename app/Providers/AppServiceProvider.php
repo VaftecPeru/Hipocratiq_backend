@@ -6,6 +6,7 @@ use App\Contracts\BillingGateway;
 use App\Contracts\SmsSender;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
+use App\Models\ClinicMembership;
 use App\Models\User;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
@@ -14,6 +15,7 @@ use App\Services\Billing\SimulatedBillingGateway;
 use App\Services\Billing\UnavailableBillingGateway;
 use App\Services\Sms\ArraySmsSender;
 use App\Services\Sms\TwilioSmsSender;
+use App\Support\Authorization\RolePermissionCatalog;
 use App\Support\PhoneNumber;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -75,6 +77,21 @@ class AppServiceProvider extends ServiceProvider
         Gate::before(fn (User $user, string $ability): ?bool => (
             $user->status === UserStatus::Active && $user->hasRole(RoleKey::SuperAdmin)
         ) ? true : null);
+
+        foreach (RolePermissionCatalog::abilities() as $ability) {
+            Gate::define($ability, static function (User $user) use ($ability): bool {
+                $membership = request()->attributes->get('clinic_membership');
+
+                if (! $membership instanceof ClinicMembership
+                    || (string) $membership->user_id !== (string) $user->getKey()) {
+                    return false;
+                }
+
+                $roleKey = $membership->role?->key;
+
+                return is_string($roleKey) && RolePermissionCatalog::allows($roleKey, $ability);
+            });
+        }
 
         // En modo demo aflojamos los throttles: las corridas repetidas de la
         // demo desde la misma IP/teléfono no deben quedar bloqueadas hasta una
