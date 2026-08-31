@@ -179,12 +179,21 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/clinic/appointments', [ClinicDashboardController::class, 'appointments'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.appointments.index');
+        Route::post('/clinic/appointments', [ClinicDashboardController::class, 'storeAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist','clinic.access','can:clinic.appointments.manage'])
+    ->name('clinic.appointments.store');
         Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');
         Route::patch('/clinic/settings', [ClinicDashboardController::class, 'updateSettings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.settings.manage'])
             ->name('clinic.settings.update');
+        Route::get('/clinic/schedule-blocks', [ClinicDashboardController::class, 'scheduleBlocks'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.schedule-blocks.index');
+        Route::post('/clinic/schedule-blocks', [ClinicDashboardController::class, 'storeScheduleBlock'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.schedule-blocks.store');
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');

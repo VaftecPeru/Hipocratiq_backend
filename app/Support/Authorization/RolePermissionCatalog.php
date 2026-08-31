@@ -29,6 +29,7 @@ final class RolePermissionCatalog
             ['key' => 'clinic.dashboard.view', 'label' => 'Ver panel de la clínica', 'group' => 'Clínica'],
             ['key' => 'clinic.members.manage', 'label' => 'Administrar integrantes de la clínica', 'group' => 'Clínica'],
             ['key' => 'clinic.patients.manage', 'label' => 'Administrar pacientes de la clínica', 'group' => 'Clínica'],
+            ['key' => 'clinic.appointments.manage', 'label' => 'Administrar citas de la clínica','group' => 'Clínica'],
             ['key' => 'clinic.settings.manage', 'label' => 'Administrar configuración de la clínica', 'group' => 'Clínica'],
             ['key' => 'reception.dashboard.view', 'label' => 'Ver panel de recepción', 'group' => 'Recepción'],
             ['key' => 'reception.patients.manage', 'label' => 'Gestionar pacientes', 'group' => 'Recepción'],
@@ -49,7 +50,7 @@ final class RolePermissionCatalog
                 'name' => 'Superadministrador',
                 'scope' => RoleScope::Global->value,
                 'description' => 'Supervisa y administra todos los países, tenants y módulos de la plataforma.',
-                'permissions' => self::permissionKeysWithPrefix('platform.'),
+                'permissions' => self::permissionKeysWithPrefix('platform.'),'clinic.appointments.manage',
             ],
             [
                 'key' => AdminAssignableRole::ClinicAdmin->value,
