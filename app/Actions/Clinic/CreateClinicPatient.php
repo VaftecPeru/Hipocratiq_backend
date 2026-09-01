@@ -58,6 +58,9 @@ final class CreateClinicPatient
                 'sex' => $data['sex'] ?? null,
                 'address' => $data['address'] ?? null,
                 'emergency_contact' => $data['emergency_contact'] ?? null,
+                'insurance' => $data['insurance'] ?? null,
+                'is_returning_patient' => $data['is_returning_patient'] ?? false,
+                'whatsapp_consent' => $data['whatsapp_consent'] ?? false,
             ]);
 
             if (array_key_exists('objective', $data)) {

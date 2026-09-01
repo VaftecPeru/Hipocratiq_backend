@@ -57,7 +57,15 @@ class ClinicPatientIntakeTest extends TestCase
             'requested_doctor_user_id' => $doctor->id,
             'specialty_id' => $specialty->id,
             'subspecialty_id' => $subspecialty->id,
-        ]))->assertCreated()->assertJsonPath('data.name', 'Paciente con Ingreso');
+            'insurance' => 'EsSalud',
+            'is_returning_patient' => true,
+            'whatsapp_consent' => true,
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Paciente con Ingreso')
+            ->assertJsonPath('data.insurance', 'EsSalud')
+            ->assertJsonPath('data.is_returning_patient', true)
+            ->assertJsonPath('data.whatsapp_consent', true);
 
         $this->assertDatabaseHas('patient_profiles', [
             'clinic_id' => $this->clinic->id,
@@ -65,6 +73,9 @@ class ClinicPatientIntakeTest extends TestCase
             'document_number' => '12345678',
             'sex' => 'Femenino',
             'address' => 'Av. Salud 123',
+            'insurance' => 'EsSalud',
+            'is_returning_patient' => true,
+            'whatsapp_consent' => true,
         ]);
         $this->assertDatabaseHas('patient_intakes', [
             'clinic_id' => $this->clinic->id,
@@ -221,6 +232,7 @@ class ClinicPatientIntakeTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1000 0201',
             'password' => 'SecurePass123',
+            'requested_role' => 'receptionist',
         ])->assertAccepted();
         $session = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

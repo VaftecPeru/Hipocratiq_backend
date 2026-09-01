@@ -110,6 +110,7 @@ class DoctorRegistrationTest extends TestCase
             'purpose' => 'login',
             'client_type' => 'web',
             'actor_context' => 'staff',
+            'requested_role' => 'doctor',
             'identifier' => 'medico@example.test',
             'password' => 'SecurePass123',
         ]);

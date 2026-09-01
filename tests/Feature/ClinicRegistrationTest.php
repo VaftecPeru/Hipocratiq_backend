@@ -68,6 +68,7 @@ class ClinicRegistrationTest extends TestCase
             'purpose' => 'login',
             'identifier' => 'ana@clinica.test',
             'actor_context' => 'staff',
+            'requested_role' => 'clinic_admin',
             'password' => 'SecurePass123',
         ]);
         $login->assertAccepted();
@@ -91,6 +92,7 @@ class ClinicRegistrationTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 8765 4321',
             'password' => 'SecurePass123',
+            'requested_role' => 'clinic_admin',
         ]);
         $legacyLogin->assertAccepted();
         $legacyVerification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [

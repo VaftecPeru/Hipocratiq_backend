@@ -136,6 +136,7 @@ class AdminUserIndexTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ])->assertAccepted();
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

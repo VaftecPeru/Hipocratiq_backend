@@ -21,8 +21,12 @@ use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\ClinicDashboardController;
+use App\Http\Controllers\Api\V1\DoctorAppointmentController;
+use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
+use App\Http\Controllers\Api\V1\DoctorDashboardController;
 use App\Http\Controllers\Api\V1\DoctorPatientController;
+use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Redis;
@@ -142,12 +146,48 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/doctor/profile', [DoctorProfileController::class, 'update'])
             ->middleware('actor.context:doctor')
             ->name('doctor.profile.update');
+        Route::get('/doctor/dashboard', [DoctorDashboardController::class, 'show'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.dashboard.show');
+        Route::get('/doctor/preferences', [DoctorPreferencesController::class, 'show'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.preferences.show');
+        Route::patch('/doctor/preferences', [DoctorPreferencesController::class, 'update'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.preferences.update');
+        Route::get('/doctor/availability', [DoctorAvailabilityController::class, 'show'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.availability.show');
         Route::get('/doctor/patients', [DoctorPatientController::class, 'patients'])
             ->middleware('actor.context:doctor')
             ->name('doctor.patients.index');
+        Route::post('/doctor/patients', [DoctorPatientController::class, 'store'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.patients.store');
+        Route::get('/doctor/patients/{patient}', [DoctorPatientController::class, 'show'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.patients.show');
+        Route::patch('/doctor/patients/{patient}', [DoctorPatientController::class, 'update'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.patients.update');
         Route::get('/doctor/patients/{patient}/clinical-history', [DoctorPatientController::class, 'clinicalHistory'])
             ->middleware('actor.context:doctor')
             ->name('doctor.patients.clinical-history');
+        Route::get('/doctor/appointments', [DoctorAppointmentController::class, 'index'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.appointments.index');
+        Route::post('/doctor/appointments', [DoctorAppointmentController::class, 'store'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.appointments.store');
+        Route::patch('/doctor/appointments/{appointment}', [DoctorAppointmentController::class, 'update'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.appointments.update');
+        Route::patch('/doctor/appointments/{appointment}/status', [DoctorAppointmentController::class, 'updateStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.appointments.status.update');
+        Route::post('/doctor/appointments/{appointment}/cancel', [DoctorAppointmentController::class, 'cancel'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.appointments.cancel');
         Route::post('/doctor/patients/{patient}/consultations', [DoctorConsultationController::class, 'store'])
             ->middleware('actor.context:doctor')
             ->name('doctor.consultations.store');
@@ -170,15 +210,48 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/clinic/members', [ClinicDashboardController::class, 'storeMember'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.store');
+        Route::post('/clinic/members/doctors', [ClinicDashboardController::class, 'storeDoctor'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
+            ->name('clinic.members.doctors.store');
+        Route::patch('/clinic/members/{member}', [ClinicDashboardController::class, 'updateMember'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
+            ->name('clinic.members.update');
+        Route::patch('/clinic/members/{member}/status', [ClinicDashboardController::class, 'updateMemberStatus'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
+            ->name('clinic.members.status.update');
+        Route::delete('/clinic/members/{member}', [ClinicDashboardController::class, 'destroyMember'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
+            ->name('clinic.members.destroy');
         Route::get('/clinic/patients', [ClinicDashboardController::class, 'patients'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
             ->name('clinic.patients.index');
         Route::post('/clinic/patients', [ClinicDashboardController::class, 'storePatient'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
             ->name('clinic.patients.store');
+        Route::get('/clinic/patients/export', [ClinicDashboardController::class, 'exportPatients'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
+            ->name('clinic.patients.export');
+        Route::get('/clinic/patients/{patient}', [ClinicDashboardController::class, 'patient'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
+            ->name('clinic.patients.show');
+        Route::patch('/clinic/patients/{patient}', [ClinicDashboardController::class, 'updatePatient'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
+            ->name('clinic.patients.update');
+        Route::patch('/clinic/patients/{patient}/status', [ClinicDashboardController::class, 'updatePatientStatus'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.patients.manage'])
+            ->name('clinic.patients.status.update');
         Route::get('/clinic/appointments', [ClinicDashboardController::class, 'appointments'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.appointments.index');
+        Route::post('/clinic/appointments', [ClinicDashboardController::class, 'storeAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.appointments.store');
+        Route::patch('/clinic/appointments/{appointment}', [ClinicDashboardController::class, 'updateAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.appointments.update');
+        Route::patch('/clinic/appointments/{appointment}/status', [ClinicDashboardController::class, 'updateAppointmentStatus'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.appointments.status.update');
         Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');

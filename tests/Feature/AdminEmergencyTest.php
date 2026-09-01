@@ -42,7 +42,7 @@ class AdminEmergencyTest extends TestCase
     private function authenticateAdmin(): void
     {
         User::factory()->superAdmin()->create(['email' => 'emergency-admin@example.test', 'phone_number' => '+525512345678', 'password' => 'SecurePass123']);
-        $login = $this->withSpaOrigin()->postJson('/api/v1/auth/login', ['country_code' => 'MX', 'phone_number' => '55 1234 5678', 'password' => 'SecurePass123'])->assertAccepted();
+        $login = $this->withSpaOrigin()->postJson('/api/v1/auth/login', ['country_code' => 'MX', 'phone_number' => '55 1234 5678', 'password' => 'SecurePass123', 'requested_role' => 'super_admin'])->assertAccepted();
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', ['challenge_id' => $login->json('data.challenge_id'), 'code' => '123456'])->assertOk();
         $cookie = $verification->getCookie(config('session.cookie'));
         $this->withCookie($cookie->getName(), $cookie->getValue());

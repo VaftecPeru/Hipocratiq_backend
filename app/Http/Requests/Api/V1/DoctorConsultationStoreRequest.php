@@ -27,9 +27,7 @@ class DoctorConsultationStoreRequest extends FormRequest
             'status' => ['nullable', Rule::in(array_map(fn ($case) => $case->value, ConsultationStatus::cases()))],
             'sections' => ['nullable', 'array'],
             'sections.*' => ['array'],
-            'signature' => ['nullable', 'array'],
-            'signature.signed_by' => ['nullable', 'integer', Rule::exists('users', 'id')],
-            'signature.signed_at' => ['nullable', 'date'],
+            'signature' => ['prohibited'],
         ];
     }
 
@@ -37,7 +35,12 @@ class DoctorConsultationStoreRequest extends FormRequest
     {
         return [function (Validator $validator): void {
             $activeKeys = ClinicalHistorySection::query()->where('is_active', true)->pluck('key')->all();
-            $providedKeys = array_keys($this->input('sections', []));
+            $sections = $this->input('sections', []);
+            if (! is_array($sections)) {
+                return;
+            }
+
+            $providedKeys = array_keys($sections);
 
             $unknownKeys = array_diff($providedKeys, $activeKeys);
             if ($unknownKeys !== []) {

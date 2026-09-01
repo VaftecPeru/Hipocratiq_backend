@@ -73,7 +73,9 @@ class AdminClinicController extends Controller
             ->paginate($filters['per_page'] ?? 10);
 
         $data = $clinics->getCollection()
-            ->map(fn (Clinic $clinic): array => $this->serializeClinic($clinic));
+            ->map(fn (Clinic $clinic): array => $this->serializeClinic($clinic))
+            ->values()
+            ->all();
 
         return response()->json([
             'success' => true,

@@ -108,7 +108,7 @@ class AdminUserController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $users->getCollection()->map(fn (User $user): array => $this->serializeUser($user)),
+            'data' => $users->getCollection()->map(fn (User $user): array => $this->serializeUser($user))->values()->all(),
             'meta' => [
                 'current_page' => $users->currentPage(),
                 'from' => $users->firstItem(),
@@ -119,7 +119,7 @@ class AdminUserController extends Controller
             ],
             'summary' => $this->summary(),
             'filter_options' => [
-                'clinics' => Clinic::query()->orderBy('name')->get(['id', 'name', 'country_code', 'status']),
+                'clinics' => Clinic::query()->orderBy('name')->get(['id', 'name', 'country_code', 'status'])->values()->all(),
             ],
         ]);
     }
@@ -314,7 +314,7 @@ class AdminUserController extends Controller
                 AdminAssignableRole::Receptionist->value,
                 $user->doctorProfile !== null ? AdminAssignableRole::Doctor->value : null,
                 $user->patientProfile !== null ? AdminAssignableRole::Patient->value : null,
-            ])->filter()->values(),
+            ])->filter()->values()->all(),
             'clinic' => $clinic?->only(['id', 'name', 'address']),
             'last_login_at' => $user->last_login_at?->toIso8601String(),
             'status' => $user->status->value,
@@ -373,12 +373,12 @@ class AdminUserController extends Controller
                 'role' => $role,
                 'count' => $count,
                 'percentage' => $totalUsers === 0 ? 0 : round(($count / $totalUsers) * 100, 1),
-            ])->values(),
+            ])->values()->all(),
             'country_distribution' => $countryCounts->map(fn ($count, string $countryCode): array => [
                 'country_code' => $countryCode,
                 'count' => (int) $count,
                 'percentage' => $totalUsers === 0 ? 0 : round((((int) $count) / $totalUsers) * 100, 1),
-            ])->values(),
+            ])->values()->all(),
             'recent_activity' => $this->adminUserQuery()
                 ->limit(5)
                 ->get()
@@ -388,7 +388,7 @@ class AdminUserController extends Controller
                     'detail' => $user->name,
                     'role' => $this->effectiveRole($user->roles->pluck('key'), $user->patientProfile !== null),
                     'occurred_at' => $user->created_at?->toIso8601String(),
-                ]),
+                ])->values()->all(),
         ];
     }
 }

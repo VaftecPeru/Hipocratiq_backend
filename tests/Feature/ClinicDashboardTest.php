@@ -9,9 +9,11 @@ use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicSubscription;
+use App\Models\DoctorProfile;
 use App\Models\PatientProfile;
 use App\Models\Plan;
 use App\Models\Role;
+use App\Models\Specialty;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Support\Authorization\RolePermissionCatalog;
@@ -62,15 +64,29 @@ class ClinicDashboardTest extends TestCase
                 'name' => 'Clínica Actualizada',
                 'address' => 'Av. Nueva 123',
                 'contact_phone' => '55 5555 5555',
+                'preferences' => [
+                    'maintenance' => true,
+                    'audit' => false,
+                ],
             ])
             ->assertOk()
-            ->assertJsonPath('data.clinic.name', 'Clínica Actualizada');
+            ->assertJsonPath('data.clinic.name', 'Clínica Actualizada')
+            ->assertJsonPath('data.clinic.preferences.maintenance', true)
+            ->assertJsonPath('data.clinic.preferences.audit', false)
+            ->assertJsonPath('data.clinic.preferences.signatures', true)
+            ->assertJsonPath('data.clinic.preferences.backups', true);
 
         $this->assertDatabaseHas('clinics', [
             'id' => $clinic->id,
             'name' => 'Clínica Actualizada',
             'address' => 'Av. Nueva 123',
         ]);
+        $this->assertSame([
+            'maintenance' => true,
+            'audit' => false,
+            'signatures' => true,
+            'backups' => true,
+        ], $clinic->fresh()->preferences);
 
         $this->withSpaOrigin()
             ->postJson('/api/v1/auth/clinic/patients', [
@@ -332,6 +348,218 @@ class ClinicDashboardTest extends TestCase
         ]);
     }
 
+    public function test_clinic_admin_can_create_a_doctor_with_a_catalog_specialty(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $doctorRole = Role::query()->create([
+            'key' => RoleKey::Doctor->value,
+            'name' => 'Médico',
+            'scope' => RoleScope::Organization,
+            'is_system' => true,
+        ]);
+        $specialty = Specialty::query()->create([
+            'code' => 'medicina_interna',
+            'name' => 'Medicina Interna',
+            'parent_id' => null,
+            'is_active' => true,
+        ]);
+        $subspecialty = Specialty::query()->create([
+            'code' => 'cardiologia',
+            'name' => 'Cardiología',
+            'parent_id' => $specialty->id,
+            'is_active' => true,
+        ]);
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000021',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0021');
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/members/doctors', [
+                'name' => 'Dra. Elena Ruiz',
+                'email' => 'elena.ruiz@clinic.test',
+                'phone_number' => '55 1000 0022',
+                'country_code' => 'MX',
+                'medical_license' => ' med-123456 ',
+                'specialty_id' => $specialty->id,
+                'subspecialty_id' => $subspecialty->id,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Dra. Elena Ruiz')
+            ->assertJsonPath('data.role', 'doctor')
+            ->assertJsonPath('data.specialty', 'Medicina Interna')
+            ->assertJsonPath('data.medical_license', 'MED-123456')
+            ->assertJsonPath('meta.requires_password_reset', true);
+
+        $doctor = User::query()->where('email', 'elena.ruiz@clinic.test')->firstOrFail();
+        $this->assertDatabaseHas('doctor_profiles', [
+            'user_id' => $doctor->id,
+            'clinic_id' => $clinic->id,
+            'medical_license' => 'MED-123456',
+            'specialty' => 'Medicina Interna',
+            'specialty_id' => $specialty->id,
+            'subspecialty_id' => $subspecialty->id,
+            'practice_type' => 'clinic',
+        ]);
+        $this->assertDatabaseHas('clinic_memberships', [
+            'user_id' => $doctor->id,
+            'clinic_id' => $clinic->id,
+            'role_id' => $doctorRole->id,
+            'status' => 'active',
+        ]);
+    }
+
+    public function test_clinic_admin_cannot_create_a_doctor_without_license_or_specialty(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000023',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0023');
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/members/doctors', [
+                'name' => 'Médico sin datos profesionales',
+                'email' => 'medico.incompleto@clinic.test',
+                'phone_number' => '55 1000 0024',
+                'country_code' => 'MX',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['medical_license', 'specialty_id']);
+
+        $this->assertDatabaseMissing('users', ['email' => 'medico.incompleto@clinic.test']);
+        $this->assertDatabaseCount('doctor_profiles', 0);
+    }
+
+    public function test_clinic_admin_cannot_create_a_doctor_with_a_duplicate_license(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $specialty = Specialty::query()->create([
+            'code' => 'pediatria',
+            'name' => 'Pediatría',
+            'parent_id' => null,
+            'is_active' => true,
+        ]);
+        $existingDoctor = User::factory()->create(['phone_number' => '+525510000025']);
+        DoctorProfile::factory()->create([
+            'user_id' => $existingDoctor->id,
+            'medical_license' => 'MED-DUPLICATE',
+        ]);
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000026',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0026');
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/members/doctors', [
+                'name' => 'Otro Médico',
+                'email' => 'otro.medico@clinic.test',
+                'phone_number' => '55 1000 0027',
+                'country_code' => 'MX',
+                'medical_license' => ' med-duplicate ',
+                'specialty_id' => $specialty->id,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('medical_license');
+
+        $this->assertDatabaseMissing('users', ['email' => 'otro.medico@clinic.test']);
+        $this->assertDatabaseCount('doctor_profiles', 1);
+    }
+
+    public function test_receptionist_cannot_create_a_doctor(): void
+    {
+        [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $receptionist = User::factory()->create([
+            'phone_number' => '+525510000028',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $receptionist, $receptionistRole);
+        $this->authenticate($receptionist, '55 1000 0028');
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/members/doctors', [
+                'name' => 'Intento no autorizado',
+                'phone_number' => '55 1000 0029',
+                'country_code' => 'MX',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseMissing('users', ['name' => 'Intento no autorizado']);
+        $this->assertDatabaseCount('doctor_profiles', 0);
+    }
+
+    public function test_clinic_admin_can_remove_another_active_member_without_deleting_the_user(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $receptionistRole = Role::query()->create([
+            'key' => RoleKey::Receptionist->value,
+            'name' => 'Recepcionista',
+            'scope' => RoleScope::Organization,
+            'is_system' => true,
+        ]);
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000030',
+            'password' => 'SecurePass123',
+        ]);
+        $member = User::factory()->create([
+            'name' => 'Recepcionista a retirar',
+            'phone_number' => '+525510000031',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->attachMembership($clinic, $member, $receptionistRole);
+        $this->authenticate($admin, '55 1000 0030');
+
+        $this->withSpaOrigin()
+            ->deleteJson("/api/v1/auth/clinic/members/{$member->id}")
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        $this->assertDatabaseHas('clinic_memberships', [
+            'clinic_id' => $clinic->id,
+            'user_id' => $member->id,
+            'status' => 'suspended',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'id' => $member->id,
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('admin_audit_events', [
+            'actor_user_id' => $admin->id,
+            'clinic_id' => $clinic->id,
+            'module' => 'clinic_team',
+            'action' => 'member_removed',
+            'resource_id' => (string) $member->id,
+        ]);
+    }
+
+    public function test_clinic_admin_cannot_remove_itself_from_the_clinic(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000032',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0032');
+
+        $this->withSpaOrigin()
+            ->deleteJson("/api/v1/auth/clinic/members/{$admin->id}")
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'No puedes eliminarte a ti mismo del equipo.');
+
+        $this->assertDatabaseHas('clinic_memberships', [
+            'clinic_id' => $clinic->id,
+            'user_id' => $admin->id,
+            'status' => 'active',
+        ]);
+    }
+
     public function test_clinic_write_catalog_and_gate_fail_closed_without_a_membership(): void
     {
         $user = User::factory()->create();
@@ -382,6 +610,7 @@ class ClinicDashboardTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => $phone,
             'password' => 'SecurePass123',
+            'requested_role' => $expectedActorContext?->value ?? $user->roles()->firstOrFail()->key,
         ])->assertAccepted();
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

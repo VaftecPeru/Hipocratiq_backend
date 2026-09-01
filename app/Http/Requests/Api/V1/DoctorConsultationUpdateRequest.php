@@ -27,9 +27,7 @@ class DoctorConsultationUpdateRequest extends FormRequest
             'status' => ['sometimes', Rule::in(array_map(fn ($case) => $case->value, ConsultationStatus::cases()))],
             'sections' => ['sometimes', 'nullable', 'array'],
             'sections.*' => ['array'],
-            'signature' => ['sometimes', 'nullable', 'array'],
-            'signature.signed_by' => ['sometimes', 'nullable', 'integer', Rule::exists('users', 'id')],
-            'signature.signed_at' => ['sometimes', 'nullable', 'date'],
+            'signature' => ['prohibited'],
         ];
     }
 
@@ -41,7 +39,12 @@ class DoctorConsultationUpdateRequest extends FormRequest
             }
 
             $activeKeys = ClinicalHistorySection::query()->where('is_active', true)->pluck('key')->all();
-            $providedKeys = array_keys($this->input('sections', []));
+            $sections = $this->input('sections', []);
+            if (! is_array($sections)) {
+                return;
+            }
+
+            $providedKeys = array_keys($sections);
 
             $unknownKeys = array_diff($providedKeys, $activeKeys);
             if ($unknownKeys !== []) {

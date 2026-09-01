@@ -5,6 +5,7 @@ namespace App\Actions\Admin;
 use App\Models\AdminAuditEvent;
 use App\Models\Clinic;
 use App\Models\User;
+use App\Support\AdminDashboardCache;
 use Illuminate\Http\Request;
 
 final class RecordAdminAuditEvent
@@ -25,7 +26,7 @@ final class RecordAdminAuditEvent
         array $metadata = [],
         bool $critical = false,
     ): AdminAuditEvent {
-        return AdminAuditEvent::create([
+        $event = AdminAuditEvent::create([
             'actor_user_id' => $actor->getKey(),
             'clinic_id' => $clinic?->getKey(),
             'country_code' => $countryCode ?? $clinic?->country_code ?? $actor->country_code,
@@ -41,5 +42,9 @@ final class RecordAdminAuditEvent
             'metadata' => $metadata,
             'occurred_at' => now(),
         ]);
+
+        AdminDashboardCache::invalidateFor($module, $action);
+
+        return $event;
     }
 }

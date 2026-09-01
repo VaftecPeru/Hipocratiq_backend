@@ -52,7 +52,7 @@ class AdminSupportTicketController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $tickets->getCollection()->map(fn (SupportTicket $ticket): array => $this->serializeTicket($ticket)),
+            'data' => $tickets->getCollection()->map(fn (SupportTicket $ticket): array => $this->serializeTicket($ticket))->values()->all(),
             'meta' => [
                 'current_page' => $tickets->currentPage(),
                 'from' => $tickets->firstItem(),
@@ -255,8 +255,8 @@ class AdminSupportTicketController extends Controller
                 'target_percentage' => 90,
                 'evaluated_tickets' => $completedCount,
             ],
-            'by_priority' => collect(SupportTicketPriority::cases())->map(fn (SupportTicketPriority $priority): array => $this->distributionItem($priority->value, (int) ($priorityCounts[$priority->value] ?? 0), $total))->values(),
-            'by_category' => collect(SupportTicketCategory::cases())->map(fn (SupportTicketCategory $category): array => $this->distributionItem($category->value, (int) ($categoryCounts[$category->value] ?? 0), $total))->values(),
+            'by_priority' => collect(SupportTicketPriority::cases())->map(fn (SupportTicketPriority $priority): array => $this->distributionItem($priority->value, (int) ($priorityCounts[$priority->value] ?? 0), $total))->values()->all(),
+            'by_category' => collect(SupportTicketCategory::cases())->map(fn (SupportTicketCategory $category): array => $this->distributionItem($category->value, (int) ($categoryCounts[$category->value] ?? 0), $total))->values()->all(),
             'by_country' => $this->countrySummary(),
             'agents' => $this->agentSummary(),
             'escalations' => $this->escalations(),
@@ -290,7 +290,7 @@ class AdminSupportTicketController extends Controller
             'total' => (int) $row->total,
             'open' => (int) $row->open_count,
             'overdue' => (int) $row->overdue_count,
-        ])->all();
+        ])->values()->all();
     }
 
     /** @return list<array<string, mixed>> */
@@ -312,6 +312,7 @@ class AdminSupportTicketController extends Controller
                 'active_tickets' => $user->active_tickets_count,
                 'resolved_tickets' => $user->resolved_tickets_count,
             ])
+            ->values()
             ->all();
     }
 
@@ -323,6 +324,7 @@ class AdminSupportTicketController extends Controller
             ->limit(10)
             ->get()
             ->map(fn (SupportTicket $ticket): array => $this->serializeTicket($ticket))
+            ->values()
             ->all();
     }
 
@@ -335,6 +337,7 @@ class AdminSupportTicketController extends Controller
             ->limit(10)
             ->get()
             ->map(fn (SupportTicketActivity $activity): array => $this->serializeActivity($activity))
+            ->values()
             ->all();
     }
 
@@ -342,8 +345,8 @@ class AdminSupportTicketController extends Controller
     private function filterOptions(): array
     {
         return [
-            'clinics' => Clinic::query()->where('status', 'active')->orderBy('country_code')->orderBy('name')->get(['id', 'name', 'country_code']),
-            'agents' => $this->agentQuery()->orderBy('name')->get(['id', 'name', 'email']),
+            'clinics' => Clinic::query()->where('status', 'active')->orderBy('country_code')->orderBy('name')->get(['id', 'name', 'country_code'])->values()->all(),
+            'agents' => $this->agentQuery()->orderBy('name')->get(['id', 'name', 'email'])->values()->all(),
             'countries' => Clinic::query()->distinct()->orderBy('country_code')->pluck('country_code')->values(),
             'categories' => array_map(fn (SupportTicketCategory $category): string => $category->value, SupportTicketCategory::cases()),
             'priorities' => array_map(fn (SupportTicketPriority $priority): string => $priority->value, SupportTicketPriority::cases()),
@@ -404,7 +407,7 @@ class AdminSupportTicketController extends Controller
         ];
 
         if ($includeActivities) {
-            $data['activities'] = $ticket->activities->map(fn (SupportTicketActivity $activity): array => $this->serializeActivity($activity))->values();
+            $data['activities'] = $ticket->activities->map(fn (SupportTicketActivity $activity): array => $this->serializeActivity($activity))->values()->all();
         }
 
         return $data;

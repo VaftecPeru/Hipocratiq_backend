@@ -354,6 +354,7 @@ class DoctorClinicalRecordTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => $this->phoneNumber($user->phone_number),
             'password' => 'SecurePass123',
+            'requested_role' => 'doctor',
         ])->assertAccepted();
         $session = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

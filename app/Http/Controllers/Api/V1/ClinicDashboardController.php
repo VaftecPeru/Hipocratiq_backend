@@ -3,28 +3,51 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Admin\RecordAdminAuditEvent;
+use App\Actions\Clinic\CreateClinicAppointment;
+use App\Actions\Clinic\CreateClinicDoctor;
 use App\Actions\Clinic\CreateClinicPatient;
 use App\Actions\Clinic\CreateClinicReceptionist;
+use App\Actions\Clinic\UpdateClinicPatient;
 use App\Enums\AppointmentStatus;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\RoleKey;
+use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\ClinicAppointmentStatusUpdateRequest;
+use App\Http\Requests\Api\V1\ClinicAppointmentStoreRequest;
+use App\Http\Requests\Api\V1\ClinicAppointmentUpdateRequest;
+use App\Http\Requests\Api\V1\ClinicDoctorStoreRequest;
+use App\Http\Requests\Api\V1\ClinicMemberStatusUpdateRequest;
 use App\Http\Requests\Api\V1\ClinicMemberStoreRequest;
+use App\Http\Requests\Api\V1\ClinicMemberUpdateRequest;
+use App\Http\Requests\Api\V1\ClinicPatientStatusUpdateRequest;
 use App\Http\Requests\Api\V1\ClinicPatientStoreRequest;
+use App\Http\Requests\Api\V1\ClinicPatientUpdateRequest;
 use App\Http\Requests\Api\V1\ClinicSettingsUpdateRequest;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\PatientIntake;
+use App\Models\PatientProfile;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ClinicDashboardController extends Controller
 {
+    /** @var array{maintenance: bool, audit: bool, signatures: bool, backups: bool} */
+    private const DEFAULT_CLINIC_PREFERENCES = [
+        'maintenance' => false,
+        'audit' => true,
+        'signatures' => true,
+        'backups' => true,
+    ];
+
     public function show(Request $request): JsonResponse
     {
         $clinic = $this->clinic($request);
@@ -111,20 +134,37 @@ class ClinicDashboardController extends Controller
     {
         $clinic = $this->clinic($request);
         $query = $clinic->patientProfiles()
-            ->with(['user:id,name,email,phone_number,status,created_at', 'latestIntake.registrar:id,name'])
+            ->with([
+                'user:id,name,email,phone_number,status,created_at',
+                'latestIntake.registrar:id,name',
+                'lastAppointment.doctor:id,name',
+                'lastAppointment.doctor.doctorProfile:id,user_id,specialty',
+                'nextAppointment.doctor:id,name',
+                'nextAppointment.doctor.doctorProfile:id,user_id,specialty',
+            ])
             ->latest('id');
         $search = trim((string) $request->query('search', ''));
 
         if ($search !== '') {
-            $query->whereHas('user', function ($userQuery) use ($search): void {
-                $userQuery
-                    ->where('name', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%")
-                    ->orWhere('phone_number', 'like', "%{$search}%");
+            $patientCodeId = $this->patientCodeId($search);
+            $query->where(function (Builder $patientQuery) use ($patientCodeId, $search): void {
+                $patientQuery
+                    ->where('document_number', 'like', "%{$search}%")
+                    ->orWhereHas('user', function (Builder $userQuery) use ($search): void {
+                        $userQuery
+                            ->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%")
+                            ->orWhere('phone_number', 'like', "%{$search}%");
+                    });
+
+                if ($patientCodeId !== null) {
+                    $patientQuery->orWhere($patientQuery->getModel()->getQualifiedKeyName(), $patientCodeId);
+                }
             });
         }
 
         $patients = $query->paginate(min(max((int) $request->query('per_page', 10), 1), 100));
+        $summary = $this->patientSummary($clinic);
 
         return response()->json([
             'success' => true,
@@ -136,6 +176,7 @@ class ClinicDashboardController extends Controller
                 'per_page' => $patients->perPage(),
                 'to' => $patients->lastItem(),
                 'total' => $patients->total(),
+                'summary' => $summary,
             ],
         ]);
     }
@@ -152,6 +193,169 @@ class ClinicDashboardController extends Controller
             'success' => true,
             'data' => $this->serializePatient($patient),
         ], 201);
+    }
+
+    public function patient(Request $request, PatientProfile $patient): JsonResponse
+    {
+        $clinic = $this->clinic($request);
+        $patient = $this->clinicPatient($clinic, $patient)->load([
+            'user:id,name,email,phone_number,country_code,status,created_at',
+            'latestIntake.registrar:id,name',
+            'latestIntake.requestedDoctor:id,name',
+            'latestIntake.requestedDoctor.doctorProfile:id,user_id,specialty',
+            'latestIntake.specialty:id,name',
+            'lastAppointment.doctor:id,name',
+            'lastAppointment.doctor.doctorProfile:id,user_id,specialty',
+            'nextAppointment.doctor:id,name',
+            'nextAppointment.doctor.doctorProfile:id,user_id,specialty',
+        ]);
+
+        $recentAppointments = $this->patientAppointments($clinic, $patient)
+            ->where('scheduled_at', '<=', now())
+            ->latest('scheduled_at')
+            ->limit(5)
+            ->get();
+        $nextAppointment = $this->patientAppointments($clinic, $patient)
+            ->where('scheduled_at', '>', now())
+            ->orderBy('scheduled_at')
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'patient' => $this->serializePatient($patient),
+                'profile' => $this->serializePatientProfile($patient),
+                'intake' => $this->serializeIntakeSummary($patient->latestIntake),
+                'recent_appointments' => $recentAppointments
+                    ->map(fn (Appointment $appointment): array => $this->serializePatientAppointment($appointment))
+                    ->values(),
+                'next_appointment' => $nextAppointment === null ? null : $this->serializePatientAppointment($nextAppointment),
+            ],
+        ]);
+    }
+
+    public function updatePatient(
+        ClinicPatientUpdateRequest $request,
+        PatientProfile $patient,
+        UpdateClinicPatient $updatePatient,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $patient = $this->clinicPatient($clinic, $patient)->load('user');
+        $before = $this->administrativePatientSnapshot($patient);
+        $patient = $updatePatient->handle($request->validated(), $patient);
+        $patient->load([
+            'user:id,name,email,phone_number,country_code,status,created_at',
+            'latestIntake.registrar:id,name',
+            'lastAppointment.doctor:id,name',
+            'lastAppointment.doctor.doctorProfile:id,user_id,specialty',
+            'nextAppointment.doctor:id,name',
+            'nextAppointment.doctor.doctorProfile:id,user_id,specialty',
+        ]);
+        $after = $this->administrativePatientSnapshot($patient);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_patients',
+            'patient_updated',
+            PatientProfile::class,
+            $patient->id,
+            $patient->user?->name,
+            clinic: $clinic,
+            metadata: ['changed_fields' => $this->changedFields($before, $after)],
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializePatient($patient)]);
+    }
+
+    public function updatePatientStatus(
+        ClinicPatientStatusUpdateRequest $request,
+        PatientProfile $patient,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $patient = $this->clinicPatient($clinic, $patient)->load('user');
+        $user = $patient->user;
+
+        if ($user === null) {
+            abort(404);
+        }
+
+        $previousStatus = $user->status->value;
+        $user->update(['status' => $request->validated('status')]);
+        $patient->load([
+            'user:id,name,email,phone_number,country_code,status,created_at',
+            'latestIntake.registrar:id,name',
+            'lastAppointment.doctor:id,name',
+            'lastAppointment.doctor.doctorProfile:id,user_id,specialty',
+            'nextAppointment.doctor:id,name',
+            'nextAppointment.doctor.doctorProfile:id,user_id,specialty',
+        ]);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_patients',
+            'patient_status_updated',
+            PatientProfile::class,
+            $patient->id,
+            $patient->user?->name,
+            clinic: $clinic,
+            metadata: ['from' => $previousStatus, 'to' => $request->validated('status')],
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializePatient($patient)]);
+    }
+
+    public function exportPatients(Request $request, RecordAdminAuditEvent $audit): StreamedResponse
+    {
+        $clinic = $this->clinic($request);
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_patients',
+            'patients_exported',
+            clinic: $clinic,
+        );
+
+        return response()->streamDownload(function () use ($clinic): void {
+            $output = fopen('php://output', 'w');
+            fwrite($output, "\xEF\xBB\xBF");
+            fputcsv($output, ['Código', 'Paciente', 'Documento', 'Teléfono', 'Correo', 'Seguro', 'Paciente recurrente', 'WhatsApp', 'Estado', 'Registro']);
+
+            foreach ($clinic->patientProfiles()
+                ->select([
+                    'id',
+                    'user_id',
+                    'clinic_id',
+                    'document_type',
+                    'document_number',
+                    'insurance',
+                    'is_returning_patient',
+                    'whatsapp_consent',
+                    'created_at',
+                ])
+                ->with('user:id,name,email,phone_number,status')
+                ->orderBy('id')
+                ->lazyById(100) as $patient) {
+                $document = trim(implode(' ', array_filter([$patient->document_type, $patient->document_number])));
+                fputcsv($output, [
+                    $this->safeCsvValue('PAC-'.str_pad((string) $patient->id, 6, '0', STR_PAD_LEFT)),
+                    $this->safeCsvValue($patient->user?->name),
+                    $this->safeCsvValue($document),
+                    $this->safeCsvValue($patient->user?->phone_number),
+                    $this->safeCsvValue($patient->user?->email),
+                    $this->safeCsvValue($patient->insurance),
+                    $this->safeCsvValue($patient->is_returning_patient ? 'Sí' : 'No'),
+                    $this->safeCsvValue($patient->whatsapp_consent ? 'Sí' : 'No'),
+                    $this->safeCsvValue($patient->user?->status?->value),
+                    $this->safeCsvValue($patient->created_at?->toDateString()),
+                ]);
+            }
+
+            fclose($output);
+        }, 'pacientes-'.now()->format('Y-m-d-His').'.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
     public function appointments(Request $request): JsonResponse
@@ -213,8 +417,18 @@ class ClinicDashboardController extends Controller
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
         $clinic = $this->clinic($request);
+        $validated = $request->validated();
         $before = $clinic->only(['name', 'contact_phone', 'address']);
-        $clinic->fill($request->validated())->save();
+        $before['preferences'] = $this->clinicPreferences($clinic);
+
+        if (is_array($validated['preferences'] ?? null)) {
+            $validated['preferences'] = array_replace(
+                $before['preferences'],
+                $validated['preferences'],
+            );
+        }
+
+        $clinic->fill($validated)->save();
 
         $audit->handle(
             $request->user(),
@@ -225,7 +439,13 @@ class ClinicDashboardController extends Controller
             $clinic->id,
             $clinic->name,
             clinic: $clinic,
-            metadata: ['before' => $before, 'after' => $clinic->only(array_keys($before))],
+            metadata: [
+                'before' => $before,
+                'after' => [
+                    ...$clinic->only(['name', 'contact_phone', 'address']),
+                    'preferences' => $this->clinicPreferences($clinic),
+                ],
+            ],
         );
 
         return response()->json([
@@ -234,13 +454,270 @@ class ClinicDashboardController extends Controller
         ]);
     }
 
+    public function storeAppointment(
+        ClinicAppointmentStoreRequest $request,
+        CreateClinicAppointment $createAppointment,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $appointment = $createAppointment->handle($request->validated(), $clinic);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_appointments',
+            'appointment_created',
+            Appointment::class,
+            $appointment->id,
+            null,
+            clinic: $clinic,
+            metadata: [
+                'patient_profile_id' => $appointment->patient_profile_id,
+                'doctor_user_id' => $appointment->doctor_user_id,
+                'scheduled_at' => $appointment->scheduled_at?->toIso8601String(),
+            ],
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializeAppointment($appointment),
+        ], 201);
+    }
+
+    public function updateAppointment(
+        ClinicAppointmentUpdateRequest $request,
+        Appointment $appointment,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $this->clinicAppointment($clinic, $appointment);
+
+        if (array_key_exists('doctor_user_id', $request->validated())) {
+            $doctorIsClinicMember = $clinic->memberships()
+                ->where('user_id', $request->validated('doctor_user_id'))
+                ->where('status', ClinicMembershipStatus::Active->value)
+                ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Doctor->value))
+                ->exists();
+
+            if (! $doctorIsClinicMember) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El médico no es miembro activo de esta clínica.',
+                    'errors' => ['doctor_user_id' => ['El médico no es miembro activo de esta clínica.']],
+                ], 422);
+            }
+        }
+
+        $appointment->update($request->validated());
+        $appointment->load([
+            'patientProfile.user:id,name,email,phone_number',
+            'doctor:id,name',
+            'doctor.doctorProfile:id,user_id,specialty',
+        ]);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_appointments',
+            'appointment_updated',
+            Appointment::class,
+            $appointment->id,
+            null,
+            clinic: $clinic,
+            metadata: ['changed_fields' => array_keys($request->validated())],
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeAppointment($appointment)]);
+    }
+
+    public function updateAppointmentStatus(
+        ClinicAppointmentStatusUpdateRequest $request,
+        Appointment $appointment,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $this->clinicAppointment($clinic, $appointment);
+
+        $previousStatus = $appointment->status->value;
+        $appointment->update(['status' => $request->validated('status')]);
+        $appointment->load([
+            'patientProfile.user:id,name,email,phone_number',
+            'doctor:id,name',
+            'doctor.doctorProfile:id,user_id,specialty',
+        ]);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_appointments',
+            'appointment_status_updated',
+            Appointment::class,
+            $appointment->id,
+            null,
+            clinic: $clinic,
+            metadata: ['from' => $previousStatus, 'to' => $request->validated('status')],
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeAppointment($appointment)]);
+    }
+
+    public function storeDoctor(
+        ClinicDoctorStoreRequest $request,
+        CreateClinicDoctor $createDoctor,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $user = $createDoctor->handle($request->validated(), $clinic);
+
+        $membership = $clinic->memberships()
+            ->where('user_id', $user->id)
+            ->with([
+                'role:id,key,name',
+                'user:id,name,email,phone_number,status,last_login_at',
+                'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
+            ])
+            ->firstOrFail();
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_team',
+            'doctor_created',
+            User::class,
+            $user->id,
+            $user->name,
+            clinic: $clinic,
+            countryCode: $user->country_code,
+            metadata: ['role' => RoleKey::Doctor->value, 'requires_password_reset' => true],
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializeMember($membership),
+            'meta' => ['requires_password_reset' => true],
+        ], 201);
+    }
+
+    public function updateMember(
+        ClinicMemberUpdateRequest $request,
+        User $member,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $this->clinicMember($clinic, $member);
+
+        $before = $member->only(['name', 'email', 'phone_number', 'country_code']);
+        $member->update($request->validated());
+        $member->refresh();
+
+        $membership = $clinic->memberships()
+            ->where('user_id', $member->id)
+            ->with([
+                'role:id,key,name',
+                'user:id,name,email,phone_number,status,last_login_at',
+                'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
+            ])
+            ->firstOrFail();
+
+        $after = $member->only(array_keys($before));
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_team',
+            'member_updated',
+            User::class,
+            $member->id,
+            $member->name,
+            clinic: $clinic,
+            metadata: ['changed_fields' => $this->changedFields($before, $after)],
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeMember($membership)]);
+    }
+
+    public function updateMemberStatus(
+        ClinicMemberStatusUpdateRequest $request,
+        User $member,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $this->clinicMember($clinic, $member);
+
+        if ($request->user()->id === $member->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No puedes cambiar tu propio estado.',
+            ], 422);
+        }
+
+        $previousStatus = $member->status->value;
+        $member->update(['status' => $request->validated('status')]);
+
+        $membership = $clinic->memberships()
+            ->where('user_id', $member->id)
+            ->with([
+                'role:id,key,name',
+                'user:id,name,email,phone_number,status,last_login_at',
+                'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
+            ])
+            ->firstOrFail();
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_team',
+            'member_status_updated',
+            User::class,
+            $member->id,
+            $member->name,
+            clinic: $clinic,
+            metadata: ['from' => $previousStatus, 'to' => $request->validated('status')],
+        );
+
+        return response()->json(['success' => true, 'data' => $this->serializeMember($membership)]);
+    }
+
+    public function destroyMember(
+        Request $request,
+        User $member,
+        RecordAdminAuditEvent $audit,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $this->clinicMember($clinic, $member);
+
+        if ($request->user()->id === $member->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No puedes eliminarte a ti mismo del equipo.',
+            ], 422);
+        }
+
+        $clinic->memberships()
+            ->where('user_id', $member->id)
+            ->update(['status' => ClinicMembershipStatus::Suspended->value]);
+
+        $audit->handle(
+            $request->user(),
+            $request,
+            'clinic_team',
+            'member_removed',
+            User::class,
+            $member->id,
+            $member->name,
+            clinic: $clinic,
+        );
+
+        return response()->json(['success' => true]);
+    }
+
     private function clinic(Request $request): Clinic
     {
         return $request->attributes->get('clinic');
     }
 
     /** @return Collection<int, ClinicMembership> */
-    private function activeMembers(Clinic $clinic)
+    private function activeMembers(Clinic $clinic): Collection
     {
         return $clinic->memberships()
             ->where('status', ClinicMembershipStatus::Active->value)
@@ -253,13 +730,69 @@ class ClinicDashboardController extends Controller
     }
 
     /** @return Collection<int, mixed> */
-    private function recentPatients(Clinic $clinic, int $limit)
+    private function recentPatients(Clinic $clinic, int $limit): Collection
     {
         return $clinic->patientProfiles()
             ->with(['user:id,name,email,phone_number,status,created_at', 'latestIntake.registrar:id,name'])
             ->latest('id')
             ->limit($limit)
             ->get();
+    }
+
+    private function clinicPatient(Clinic $clinic, PatientProfile $patient): PatientProfile
+    {
+        return $clinic->patientProfiles()->whereKey($patient->id)->firstOrFail();
+    }
+
+    private function clinicAppointment(Clinic $clinic, Appointment $appointment): Appointment
+    {
+        if ($appointment->clinic_id !== $clinic->id) {
+            abort(404);
+        }
+
+        return $appointment;
+    }
+
+    private function clinicMember(Clinic $clinic, User $member): void
+    {
+        $exists = $clinic->memberships()
+            ->where('user_id', $member->id)
+            ->where('status', ClinicMembershipStatus::Active->value)
+            ->exists();
+
+        if (! $exists) {
+            abort(404);
+        }
+    }
+
+    /** @return Builder<Appointment> */
+    private function patientAppointments(Clinic $clinic, PatientProfile $patient): Builder
+    {
+        return Appointment::query()
+            ->where('clinic_id', $clinic->id)
+            ->where('patient_profile_id', $patient->id)
+            ->with(['doctor:id,name', 'doctor.doctorProfile:id,user_id,specialty']);
+    }
+
+    /** @return array{total: int, active: int, suspended: int} */
+    private function patientSummary(Clinic $clinic): array
+    {
+        $patients = $clinic->patientProfiles();
+
+        return [
+            'total' => $patients->count(),
+            'active' => (clone $patients)->whereHas('user', fn (Builder $query) => $query->where('status', UserStatus::Active->value))->count(),
+            'suspended' => (clone $patients)->whereHas('user', fn (Builder $query) => $query->where('status', UserStatus::Suspended->value))->count(),
+        ];
+    }
+
+    private function patientCodeId(string $search): ?int
+    {
+        if (preg_match('/^PAC-(\d+)$/i', trim($search), $matches) !== 1) {
+            return null;
+        }
+
+        return (int) $matches[1];
     }
 
     /** @return Collection<int, Appointment> */
@@ -286,7 +819,7 @@ class ClinicDashboardController extends Controller
     }
 
     /** @return Relation */
-    private function appointmentsQuery(Clinic $clinic)
+    private function appointmentsQuery(Clinic $clinic): Relation
     {
         return $clinic->appointments()->with([
             'patientProfile.user:id,name,email,phone_number',
@@ -305,7 +838,19 @@ class ClinicDashboardController extends Controller
             'contact_phone' => $clinic->contact_phone,
             'address' => $clinic->address,
             'status' => $clinic->status->value,
+            'preferences' => $this->clinicPreferences($clinic),
         ];
+    }
+
+    /** @return array{maintenance: bool, audit: bool, signatures: bool, backups: bool} */
+    private function clinicPreferences(Clinic $clinic): array
+    {
+        $stored = is_array($clinic->preferences) ? $clinic->preferences : [];
+
+        return array_replace(
+            self::DEFAULT_CLINIC_PREFERENCES,
+            array_intersect_key($stored, self::DEFAULT_CLINIC_PREFERENCES),
+        );
     }
 
     /** @return array<string, mixed> */
@@ -328,7 +873,7 @@ class ClinicDashboardController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function serializePatient($patient): array
+    private function serializePatient(PatientProfile $patient): array
     {
         return [
             'id' => $patient->id,
@@ -337,9 +882,122 @@ class ClinicDashboardController extends Controller
             'email' => $patient->user?->email,
             'phone_number' => $patient->user?->phone_number,
             'status' => $patient->user?->status?->value,
+            'insurance' => $patient->insurance,
+            'is_returning_patient' => (bool) $patient->is_returning_patient,
+            'whatsapp_consent' => (bool) $patient->whatsapp_consent,
             'created_at' => $patient->user?->created_at?->toIso8601String(),
+            'age' => $patient->date_of_birth?->age,
+            'last_appointment' => $patient->relationLoaded('lastAppointment')
+                ? $this->serializePatientAppointment($patient->lastAppointment)
+                : null,
+            'next_appointment' => $patient->relationLoaded('nextAppointment')
+                ? $this->serializePatientAppointment($patient->nextAppointment)
+                : null,
             'triage' => $this->serializeTriage($patient->latestIntake),
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializePatientProfile(PatientProfile $patient): array
+    {
+        return [
+            'document_type' => $patient->document_type,
+            'document_number' => $patient->document_number,
+            'date_of_birth' => $patient->date_of_birth?->toDateString(),
+            'sex' => $patient->sex,
+            'address' => $patient->address,
+            'emergency_contact' => $patient->emergency_contact,
+            'insurance' => $patient->insurance,
+            'is_returning_patient' => (bool) $patient->is_returning_patient,
+            'whatsapp_consent' => (bool) $patient->whatsapp_consent,
+            'country_code' => $patient->user?->country_code,
+        ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function serializeIntakeSummary(?PatientIntake $intake): ?array
+    {
+        if ($intake === null) {
+            return null;
+        }
+
+        return [
+            'reason_category' => $intake->reason_category,
+            'requested_doctor' => $intake->requestedDoctor === null ? null : [
+                'id' => $intake->requestedDoctor->id,
+                'name' => $intake->requestedDoctor->name,
+                'specialty' => $intake->requestedDoctor->doctorProfile?->specialty,
+            ],
+            'specialty' => $intake->specialty?->name,
+            'triage' => [
+                'temperature_c' => $intake->temperature_c,
+                'systolic_bp' => $intake->systolic_bp,
+                'diastolic_bp' => $intake->diastolic_bp,
+                'heart_rate' => $intake->heart_rate,
+                'respiratory_rate' => $intake->respiratory_rate,
+                'oxygen_saturation' => $intake->oxygen_saturation,
+                'priority' => $intake->triage_priority,
+                'recorded_at' => $intake->created_at?->toIso8601String(),
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function serializePatientAppointment(?Appointment $appointment): ?array
+    {
+        if ($appointment === null) {
+            return null;
+        }
+
+        return [
+            'id' => $appointment->id,
+            'scheduled_at' => $appointment->scheduled_at?->toIso8601String(),
+            'appointment_type' => $appointment->appointment_type,
+            'status' => $appointment->status->value,
+            'status_label' => $appointment->status->label(),
+            'doctor' => $appointment->doctor === null ? null : [
+                'id' => $appointment->doctor->id,
+                'name' => $appointment->doctor->name,
+                'specialty' => $appointment->doctor->doctorProfile?->specialty,
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function administrativePatientSnapshot(PatientProfile $patient): array
+    {
+        return [
+            'name' => $patient->user?->name,
+            'email' => $patient->user?->email,
+            'phone_number' => $patient->user?->phone_number,
+            'country_code' => $patient->user?->country_code,
+            'document_type' => $patient->document_type,
+            'document_number' => $patient->document_number,
+            'date_of_birth' => $patient->date_of_birth?->toDateString(),
+            'sex' => $patient->sex,
+            'address' => $patient->address,
+            'emergency_contact' => $patient->emergency_contact,
+            'insurance' => $patient->insurance,
+            'is_returning_patient' => (bool) $patient->is_returning_patient,
+            'whatsapp_consent' => (bool) $patient->whatsapp_consent,
+        ];
+    }
+
+    /** @param array<string, mixed> $before @param array<string, mixed> $after @return array<int, string> */
+    private function changedFields(array $before, array $after): array
+    {
+        return array_keys(array_filter(
+            $after,
+            fn (mixed $value, string $field): bool => $value !== ($before[$field] ?? null),
+            ARRAY_FILTER_USE_BOTH,
+        ));
+    }
+
+    private function safeCsvValue(mixed $value): string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        return preg_match('/^[=+\-@]/u', $normalized) === 1 ? "'{$normalized}" : $normalized;
     }
 
     /** @return array<string, mixed>|null */

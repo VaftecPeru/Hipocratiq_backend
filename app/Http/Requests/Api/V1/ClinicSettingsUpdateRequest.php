@@ -19,6 +19,11 @@ class ClinicSettingsUpdateRequest extends FormRequest
             'name' => ['sometimes', 'string', 'min:2', 'max:160'],
             'contact_phone' => ['sometimes', 'string', 'max:32'],
             'address' => ['sometimes', 'string', 'max:240'],
+            'preferences' => ['sometimes', 'array'],
+            'preferences.maintenance' => ['sometimes', 'boolean'],
+            'preferences.audit' => ['sometimes', 'boolean'],
+            'preferences.signatures' => ['sometimes', 'boolean'],
+            'preferences.backups' => ['sometimes', 'boolean'],
         ];
     }
 }

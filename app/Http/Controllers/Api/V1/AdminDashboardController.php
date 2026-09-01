@@ -17,9 +17,11 @@ use App\Models\SubscriptionPayment;
 use App\Models\SupportTicket;
 use App\Models\SystemIncident;
 use App\Models\User;
+use App\Support\AdminDashboardCache;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Enumerable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -27,7 +29,34 @@ use Throwable;
 
 class AdminDashboardController extends Controller
 {
+    /** @var list<string> */
+    private const DashboardListFields = [
+        'revenue',
+        'countries',
+        'recent_clinics',
+        'recent_activity',
+        'system',
+    ];
+
     public function show(): JsonResponse
+    {
+        $data = Cache::flexible(
+            AdminDashboardCache::key(),
+            [AdminDashboardCache::FreshSeconds, AdminDashboardCache::StaleSeconds],
+            fn (): array => $this->dashboardReadModel(),
+        );
+
+        if (is_array($data)) {
+            $data = $this->normalizeDashboardLists($data);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    private function dashboardReadModel(): array
     {
         $now = CarbonImmutable::now();
         $monthStart = $now->startOfMonth();
@@ -38,46 +67,72 @@ class AdminDashboardController extends Controller
             SupportTicketStatus::WaitingOnCustomer->value,
         ];
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'generated_at' => $now->toIso8601String(),
-                'kpis' => [
-                    'active_clinics' => Clinic::query()->where('status', ClinicStatus::Active->value)->count(),
-                    'clinics_added_this_month' => Clinic::query()->where('created_at', '>=', $monthStart)->count(),
-                    'active_users' => User::query()->where('status', UserStatus::Active->value)->count(),
-                    'users_added_this_month' => User::query()->where('created_at', '>=', $monthStart)->count(),
-                    'active_patients' => PatientProfile::query()->whereHas('user', fn ($query) => $query->where('status', UserStatus::Active->value))->count(),
-                    'monthly_revenue_cents' => $this->payments()->where('paid_at', '>=', $monthStart)->sum('amount_cents'),
-                    'previous_month_revenue_cents' => $this->payments()->whereBetween('paid_at', [$previousMonthStart, $monthStart])->sum('amount_cents'),
-                    'open_support_tickets' => SupportTicket::query()->whereIn('status', $activeStatuses)->count(),
-                    'overdue_support_tickets' => SupportTicket::query()->whereIn('status', $activeStatuses)->where('due_at', '<', $now)->count(),
-                ],
-                'revenue' => $this->revenueSeries($now),
-                'countries' => $this->countryDistribution(),
-                'recent_clinics' => Clinic::query()
-                    ->where('status', ClinicStatus::Active->value)
-                    ->latest()
-                    ->limit(5)
-                    ->get(['id', 'name', 'country_code', 'address', 'created_at']),
-                'recent_activity' => AdminAuditEvent::query()
-                    ->with('actor:id,name')
-                    ->latest('occurred_at')
-                    ->limit(5)
-                    ->get()
-                    ->map(fn (AdminAuditEvent $event): array => [
-                        'id' => $event->id,
-                        'module' => $event->module,
-                        'action' => $event->action,
-                        'resource_label' => $event->resource_label,
-                        'actor_name' => $event->actor?->name,
-                        'country_code' => $event->country_code,
-                        'critical' => $event->is_critical,
-                        'occurred_at' => $event->occurred_at?->toIso8601String(),
-                    ]),
-                'system' => $this->systemSnapshot(),
+        return $this->normalizeDashboardLists([
+            'generated_at' => $now->toIso8601String(),
+            'kpis' => [
+                'active_clinics' => Clinic::query()->where('status', ClinicStatus::Active->value)->count(),
+                'clinics_added_this_month' => Clinic::query()->where('created_at', '>=', $monthStart)->count(),
+                'active_users' => User::query()->where('status', UserStatus::Active->value)->count(),
+                'users_added_this_month' => User::query()->where('created_at', '>=', $monthStart)->count(),
+                'active_patients' => PatientProfile::query()->whereHas('user', fn ($query) => $query->where('status', UserStatus::Active->value))->count(),
+                'monthly_revenue_cents' => $this->payments()->where('paid_at', '>=', $monthStart)->sum('amount_cents'),
+                'previous_month_revenue_cents' => $this->payments()->whereBetween('paid_at', [$previousMonthStart, $monthStart])->sum('amount_cents'),
+                'open_support_tickets' => SupportTicket::query()->whereIn('status', $activeStatuses)->count(),
+                'overdue_support_tickets' => SupportTicket::query()->whereIn('status', $activeStatuses)->where('due_at', '<', $now)->count(),
             ],
+            'revenue' => $this->revenueSeries($now),
+            'countries' => $this->countryDistribution(),
+            'recent_clinics' => Clinic::query()
+                ->where('status', ClinicStatus::Active->value)
+                ->latest()
+                ->limit(5)
+                ->get(['id', 'name', 'country_code', 'address', 'created_at'])
+                ->map(fn (Clinic $clinic): array => [
+                    'id' => $clinic->id,
+                    'name' => $clinic->name,
+                    'country_code' => $clinic->country_code,
+                    'address' => $clinic->address,
+                    'created_at' => $clinic->created_at?->toIso8601String(),
+                ]),
+            'recent_activity' => AdminAuditEvent::query()
+                ->with('actor:id,name')
+                ->latest('occurred_at')
+                ->limit(5)
+                ->get()
+                ->map(fn (AdminAuditEvent $event): array => [
+                    'id' => $event->id,
+                    'module' => $event->module,
+                    'action' => $event->action,
+                    'resource_label' => $event->resource_label,
+                    'actor_name' => $event->actor?->name,
+                    'country_code' => $event->country_code,
+                    'critical' => $event->is_critical,
+                    'occurred_at' => $event->occurred_at?->toIso8601String(),
+                ]),
+            'system' => $this->systemSnapshot(),
         ]);
+    }
+
+    /**
+     * Reindex dashboard lists before cache writes and after cache reads. Invalid list
+     * values remain unchanged so the frontend contract boundary can reject them.
+     *
+     * @param  array<string, mixed>  $readModel
+     * @return array<string, mixed>
+     */
+    private function normalizeDashboardLists(array $readModel): array
+    {
+        foreach (self::DashboardListFields as $field) {
+            $value = $readModel[$field] ?? null;
+
+            if ($value instanceof Enumerable) {
+                $readModel[$field] = $value->values()->all();
+            } elseif (is_array($value)) {
+                $readModel[$field] = array_values($value);
+            }
+        }
+
+        return $readModel;
     }
 
     public function monitoring(): JsonResponse
@@ -130,7 +185,7 @@ class AdminDashboardController extends Controller
                     'resource_label' => $event->resource_label,
                     'country_code' => $event->country_code,
                     'occurred_at' => $event->occurred_at?->toIso8601String(),
-                ]),
+                ])->values()->all(),
                 'incidents' => $incidents->map(fn (SystemIncident $incident): array => [
                     'id' => $incident->id,
                     'title' => $incident->title,
@@ -142,7 +197,7 @@ class AdminDashboardController extends Controller
                     'created_by' => $incident->creator?->name,
                     'started_at' => $incident->started_at?->toIso8601String(),
                     'resolved_at' => $incident->resolved_at?->toIso8601String(),
-                ])->values(),
+                ])->values()->all(),
                 'event_volume' => [
                     'administrative' => AdminAuditEvent::query()->where('occurred_at', '>=', $now->subDay())->count(),
                     'authentication' => AuthenticationEvent::query()->where('occurred_at', '>=', $now->subDay())->count(),

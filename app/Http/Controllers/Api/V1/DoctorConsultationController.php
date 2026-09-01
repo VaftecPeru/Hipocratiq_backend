@@ -16,16 +16,22 @@ use App\Models\PatientIntake;
 use App\Models\PatientProfile;
 use App\Models\User;
 use App\Support\Clinical\DoctorClinicScope;
+use App\Support\Clinical\DoctorScheduling;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class DoctorConsultationController extends Controller
 {
-    public function store(DoctorConsultationStoreRequest $request, PatientProfile $patient): JsonResponse
+    public function store(
+        DoctorConsultationStoreRequest $request,
+        PatientProfile $patient,
+        DoctorScheduling $scheduling,
+    ): JsonResponse
     {
         $doctor = $request->user();
-        $clinic = DoctorClinicScope::workingClinic($doctor);
+        $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $this->assertPatientConnected($doctor, $clinic, $patient);
 
         $data = $request->validated();
@@ -35,10 +41,12 @@ class DoctorConsultationController extends Controller
         }
 
         $objective = $this->resolveObjective($data['objective'] ?? null, $clinic, $patient);
+        $status = ConsultationStatus::from($data['status'] ?? ConsultationStatus::InProgress->value);
+        $scheduling->assertConsultationStatusTransition(ConsultationStatus::Draft, $status);
 
-        $consultation = DB::transaction(function () use ($doctor, $clinic, $patient, $data, $objective): Consultation {
+        $consultation = DB::transaction(function () use ($doctor, $clinic, $patient, $data, $objective, $status): Consultation {
             $record = ClinicalHistoryRecord::query()->create([
-                'clinic_id' => $clinic->id,
+                'clinic_id' => $clinic?->id,
                 'patient_profile_id' => $patient->id,
                 'doctor_user_id' => $doctor->id,
                 'appointment_id' => $data['appointment_id'] ?? null,
@@ -49,21 +57,17 @@ class DoctorConsultationController extends Controller
 
             $this->syncSections($record, $data['sections'] ?? []);
 
-            $signedBy = $data['signature']['signed_by'] ?? null;
-            $signedAt = $data['signature']['signed_at'] ?? null;
-
             return Consultation::query()->create([
-                'clinic_id' => $clinic->id,
+                'clinic_id' => $clinic?->id,
                 'doctor_user_id' => $doctor->id,
                 'patient_profile_id' => $patient->id,
                 'appointment_id' => $data['appointment_id'] ?? null,
                 'clinical_history_record_id' => $record->id,
                 'created_by_user_id' => $doctor->id,
-                'status' => $data['status'] ?? ConsultationStatus::InProgress->value,
+                'status' => $status,
                 'chief_complaint' => $data['chief_complaint'],
                 'objective' => $objective,
-                'signed_by_user_id' => $signedBy,
-                'signed_at' => $signedAt,
+                'completed_at' => $status === ConsultationStatus::Completed ? now() : null,
             ]);
         });
 
@@ -75,15 +79,21 @@ class DoctorConsultationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $doctor = $request->user();
-        $clinic = DoctorClinicScope::workingClinic($doctor);
+        $clinic = DoctorClinicScope::clinicOrNull($doctor);
 
-        $consultations = Consultation::query()
-            ->where('clinic_id', $clinic->id)
+        $query = Consultation::query()
             ->where('doctor_user_id', $doctor->id)
             ->with(['clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy'])
             ->orderByDesc('created_at')
-            ->orderByDesc('id')
-            ->get();
+            ->orderByDesc('id');
+
+        if ($clinic !== null) {
+            $query->where('clinic_id', $clinic->id);
+        } else {
+            $query->whereNull('clinic_id');
+        }
+
+        $consultations = $query->get();
 
         return response()->json([
             'success' => true,
@@ -94,19 +104,29 @@ class DoctorConsultationController extends Controller
     public function show(Request $request, Consultation $consultation): ConsultationResource
     {
         $doctor = $request->user();
-        $clinic = DoctorClinicScope::workingClinic($doctor);
+        $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $this->assertConsultationAccessible($doctor, $clinic, $consultation);
 
         return new ConsultationResource($consultation);
     }
 
-    public function update(DoctorConsultationUpdateRequest $request, Consultation $consultation): ConsultationResource
+    public function update(
+        DoctorConsultationUpdateRequest $request,
+        Consultation $consultation,
+        DoctorScheduling $scheduling,
+    ): ConsultationResource
     {
         $doctor = $request->user();
-        $clinic = DoctorClinicScope::workingClinic($doctor);
+        $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $this->assertConsultationAccessible($doctor, $clinic, $consultation);
 
         $data = $request->validated();
+
+        if ($consultation->status === ConsultationStatus::Signed) {
+            throw ValidationException::withMessages([
+                'status' => ['Una consulta firmada no se puede modificar.'],
+            ]);
+        }
 
         if (isset($data['appointment_id'])) {
             $this->assertAppointmentOwned($doctor, $clinic, $consultation->patientProfile, (int) $data['appointment_id']);
@@ -116,15 +136,29 @@ class DoctorConsultationController extends Controller
         if (array_key_exists('objective', $data)) {
             $objective = $this->resolveObjective($data['objective'], $clinic, $consultation->patientProfile);
         }
+        $nextStatus = ConsultationStatus::from($data['status'] ?? $consultation->status->value);
+        $scheduling->assertConsultationStatusTransition($consultation->status, $nextStatus);
 
-        DB::transaction(function () use ($data, $objective, $consultation): void {
-            $consultation->fill([
-                'status' => $data['status'] ?? $consultation->status->value,
+        DB::transaction(function () use ($data, $doctor, $nextStatus, $objective, $consultation): void {
+            $updates = [
+                'status' => $nextStatus,
                 'chief_complaint' => $data['chief_complaint'] ?? $consultation->chief_complaint,
                 'objective' => $objective,
                 'appointment_id' => $data['appointment_id'] ?? $consultation->appointment_id,
-                'signed_by_user_id' => $data['signature']['signed_by'] ?? $consultation->signed_by_user_id,
-                'signed_at' => $data['signature']['signed_at'] ?? $consultation->signed_at,
+            ];
+
+            if ($nextStatus === ConsultationStatus::Completed && $consultation->completed_at === null) {
+                $updates['completed_at'] = now();
+            }
+
+            if ($nextStatus === ConsultationStatus::Signed) {
+                $updates['signed_by_user_id'] = $doctor->id;
+                $updates['signed_at'] = now();
+                $updates['completed_at'] ??= $consultation->completed_at ?? now();
+            }
+
+            $consultation->fill([
+                ...$updates,
             ])->save();
 
             if ($consultation->clinicalHistoryRecord !== null) {
@@ -169,10 +203,14 @@ class DoctorConsultationController extends Controller
         }
     }
 
-    private function resolveObjective(?string $objective, Clinic $clinic, PatientProfile $patient): ?string
+    private function resolveObjective(?string $objective, ?Clinic $clinic, PatientProfile $patient): ?string
     {
         if (is_string($objective) && trim($objective) !== '') {
             return $objective;
+        }
+
+        if ($clinic === null) {
+            return null;
         }
 
         $intake = PatientIntake::query()
@@ -184,8 +222,16 @@ class DoctorConsultationController extends Controller
         return $intake?->objective;
     }
 
-    private function assertPatientConnected(User $doctor, Clinic $clinic, PatientProfile $patient): void
+    private function assertPatientConnected(User $doctor, ?Clinic $clinic, PatientProfile $patient): void
     {
+        if ($clinic === null) {
+            if ($patient->clinic_id !== null || $patient->owner_doctor_user_id !== $doctor->id) {
+                abort(404, 'Paciente no encontrado.');
+            }
+
+            return;
+        }
+
         if ($patient->clinic_id !== $clinic->id) {
             abort(404, 'Paciente no encontrado en la clínica del médico.');
         }
@@ -206,23 +252,33 @@ class DoctorConsultationController extends Controller
         }
     }
 
-    private function assertAppointmentOwned(User $doctor, Clinic $clinic, PatientProfile $patient, int $appointmentId): void
+    private function assertAppointmentOwned(User $doctor, ?Clinic $clinic, PatientProfile $patient, int $appointmentId): void
     {
-        $owned = Appointment::query()
+        $query = Appointment::query()
             ->whereKey($appointmentId)
-            ->where('clinic_id', $clinic->id)
             ->where('patient_profile_id', $patient->id)
-            ->where('doctor_user_id', $doctor->id)
-            ->exists();
+            ->where('doctor_user_id', $doctor->id);
+
+        if ($clinic !== null) {
+            $query->where('clinic_id', $clinic->id);
+        } else {
+            $query->whereNull('clinic_id');
+        }
+
+        $owned = $query->exists();
 
         if (! $owned) {
             abort(403, 'La cita no pertenece a este paciente en tu clínica.');
         }
     }
 
-    private function assertConsultationAccessible(User $doctor, Clinic $clinic, Consultation $consultation): void
+    private function assertConsultationAccessible(User $doctor, ?Clinic $clinic, Consultation $consultation): void
     {
-        if ($consultation->clinic_id !== $clinic->id || $consultation->doctor_user_id !== $doctor->id) {
+        $sameClinic = $clinic === null
+            ? $consultation->clinic_id === null
+            : $consultation->clinic_id === $clinic->id;
+
+        if (! $sameClinic || $consultation->doctor_user_id !== $doctor->id) {
             abort(404, 'Consulta no encontrada.');
         }
     }

@@ -61,6 +61,7 @@ class DemoUsersSeederTest extends TestCase
             'purpose' => 'login',
             'client_type' => 'web',
             'actor_context' => 'staff',
+            'requested_role' => 'receptionist',
             'identifier' => 'recepcion@hipocratiq.test',
             'password' => 'Hipocratiq2026!',
         ])->assertAccepted();

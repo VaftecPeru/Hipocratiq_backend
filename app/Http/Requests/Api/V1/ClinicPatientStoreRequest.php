@@ -33,6 +33,9 @@ class ClinicPatientStoreRequest extends FormRequest
             'sex' => ['nullable', 'string', Rule::in(['Femenino', 'Masculino', 'Otro'])],
             'address' => ['nullable', 'string', 'max:240'],
             'emergency_contact' => ['nullable', 'string', 'max:160'],
+            'insurance' => ['nullable', 'string', 'max:120'],
+            'is_returning_patient' => ['sometimes', 'boolean'],
+            'whatsapp_consent' => ['sometimes', 'boolean'],
             'requested_doctor_user_id' => ['nullable', 'integer', Rule::exists('users', 'id')],
             'specialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)->whereNull('parent_id')],
             'subspecialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)],
@@ -48,6 +51,14 @@ class ClinicPatientStoreRequest extends FormRequest
             'triage_priority' => ['nullable', 'string', Rule::in(['routine', 'urgent', 'emergency'])],
             'triage_notes' => ['nullable', 'string', 'max:2000'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('insurance')) {
+            $insurance = $this->input('insurance');
+            $this->merge(['insurance' => $insurance === null ? null : trim((string) $insurance)]);
+        }
     }
 
     public function after(): array

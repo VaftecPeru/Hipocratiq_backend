@@ -25,7 +25,8 @@ class AdminAccessControlController extends Controller
             ->map(fn (array $role): array => $role + [
                 'user_count' => $this->roleQuery(AdminAssignableRole::from($role['key']))->count(),
             ])
-            ->values();
+            ->values()
+            ->all();
 
         return response()->json([
             'success' => true,
@@ -42,7 +43,7 @@ class AdminAccessControlController extends Controller
                         'name' => $clinic->name,
                         'country_code' => $clinic->country_code,
                         'status' => $clinic->status->value,
-                    ]),
+                    ])->values()->all(),
                 'summary' => [
                     'total_users' => User::query()->count(),
                     'active_clinics' => Clinic::query()->where('status', ClinicStatus::Active->value)->count(),
@@ -62,7 +63,7 @@ class AdminAccessControlController extends Controller
                         'action' => $event->action,
                         'metadata' => $event->metadata,
                         'occurred_at' => $event->occurred_at?->toIso8601String(),
-                    ]),
+                    ])->values()->all(),
             ],
         ]);
     }

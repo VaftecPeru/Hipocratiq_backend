@@ -51,12 +51,13 @@ class AdminMembershipIndexTest extends TestCase
             'starts_at' => now()->subMonths(2),
             'ends_at' => now()->addDays(20),
         ]);
+        $recentStart = now()->subDays(min(5, now()->day - 1));
         ClinicSubscription::factory()->create([
             'clinic_id' => $clinicChile->id,
             'plan_id' => $this->plan(PlanKey::Enterprise)->id,
             'billing_cycle' => BillingCycle::Monthly,
             'auto_renew' => true,
-            'starts_at' => now()->subDays(5),
+            'starts_at' => $recentStart,
             'ends_at' => null,
         ]);
         ClinicSubscription::factory()->create([
@@ -207,6 +208,7 @@ class AdminMembershipIndexTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ])->assertAccepted();
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

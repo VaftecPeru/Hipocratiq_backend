@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\V1\Auth;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
 use App\Enums\OtpPurpose;
+use App\Support\Auth\LoginRole;
 use App\Support\PhoneNumber;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -40,6 +41,11 @@ class RequestOtpRequest extends FormRequest
                     AuthenticationContext::Staff,
                 ]),
             ],
+            'requested_role' => [
+                'nullable',
+                'string',
+                'max:32',
+            ],
             'identifier' => [Rule::requiredIf(! $isRegistration), 'nullable', 'string', 'max:255', $this->identifierRule()],
             'name' => [Rule::requiredIf($isRegistration), 'nullable', 'string', 'max:120'],
             'email' => ['nullable', 'email:rfc', 'max:255', 'unique:users,email'],
@@ -63,6 +69,7 @@ class RequestOtpRequest extends FormRequest
         $purpose = (string) $this->input('purpose');
         $email = $this->input('email');
         $identifier = $this->input('identifier');
+        $requestedRole = $this->input('requested_role');
 
         $this->merge([
             'client_type' => $this->input('client_type', AuthenticationClient::Web->value),
@@ -76,6 +83,7 @@ class RequestOtpRequest extends FormRequest
             'identifier' => is_string($identifier) && str_contains($identifier, '@')
                 ? strtolower($identifier)
                 : $identifier,
+            'requested_role' => LoginRole::normalize(is_string($requestedRole) ? $requestedRole : null),
         ]);
     }
 

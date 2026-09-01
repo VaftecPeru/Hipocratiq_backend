@@ -17,10 +17,9 @@ RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
 
 COPY . .
 
-RUN composer dump-autoload --optimize \
-    && php artisan route:cache \
-    && php artisan view:cache \
-    && php artisan event:cache
+COPY Caddyfile /etc/caddy/Caddyfile
+
+RUN composer dump-autoload --optimize
 
 RUN mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
     && chmod -R a+rw storage bootstrap/cache
@@ -29,4 +28,4 @@ ENV SERVER_NAME=:8000
 
 EXPOSE 8000
 
-CMD php artisan config:cache && php artisan migrate --force && php artisan db:seed --class=DemoUsersSeeder --force && frankenphp run --config /etc/caddy/Caddyfile
+CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]

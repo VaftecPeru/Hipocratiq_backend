@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'clinic_id', 'medical_license', 'specialty', 'specialty_id', 'subspecialty_id', 'practice_type'])]
+#[Fillable(['user_id', 'clinic_id', 'medical_license', 'specialty', 'specialty_id', 'subspecialty_id', 'practice_type', 'preferences'])]
 class DoctorProfile extends Model
 {
     /** @use HasFactory<DoctorProfileFactory> */
@@ -43,6 +43,9 @@ class DoctorProfile extends Model
 
     protected function casts(): array
     {
-        return ['practice_type' => DoctorPracticeType::class];
+        return [
+            'practice_type' => DoctorPracticeType::class,
+            'preferences' => 'array',
+        ];
     }
 }

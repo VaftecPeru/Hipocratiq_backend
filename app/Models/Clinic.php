@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['name', 'slug', 'tax_id', 'country_code', 'contact_phone', 'address', 'status'])]
+#[Fillable(['name', 'slug', 'tax_id', 'country_code', 'contact_phone', 'address', 'status', 'preferences'])]
 class Clinic extends Model
 {
     /** @use HasFactory<ClinicFactory> */
@@ -76,6 +76,9 @@ class Clinic extends Model
 
     protected function casts(): array
     {
-        return ['status' => ClinicStatus::class];
+        return [
+            'status' => ClinicStatus::class,
+            'preferences' => 'array',
+        ];
     }
 }

@@ -9,6 +9,7 @@ use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
 use App\Models\User;
+use App\Support\Auth\LoginRole;
 use App\Support\PhoneNumber;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -29,19 +30,30 @@ final class StartLogin
         $isReceptionist = $user?->hasActiveReceptionistAccess() ?? false;
         $isDoctor = $user?->hasActiveDoctorAccess() ?? false;
         $isSuperAdmin = $user?->hasRole(RoleKey::SuperAdmin) ?? false;
-        $resolvedContext = match (true) {
-            $context === AuthenticationContext::Patient => AuthenticationContext::Patient,
-            $isClinicAdmin => AuthenticationContext::ClinicAdmin,
-            $isReceptionist => AuthenticationContext::Receptionist,
-            $isDoctor => AuthenticationContext::Doctor,
-            default => $context,
-        };
+        $requestedRole = LoginRole::normalize(is_string($data['requested_role'] ?? null) ? $data['requested_role'] : null);
+        $resolvedContext = $this->resolveContext(
+            $context,
+            $requestedRole,
+            $isClinicAdmin,
+            $isReceptionist,
+            $isDoctor,
+        );
 
         if (
             $user === null
             || ! in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
+            || ! $this->hasExactRequestedRole($requestedRole, $context, $client)
+            || ! $this->requestedRoleMatchesContext($requestedRole, $context)
             || $user->phone_verified_at === null
             || $user->status !== UserStatus::Active
+            || ! $this->userHasRequestedRole(
+                $requestedRole,
+                $isSuperAdmin,
+                $isClinicAdmin,
+                $isReceptionist,
+                $isDoctor,
+                $user?->patientProfile()->exists() ?? false,
+            )
             || ($context === AuthenticationContext::Patient && (
                 ! $user->patientProfile()->exists()
                 || $user->hasRole(RoleKey::SuperAdmin)
@@ -74,6 +86,66 @@ final class StartLogin
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,
         );
+    }
+
+    private function resolveContext(
+        AuthenticationContext $context,
+        ?string $requestedRole,
+        bool $isClinicAdmin,
+        bool $isReceptionist,
+        bool $isDoctor,
+    ): AuthenticationContext {
+        return match ($requestedRole) {
+            AuthenticationContext::Patient->value => AuthenticationContext::Patient,
+            RoleKey::ClinicAdmin->value => AuthenticationContext::ClinicAdmin,
+            RoleKey::Receptionist->value => AuthenticationContext::Receptionist,
+            RoleKey::Doctor->value => AuthenticationContext::Doctor,
+            default => match (true) {
+                $context === AuthenticationContext::Patient => AuthenticationContext::Patient,
+                $isClinicAdmin => AuthenticationContext::ClinicAdmin,
+                $isReceptionist => AuthenticationContext::Receptionist,
+                $isDoctor => AuthenticationContext::Doctor,
+                default => $context,
+            },
+        };
+    }
+
+    private function requestedRoleMatchesContext(?string $requestedRole, AuthenticationContext $context): bool
+    {
+        return $requestedRole === AuthenticationContext::Patient->value
+            ? $context === AuthenticationContext::Patient
+            : $context === AuthenticationContext::Staff;
+    }
+
+    private function hasExactRequestedRole(
+        ?string $requestedRole,
+        AuthenticationContext $context,
+        AuthenticationClient $client,
+    ): bool {
+        if ($context === AuthenticationContext::Patient) {
+            return $requestedRole === AuthenticationContext::Patient->value;
+        }
+
+        return $client !== AuthenticationClient::Web || LoginRole::isExactStaffRole($requestedRole);
+    }
+
+    private function userHasRequestedRole(
+        ?string $requestedRole,
+        bool $isSuperAdmin,
+        bool $isClinicAdmin,
+        bool $isReceptionist,
+        bool $isDoctor,
+        bool $isPatient,
+    ): bool {
+        return match ($requestedRole) {
+            null, AuthenticationContext::Staff->value => true,
+            RoleKey::SuperAdmin->value => $isSuperAdmin,
+            RoleKey::ClinicAdmin->value => $isClinicAdmin,
+            RoleKey::Receptionist->value => $isReceptionist,
+            RoleKey::Doctor->value => $isDoctor,
+            AuthenticationContext::Patient->value => $isPatient,
+            default => false,
+        };
     }
 
     private function findUser(array $data): ?User

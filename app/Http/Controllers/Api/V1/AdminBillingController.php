@@ -32,7 +32,7 @@ class AdminBillingController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $payments->getCollection()->map(fn (SubscriptionPayment $payment): array => $this->serializePayment($payment)),
+            'data' => $payments->getCollection()->map(fn (SubscriptionPayment $payment): array => $this->serializePayment($payment))->values()->all(),
             'meta' => [
                 'current_page' => $payments->currentPage(),
                 'from' => $payments->firstItem(),
@@ -56,7 +56,7 @@ class AdminBillingController extends Controller
                         'clinic' => $subscription->clinic?->name,
                         'country_code' => $subscription->clinic?->country_code,
                         'plan' => $subscription->plan?->name,
-                    ]),
+                    ])->values()->all(),
             ],
         ]);
     }

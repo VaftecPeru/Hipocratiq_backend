@@ -36,6 +36,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
 
         $login
@@ -81,6 +82,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'WrongPassword123',
+            'requested_role' => 'super_admin',
         ])->assertUnprocessable()->assertJsonValidationErrors('phone_number');
 
         $this->assertGuest();
@@ -135,6 +137,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
 
         $response
@@ -159,6 +162,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ])->assertUnprocessable()->assertJsonValidationErrors('phone_number');
 
         $this->assertGuest();
@@ -169,6 +173,47 @@ class LoginTest extends TestCase
         $this->withSpaOrigin()->getJson('/api/v1/auth/me')
             ->assertUnauthorized()
             ->assertJsonPath('code', 'UNAUTHENTICATED');
+    }
+
+    public function test_legacy_web_login_rejects_role_mismatch_without_issuing_an_otp(): void
+    {
+        User::factory()->superAdmin()->create([
+            'phone_number' => '+525512345678',
+            'password' => 'SecurePass123',
+        ]);
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 1234 5678',
+            'password' => 'SecurePass123',
+            'actor_context' => 'staff',
+            'requested_role' => 'clinic_admin',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('phone_number')
+            ->assertJsonPath('errors.phone_number.0', 'Las credenciales proporcionadas no son correctas.');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseCount('authentication_sessions', 0);
+    }
+
+    public function test_legacy_web_login_without_requested_role_does_not_issue_an_otp(): void
+    {
+        User::factory()->superAdmin()->create([
+            'phone_number' => '+525512345678',
+            'password' => 'SecurePass123',
+        ]);
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 1234 5678',
+            'password' => 'SecurePass123',
+            'actor_context' => 'staff',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('phone_number')
+            ->assertJsonPath('errors.phone_number.0', 'Las credenciales proporcionadas no son correctas.');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseCount('authentication_sessions', 0);
     }
 
     public function test_suspended_user_cannot_finish_pending_login(): void
@@ -182,6 +227,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
 
         $user->update(['status' => UserStatus::Suspended]);
@@ -240,6 +286,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

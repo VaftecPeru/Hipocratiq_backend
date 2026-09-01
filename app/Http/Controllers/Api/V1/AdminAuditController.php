@@ -23,7 +23,9 @@ class AdminAuditController extends Controller
             ->orderByDesc('source_id')
             ->forPage($page, $perPage)
             ->get()
-            ->map(fn (object $event): array => $this->serializeEvent($event));
+            ->map(fn (object $event): array => $this->serializeEvent($event))
+            ->values()
+            ->all();
 
         return response()->json([
             'success' => true,
@@ -138,26 +140,32 @@ class AdminAuditController extends Controller
                 'module' => $row->module,
                 'count' => (int) $row->aggregate,
                 'percentage' => $total === 0 ? 0 : round(((int) $row->aggregate / $total) * 100, 1),
-            ])->values(),
+            ])->values()->all(),
             'by_country' => (clone $query)
                 ->whereNotNull('country_code')
                 ->select('country_code', DB::raw('COUNT(*) as aggregate'))
                 ->groupBy('country_code')
                 ->orderByDesc('aggregate')
                 ->get()
-                ->map(fn (object $row): array => ['country_code' => $row->country_code, 'count' => (int) $row->aggregate]),
+                ->map(fn (object $row): array => ['country_code' => $row->country_code, 'count' => (int) $row->aggregate])
+                ->values()
+                ->all(),
             'critical_events' => (clone $query)
                 ->where('is_critical', 1)
                 ->orderByDesc('occurred_at')
                 ->limit(8)
                 ->get()
-                ->map(fn (object $event): array => $this->serializeEvent($event)),
+                ->map(fn (object $event): array => $this->serializeEvent($event))
+                ->values()
+                ->all(),
             'recent_changes' => (clone $query)
                 ->where('source', 'admin')
                 ->orderByDesc('occurred_at')
                 ->limit(8)
                 ->get()
-                ->map(fn (object $event): array => $this->serializeEvent($event)),
+                ->map(fn (object $event): array => $this->serializeEvent($event))
+                ->values()
+                ->all(),
             'generated_at' => now()->toIso8601String(),
         ];
     }
