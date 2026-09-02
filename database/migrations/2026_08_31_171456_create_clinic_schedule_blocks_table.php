@@ -11,9 +11,34 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('clinic_schedule_blocks', function (Blueprint $table) {
+         Schema::create('clinic_schedule_blocks', function (Blueprint $table): void {
             $table->id();
+
+            $table->foreignId('clinic_id')
+                ->constrained()
+                ->cascadeOnDelete();
+
+            $table->foreignId('doctor_user_id')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
+            $table->foreignId('created_by_user_id')
+                ->constrained('users')
+                ->restrictOnDelete();
+
+            $table->timestamp('starts_at');
+            $table->timestamp('ends_at');
+
+            $table->string('reason', 500)->nullable();
+
             $table->timestamps();
+
+            $table->index([
+                'clinic_id',
+                'starts_at',
+                'ends_at',
+            ]);
         });
     }
 
@@ -25,3 +50,4 @@ return new class extends Migration
         Schema::dropIfExists('clinic_schedule_blocks');
     }
 };
+
