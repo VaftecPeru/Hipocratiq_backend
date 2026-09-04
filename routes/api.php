@@ -170,6 +170,9 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/clinic/members', [ClinicDashboardController::class, 'storeMember'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.store');
+        Route::post('/clinic/members/doctors',[ClinicDashboardController::class, 'storeDoctor'])
+            ->middleware(['actor.context:clinic_admin,receptionist','clinic.access','can:clinic.members.manage'])
+            ->name('clinic.members.doctors.store');
         Route::get('/clinic/patients', [ClinicDashboardController::class, 'patients'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.patients.index');
@@ -181,7 +184,13 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
             ->name('clinic.appointments.index');
         Route::post('/clinic/appointments', [ClinicDashboardController::class, 'storeAppointment'])
             ->middleware(['actor.context:clinic_admin,receptionist','clinic.access','can:clinic.appointments.manage'])
-    ->name('clinic.appointments.store');
+            ->name('clinic.appointments.store');
+        Route::patch('/clinic/appointments/{appointment}',[ClinicDashboardController::class, 'updateAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist','clinic.access','can:clinic.appointments.manage'])
+            ->name('clinic.appointments.update');
+        Route::delete('/clinic/appointments/{appointment}',[ClinicDashboardController::class, 'destroyAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist','clinic.access','can:clinic.appointments.manage'])
+            ->name('clinic.appointments.destroy');
         Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');
@@ -194,6 +203,9 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/clinic/schedule-blocks', [ClinicDashboardController::class, 'storeScheduleBlock'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.schedule-blocks.store');
+        Route::delete('/clinic/schedule-blocks/{scheduleBlock}',[ClinicDashboardController::class, 'destroyScheduleBlock'])
+            ->middleware(['actor.context:clinic_admin,receptionist','clinic.access','can:clinic.appointments.manage'])
+            ->name('clinic.schedule-blocks.destroy');
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');

@@ -8,6 +8,7 @@ use App\Models\Clinic;
 use App\Models\ClinicScheduleBlock;
 use App\Models\DoctorProfile;
 use App\Models\User;
+use App\Models\Appointment;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -32,6 +33,26 @@ final class CreateClinicScheduleBlock
             throw ValidationException::withMessages([
                 'doctor_user_id' => [
                     'El médico seleccionado no pertenece a esta clínica.',
+                ],
+            ]);
+        }
+
+        $appointmentQuery = Appointment::query()
+            ->where('clinic_id', $clinic->id)
+            ->where('scheduled_at', '>=', $data['starts_at'])
+            ->where('scheduled_at', '<', $data['ends_at']);
+
+        if ($doctorUserId !== null) {
+            $appointmentQuery->where(
+                'doctor_user_id',
+                $doctorUserId
+            );
+        }
+
+        if ($appointmentQuery->exists()) {
+            throw ValidationException::withMessages([
+                'starts_at' => [
+                    'No se puede bloquear este horario porque ya existen citas programadas en ese periodo.',
                 ],
             ]);
         }

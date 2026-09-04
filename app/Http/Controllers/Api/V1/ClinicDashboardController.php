@@ -223,6 +223,83 @@ class ClinicDashboardController extends Controller
         ], 201);
     }
     
+    public function updateAppointment(Request $request,int $appointment,): JsonResponse 
+    {
+        $clinic = $this->clinic($request);
+        $appointmentModel = $clinic
+            ->appointments()
+            ->whereKey($appointment)
+            ->firstOrFail();
+
+        $validated = $request->validate(['doctor_user_id' => ['sometimes','nullable','integer','exists:users,id',],
+            'scheduled_at' => ['sometimes','required','date'],
+
+            'appointment_type' => ['sometimes','required','string','in:consultation,control'],
+
+            'notes' => ['sometimes','nullable','string','max:1000'],
+        ]);
+
+        $doctorUserId = array_key_exists('doctor_user_id',$validated) ? $validated['doctor_user_id']: $appointmentModel->doctor_user_id;
+        $scheduledAt = array_key_exists('scheduled_at',$validated) ? $validated['scheduled_at'] : $appointmentModel->scheduled_at;
+
+        $blocked = ClinicScheduleBlock::query()
+            ->where('clinic_id', $clinic->id)
+            ->where('starts_at', '<=', $scheduledAt)
+            ->where('ends_at', '>', $scheduledAt)
+            ->where(function ($query) use ($doctorUserId): void {
+            $query->whereNull('doctor_user_id');
+
+                if ($doctorUserId !== null) {
+                    $query->orWhere('doctor_user_id', $doctorUserId );
+                }
+            })
+            ->exists();
+
+        if ($blocked) {
+            throw ValidationException::withMessages(['scheduled_at' => ['No puedes mover la cita a un horario bloqueado.']]);
+        }
+
+        if (array_key_exists('doctor_user_id', $validated)) {
+            $appointmentModel->doctor_user_id =$validated['doctor_user_id'];
+        }
+
+        if (array_key_exists('scheduled_at', $validated)) {
+            $appointmentModel->scheduled_at =$validated['scheduled_at'];
+        }
+
+        if (array_key_exists('appointment_type', $validated)) {
+            $appointmentModel->appointment_type =$validated['appointment_type'];
+        }
+
+        if (array_key_exists('notes', $validated)) {
+            $appointmentModel->notes =$validated['notes'];
+        }
+
+        $appointmentModel->save();
+        $appointmentModel->load(['patientProfile.user:id,name,email,phone_number','doctor:id,name','doctor.doctorProfile:id,user_id,specialty']);
+
+        return response()->json(['success' => true,'message' => 'Cita actualizada correctamente.','data' => $this->serializeAppointment($appointmentModel),]);
+    }
+    
+    public function destroyAppointment(
+        Request $request,
+        int $appointment,
+    ): JsonResponse {   
+        $clinic = $this->clinic($request);
+
+        $appointmentModel = $clinic
+            ->appointments()
+            ->whereKey($appointment)
+            ->firstOrFail();
+
+        $appointmentModel->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cita eliminada correctamente.',
+        ]);
+    }
+
     public function settings(Request $request): JsonResponse
     {
         return response()->json([
@@ -259,60 +336,71 @@ class ClinicDashboardController extends Controller
         ]);
     }
 
-    public function scheduleBlocks(Request $request): JsonResponse
-{
-    $validated = $request->validate([
-        'from' => ['nullable', 'date'],
-        'to' => ['nullable', 'date'],
-    ]);
-
-    $from = isset($validated['from'])
-        ? Carbon::parse($validated['from'])->startOfDay()
-        : now()->startOfWeek(Carbon::MONDAY);
-
-    $to = isset($validated['to'])
-        ? Carbon::parse($validated['to'])->endOfDay()
-        : $from->copy()->addDays(6)->endOfDay();
-
-    $blocks = ClinicScheduleBlock::query()
-        ->where('clinic_id', $this->clinic($request)->id)
-        ->where('starts_at', '<=', $to)
-        ->where('ends_at', '>=', $from)
-        ->with([
-            'doctor:id,name',
-            'creator:id,name',
-        ])
-        ->orderBy('starts_at')
-        ->get();
-
-    return response()->json([
-        'success' => true,
-        'data' => $blocks->map(
-            fn (ClinicScheduleBlock $block): array =>
-                $this->serializeScheduleBlock($block)
-        )->values(),
-    ]);
-}
-public function storeScheduleBlock(
-    ClinicScheduleBlockStoreRequest $request,
-    CreateClinicScheduleBlock $createScheduleBlock,
-): JsonResponse {
-    $block = $createScheduleBlock
-        ->handle(
-            $request->validated(),
-            $this->clinic($request),
-            $request->user(),
-        )
-        ->load([
-            'doctor:id,name',
-            'creator:id,name',
+    public function scheduleBlocks(Request $request): JsonResponse{
+        $validated = $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
         ]);
 
-    return response()->json([
-        'success' => true,
-        'data' => $this->serializeScheduleBlock($block),
-    ], 201);
-}
+        $from = isset($validated['from'])
+            ? Carbon::parse($validated['from'])->startOfDay()
+            : now()->startOfWeek(Carbon::MONDAY);
+
+        $to = isset($validated['to'])
+            ? Carbon::parse($validated['to'])->endOfDay()
+            : $from->copy()->addDays(6)->endOfDay();
+
+        $blocks = ClinicScheduleBlock::query()
+            ->where('clinic_id', $this->clinic($request)->id)
+            ->where('starts_at', '<=', $to)
+            ->where('ends_at', '>=', $from)
+            ->with([
+                'doctor:id,name',
+                'creator:id,name',
+            ])
+            ->orderBy('starts_at')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $blocks->map(
+                fn (ClinicScheduleBlock $block): array =>$this->serializeScheduleBlock($block)
+            )->values(),
+        ]);
+    }
+
+    public function storeScheduleBlock(ClinicScheduleBlockStoreRequest $request, CreateClinicScheduleBlock $createScheduleBlock): JsonResponse {
+        $block = $createScheduleBlock
+            ->handle(
+                $request->validated(),
+                $this->clinic($request),
+                $request->user(),
+            )
+            ->load([
+                'doctor:id,name',
+                'creator:id,name',
+            ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->serializeScheduleBlock($block),
+        ], 201);
+    }
+    public function destroyScheduleBlock(Request $request,int $scheduleBlock,): JsonResponse {
+        $clinic = $this->clinic($request);
+
+        $block = ClinicScheduleBlock::query()
+            ->where('clinic_id', $clinic->id)
+            ->whereKey($scheduleBlock)
+            ->firstOrFail();
+
+        $block->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Horario desbloqueado correctamente.',
+        ]);
+    }
 
     private function clinic(Request $request): Clinic
     {
