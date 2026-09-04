@@ -99,12 +99,17 @@ class OtpAuthenticationTest extends TestCase
             'device_id' => 'installation-uuid-1',
         ]);
 
-        $request->assertAccepted();
+        $request
+            ->assertAccepted()
+            ->assertJsonPath('data.resends_remaining', config('authentication.otp.max_resends'));
 
         $verification = $this->postJson('/api/v1/auth/otp/verify', [
             'purpose' => 'login',
             'challenge_id' => $request->json('data.challenge_id'),
             'code' => '123456',
+            'client_type' => 'mobile',
+            'device_name' => 'Pixel 10',
+            'device_id' => 'installation-uuid-1',
         ]);
 
         $verification
@@ -113,12 +118,12 @@ class OtpAuthenticationTest extends TestCase
             ->assertJsonPath('data.user.id', $user->id);
 
         $token = $verification->json('data.access_token');
-        $this->withToken($token)->getJson('/api/v1/auth/me')
+        $this->withMobileToken($token, 'Pixel 10', 'installation-uuid-1')->getJson('/api/v1/auth/me')
             ->assertOk()
             ->assertJsonPath('data.client_type', 'mobile')
             ->assertJsonPath('data.actor_context', 'patient');
 
-        $this->withToken($token)->postJson('/api/v1/auth/session/renew')
+        $this->withMobileToken($token, 'Pixel 10', 'installation-uuid-1')->postJson('/api/v1/auth/session/renew')
             ->assertBadRequest()
             ->assertJsonPath('code', 'WEB_SESSION_REQUIRED');
 
@@ -133,7 +138,7 @@ class OtpAuthenticationTest extends TestCase
         ]);
         ClinicSubscription::factory()->create(['clinic_id' => $this->clinic->id]);
 
-        $this->withToken($token)->getJson('/api/v1/auth/clinic/dashboard')
+        $this->withMobileToken($token, 'Pixel 10', 'installation-uuid-1')->getJson('/api/v1/auth/clinic/dashboard')
             ->assertForbidden()
             ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
 
@@ -145,7 +150,7 @@ class OtpAuthenticationTest extends TestCase
             ->assertJsonPath('code', 'ACTOR_CONTEXT_FORBIDDEN');
         $user->tokens()->where('name', 'legacy-privileged')->delete();
 
-        $this->withToken($token)->postJson('/api/v1/auth/logout')->assertNoContent();
+        $this->withMobileToken($token, 'Pixel 10', 'installation-uuid-1')->postJson('/api/v1/auth/logout')->assertNoContent();
         $this->assertDatabaseCount('personal_access_tokens', 0);
         $this->withToken($token)->getJson('/api/v1/auth/me')->assertUnauthorized();
     }
@@ -270,6 +275,7 @@ class OtpAuthenticationTest extends TestCase
             'identifier' => 'mobile-staff@example.com',
             'actor_context' => 'staff',
             'client_type' => 'mobile',
+            'requested_role' => RoleKey::ClinicAdmin->value,
             'password' => 'SecurePass123',
             'device_name' => 'Pixel 10',
             'device_id' => 'installation-staff-1',
@@ -281,6 +287,9 @@ class OtpAuthenticationTest extends TestCase
             'purpose' => 'login',
             'challenge_id' => $request->json('data.challenge_id'),
             'code' => '123456',
+            'client_type' => 'mobile',
+            'device_name' => 'Pixel 10',
+            'device_id' => 'installation-staff-1',
         ]);
 
         $verification
@@ -289,7 +298,7 @@ class OtpAuthenticationTest extends TestCase
             ->assertJsonPath('data.user.id', $user->id)
             ->assertJsonPath('data.actor_context', 'clinic_admin');
 
-        $this->withToken($verification->json('data.access_token'))
+        $this->withMobileToken($verification->json('data.access_token'), 'Pixel 10', 'installation-staff-1')
             ->getJson('/api/v1/auth/me')
             ->assertOk()
             ->assertJsonPath('data.client_type', 'mobile')
@@ -402,6 +411,27 @@ class OtpAuthenticationTest extends TestCase
         $this->assertTrue(Hash::check('NewPassword2!', User::query()->where('email', 'clinicuser@example.com')->sole()->password));
     }
 
+    public function test_super_admin_cannot_start_password_reset_from_mobile(): void
+    {
+        User::factory()->superAdmin()->create([
+            'email' => 'superadmin@example.com',
+            'phone_number' => '+51900334455',
+            'country_code' => 'PE',
+            'password' => 'OldPassword2!',
+        ]);
+
+        $this->postJson('/api/v1/auth/otp/request', [
+            'purpose' => 'password_reset',
+            'identifier' => 'superadmin@example.com',
+            'client_type' => 'mobile',
+            'actor_context' => 'staff',
+            'device_name' => 'Pixel 10',
+            'device_id' => 'mobile-device-0001',
+        ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+    }
+
     public function test_twilio_sender_uses_messaging_service_without_exposing_credentials(): void
     {
         config()->set('sms.twilio', [
@@ -459,6 +489,15 @@ class OtpAuthenticationTest extends TestCase
     private function withSpaOrigin(): static
     {
         return $this->withCredentials()->withHeader('Origin', 'http://localhost:3000');
+    }
+
+    private function withMobileToken(string $token, string $deviceName, string $deviceId): static
+    {
+        return $this->withToken($token)->withHeaders([
+            'X-Client-Type' => 'mobile',
+            'X-Device-Name' => $deviceName,
+            'X-Device-ID' => $deviceId,
+        ]);
     }
 
     /** @return array<string, array{string, string, string, string}> */

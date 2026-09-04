@@ -19,4 +19,7 @@ return [
     'mobile_token' => [
         'ttl_minutes' => (int) env('AUTH_MOBILE_TOKEN_MINUTES', 43200),
     ],
+    'invitation' => [
+        'ttl_minutes' => (int) env('AUTH_INVITATION_TTL_MINUTES', 1440),
+    ],
 ];

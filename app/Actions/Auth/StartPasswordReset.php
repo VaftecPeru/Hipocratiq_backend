@@ -5,6 +5,7 @@ namespace App\Actions\Auth;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
 use App\Enums\OtpPurpose;
+use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
 use App\Models\User;
@@ -21,6 +22,7 @@ final class StartPasswordReset
     public function handle(array $data): OtpChallenge
     {
         $identifier = (string) $data['identifier'];
+        $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
         $user = str_contains($identifier, '@')
             ? User::query()->where('email', strtolower($identifier))->first()
             : User::query()->where('phone_number', PhoneNumber::fromE164($identifier)->value)->first();
@@ -30,6 +32,7 @@ final class StartPasswordReset
             || $user->password === null
             || $user->phone_verified_at === null
             || $user->status !== UserStatus::Active
+            || ($client === AuthenticationClient::Mobile && ($user?->hasRole(RoleKey::SuperAdmin) ?? false))
         ) {
             $this->recordEvent->handle($user, 'password_reset_failed', 'failure');
 
@@ -41,7 +44,7 @@ final class StartPasswordReset
         return $this->issueOtpChallenge->handle(
             $user,
             OtpPurpose::PasswordReset,
-            AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value),
+            $client,
             AuthenticationContext::Staff,
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,

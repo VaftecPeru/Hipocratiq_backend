@@ -124,7 +124,7 @@ class DoctorIndependentPracticeTest extends TestCase
     public function test_independent_doctor_can_create_update_list_and_cancel_appointment(): void
     {
         $patient = $this->ownedPatient('+525510000406');
-        $scheduledAt = now()->addDay()->setTime(10, 0);
+        $scheduledAt = now()->nextWeekday()->setTime(10, 0);
 
         $response = $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/appointments', [
             'patient_profile_id' => $patient->id,
@@ -143,13 +143,13 @@ class DoctorIndependentPracticeTest extends TestCase
         ]);
 
         $this->withSpaOrigin()
-            ->getJson('/api/v1/auth/doctor/appointments?from='.now()->toDateString().'&to='.now()->addDays(2)->toDateString())
+            ->getJson('/api/v1/auth/doctor/appointments?from='.$scheduledAt->toDateString().'&to='.$scheduledAt->copy()->addDay()->toDateString())
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $appointmentId)
             ->assertJsonPath('meta.summary.pending', 1);
 
-        $updatedAt = now()->addDays(2)->setTime(11, 30);
+        $updatedAt = $scheduledAt->copy()->addWeek()->setTime(11, 30);
         $this->withSpaOrigin()
             ->patchJson("/api/v1/auth/doctor/appointments/{$appointmentId}", [
                 'scheduled_at' => $updatedAt->toIso8601String(),

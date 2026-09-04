@@ -19,8 +19,10 @@ use App\Http\Controllers\Api\V1\Auth\LoginController;
 use App\Http\Controllers\Api\V1\Auth\OtpAuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
+use App\Http\Controllers\Api\V1\Auth\ReceptionistActivationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\ClinicDashboardController;
+use App\Http\Controllers\Api\V1\ClinicReceptionistInvitationController;
 use App\Http\Controllers\Api\V1\DoctorAppointmentController;
 use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
@@ -132,6 +134,12 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
     Route::post('/otp/resend', [OtpController::class, 'store'])
         ->middleware('throttle:auth-otp')
         ->name('otp.resend');
+    Route::post('/receptionist/activation/request', [ReceptionistActivationController::class, 'request'])
+        ->middleware('throttle:auth-otp-request')
+        ->name('receptionist.activation.request');
+    Route::post('/receptionist/activation/verify', [ReceptionistActivationController::class, 'verify'])
+        ->middleware('throttle:auth-otp')
+        ->name('receptionist.activation.verify');
     Route::get('/platform-settings', [AdminPlatformSettingsController::class, 'publicShow'])
         ->name('platform-settings.show');
 
@@ -210,6 +218,9 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/clinic/members', [ClinicDashboardController::class, 'storeMember'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.store');
+        Route::post('/clinic/receptionist-invitations', [ClinicReceptionistInvitationController::class, 'store'])
+            ->middleware(['actor.context:clinic_admin', 'clinic.access', 'can:clinic.members.manage'])
+            ->name('clinic.receptionist-invitations.store');
         Route::post('/clinic/members/doctors', [ClinicDashboardController::class, 'storeDoctor'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.doctors.store');

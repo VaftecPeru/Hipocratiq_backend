@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
 use App\Models\Clinic;
+use App\Models\PersonalAccessToken;
 use App\Models\Plan;
 use App\Models\Role;
 use App\Models\User;
@@ -107,6 +108,46 @@ class ClinicRegistrationTest extends TestCase
             ->assertOk();
     }
 
+    public function test_clinic_can_register_on_mobile_with_a_device_bound_draft(): void
+    {
+        $deviceName = 'Clinic phone';
+        $deviceId = 'clinic-device-0001';
+        $draft = $this->postJson('/api/v1/auth/register/clinic/draft', $this->payload() + [
+            'client_type' => 'mobile',
+            'device_name' => $deviceName,
+            'device_id' => $deviceId,
+        ]);
+
+        $draft
+            ->assertCreated()
+            ->assertJsonPath('data.next_step', 'select_plan')
+            ->assertJsonStructure(['data' => ['draft_token']]);
+        $draftToken = $draft->json('data.draft_token');
+
+        $plan = $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/clinic/plan', [
+                'plan' => 'basic',
+                'billing_cycle' => 'annual',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.next_step', 'verify_otp');
+
+        $verification = $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/clinic/verify-otp', [
+                'challenge_id' => $plan->json('data.challenge_id'),
+                'code' => '123456',
+            ])
+            ->assertOk();
+
+        $verification
+            ->assertJsonPath('data.actor_context', 'clinic_admin')
+            ->assertJsonPath('data.next_step', 'success');
+        $token = PersonalAccessToken::query()->where('tokenable_id', User::query()->sole()->id)->sole();
+        $this->assertSame('mobile', $token->client_type->value);
+        $this->assertSame('clinic_admin', $token->actor_context->value);
+        $this->assertSame(hash('sha256', $deviceId), $token->device_id_hash);
+    }
+
     public function test_clinic_admin_cannot_bypass_password_using_patient_context(): void
     {
         $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/draft', $this->payload());
@@ -130,6 +171,7 @@ class ClinicRegistrationTest extends TestCase
             'identifier' => 'ana@clinica.test',
             'actor_context' => 'patient',
             'client_type' => 'mobile',
+            'requested_role' => 'clinic_admin',
             'device_name' => 'Untrusted device',
             'device_id' => 'untrusted-installation',
         ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
@@ -278,5 +320,16 @@ class ClinicRegistrationTest extends TestCase
     private function withSpaOrigin(): static
     {
         return $this->withCredentials()->withHeader('Origin', 'http://localhost:3000');
+    }
+
+    /** @return array<string, string> */
+    private function mobileDraftHeaders(string $draftToken, string $deviceName, string $deviceId): array
+    {
+        return [
+            'X-Client-Type' => 'mobile',
+            'X-Device-Name' => $deviceName,
+            'X-Device-ID' => $deviceId,
+            'X-Registration-Token' => $draftToken,
+        ];
     }
 }
