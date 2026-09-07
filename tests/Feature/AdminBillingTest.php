@@ -40,11 +40,75 @@ class AdminBillingTest extends TestCase
         $this->withSpaOrigin()->get('/api/v1/auth/admin/billing/export')
             ->assertOk()
             ->assertHeader('content-type', 'text/csv; charset=UTF-8');
-        $this->withSpaOrigin()->get('/api/v1/auth/admin/reports/export')
+        $reportResponse = $this->withSpaOrigin()->get('/api/v1/auth/admin/reports/export')
             ->assertOk()
-            ->assertHeader('content-type', 'text/csv; charset=UTF-8');
+            ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $this->assertStringContainsString('.xlsx', (string) $reportResponse->headers->get('content-disposition'));
+        $this->assertStringStartsWith('PK', $reportResponse->streamedContent());
+
+        $temporaryFile = tempnam(sys_get_temp_dir(), 'hipocratiq-report-');
+        $this->assertNotFalse($temporaryFile);
+        file_put_contents($temporaryFile, $reportResponse->streamedContent());
+        $archive = new \ZipArchive;
+        try {
+            $this->assertTrue($archive->open($temporaryFile) === true);
+            $sheetXml = $archive->getFromName('xl/worksheets/sheet1.xml');
+            $sharedStringsXml = $archive->getFromName('xl/sharedStrings.xml');
+            $this->assertIsString($sheetXml);
+            $this->assertIsString($sharedStringsXml);
+            $this->assertStringContainsString('<autoFilter', $sheetXml);
+            $this->assertStringContainsString('state="frozen"', $sheetXml);
+            $this->assertStringContainsString('Reporte ejecutivo global', $sharedStringsXml);
+            $this->assertStringContainsString('Cobertura por país', $sharedStringsXml);
+        } finally {
+            $archive->close();
+            unlink($temporaryFile);
+        }
         $this->assertDatabaseHas('admin_audit_events', ['module' => 'billing', 'action' => 'billing_exported']);
         $this->assertDatabaseHas('admin_audit_events', ['module' => 'reports', 'action' => 'executive_report_exported']);
+    }
+
+    public function test_super_admin_can_export_billing_as_a_real_xlsx_file(): void
+    {
+        $this->authenticateAdmin();
+        SubscriptionPayment::factory()->create();
+
+        $response = $this->withSpaOrigin()->get('/api/v1/auth/admin/billing/export?format=xlsx')
+            ->assertOk()
+            ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+        $this->assertStringContainsString('.xlsx', (string) $response->headers->get('content-disposition'));
+        $this->assertStringStartsWith('PK', $response->streamedContent());
+
+        $temporaryFile = tempnam(sys_get_temp_dir(), 'hipocratiq-billing-');
+        $this->assertNotFalse($temporaryFile);
+        file_put_contents($temporaryFile, $response->streamedContent());
+        $archive = new \ZipArchive;
+        try {
+            $this->assertTrue($archive->open($temporaryFile) === true);
+            $sheetXml = $archive->getFromName('xl/worksheets/sheet1.xml');
+            $this->assertIsString($sheetXml);
+            $this->assertStringContainsString('<autoFilter', $sheetXml);
+        } finally {
+            $archive->close();
+            unlink($temporaryFile);
+        }
+    }
+
+    public function test_revenue_summary_keeps_currency_totals_and_months_separate(): void
+    {
+        $this->authenticateAdmin();
+        $subscription = ClinicSubscription::factory()->create();
+        SubscriptionPayment::factory()->create(['clinic_subscription_id' => $subscription->id, 'currency' => 'USD', 'amount_cents' => 1000, 'paid_at' => now()]);
+        SubscriptionPayment::factory()->create(['clinic_subscription_id' => $subscription->id, 'currency' => 'MXN', 'amount_cents' => 2000, 'paid_at' => now()]);
+        SubscriptionPayment::factory()->create(['clinic_subscription_id' => $subscription->id, 'currency' => 'PEN', 'amount_cents' => 3000, 'paid_at' => now()->startOfMonth()->subSecond()]);
+
+        $this->withSpaOrigin()->getJson('/api/v1/auth/admin/billing')
+            ->assertOk()
+            ->assertJsonPath('summary.by_currency.USD.monthly_revenue_cents', 1000)
+            ->assertJsonPath('summary.by_currency.MXN.monthly_revenue_cents', 2000)
+            ->assertJsonPath('summary.by_currency.PEN.monthly_revenue_cents', 0)
+            ->assertJsonPath('summary.by_currency.PEN.previous_month_revenue_cents', 3000);
     }
 
     public function test_super_admin_can_record_a_manual_payment_for_a_manual_subscription(): void

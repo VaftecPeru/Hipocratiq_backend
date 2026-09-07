@@ -102,6 +102,10 @@ class AdminMembershipIndexTest extends TestCase
     public function test_mrr_arr_and_renewal_rate_are_computed_from_active_subscriptions(): void
     {
         $this->seedPlans();
+        config([
+            'memberships.exchange_rate_usd_to_pen' => 4.05,
+            'memberships.exchange_rates_usd.PEN' => 4.05,
+        ]);
 
         $clinic = Clinic::factory()->create(['country_code' => 'PE']);
 
@@ -129,7 +133,8 @@ class AdminMembershipIndexTest extends TestCase
             ->assertJsonPath('data.kpis.mrr.usd_cents', $expectedMrr)
             ->assertJsonPath('data.kpis.arr.usd_cents', $expectedMrr * 12)
             ->assertJsonPath('data.kpis.renewal_rate.percentage', 100)
-            ->assertJsonPath('data.conversion_rate', 3.77);
+            ->assertJsonPath('data.conversion_rate', 4.05)
+            ->assertJsonPath('data.currency_rates.PEN', 4.05);
     }
 
     public function test_upcoming_renewals_only_include_renewals_in_window(): void

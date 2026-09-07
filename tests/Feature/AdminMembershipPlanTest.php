@@ -49,6 +49,24 @@ class AdminMembershipPlanTest extends TestCase
         $this->assertDatabaseHas('plans', ['key' => 'startup', 'monthly_price_cents' => 4999]);
     }
 
+    public function test_super_admin_can_create_a_plan_in_a_supported_currency(): void
+    {
+        $this->authenticateAdmin();
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/admin/memberships/plans', [
+                'key' => 'mexico',
+                'name' => 'México',
+                'monthly_price_usd' => 1499,
+                'annual_price_usd' => 14990,
+                'currency' => 'MXN',
+                'features' => ['facturación'],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.currency', 'MXN')
+            ->assertJsonPath('data.monthly_price_cents', 149900);
+    }
+
     public function test_plan_creation_validates_key_format_and_prices(): void
     {
         $this->authenticateAdmin();

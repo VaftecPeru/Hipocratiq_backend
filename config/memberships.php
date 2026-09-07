@@ -14,6 +14,8 @@ return [
 
     'currency' => env('MEMBERSHIPS_CURRENCY', 'USD'),
 
+    'supported_currencies' => ['USD', 'MXN', 'PEN'],
+
     /*
     |--------------------------------------------------------------------------
     | Tasa de conversión USD → PEN
@@ -24,7 +26,13 @@ return [
     |
     */
 
-    'exchange_rate_usd_to_pen' => (float) env('MEMBERSHIPS_EXCHANGE_RATE_USD_PEN', 3.77),
+    'exchange_rate_usd_to_pen' => env('MEMBERSHIPS_EXCHANGE_RATE_USD_PEN'),
+
+    'exchange_rates_usd' => [
+        'USD' => 1.0,
+        'MXN' => env('MEMBERSHIPS_EXCHANGE_RATE_USD_MXN'),
+        'PEN' => env('MEMBERSHIPS_EXCHANGE_RATE_USD_PEN'),
+    ],
 
     /*
     |--------------------------------------------------------------------------
