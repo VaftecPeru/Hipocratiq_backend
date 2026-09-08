@@ -17,7 +17,7 @@ class AdminEmergencyPublishRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'scope' => ['required', Rule::in(['all', 'MX', 'PE', 'US'])],
+            'scope' => ['sometimes', Rule::in(['all'])],
             'force' => ['sometimes', 'boolean'],
             'note' => ['nullable', 'string', 'max:500'],
         ];

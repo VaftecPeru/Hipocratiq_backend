@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Clinic;
+use App\Models\ClinicSubscription;
 use App\Models\PatientProfile;
+use App\Models\SubscriptionPayment;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -67,6 +69,31 @@ class AdminClinicIndexTest extends TestCase
             ->getJson('/api/v1/auth/admin/clinics?per_page=101')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('per_page');
+    }
+
+    public function test_clinic_summary_keeps_revenue_metrics_separate_by_currency(): void
+    {
+        $this->authenticateAdmin();
+        $subscription = ClinicSubscription::factory()->create();
+        SubscriptionPayment::factory()->create([
+            'clinic_subscription_id' => $subscription->id,
+            'currency' => 'USD',
+            'amount_cents' => 1000,
+            'paid_at' => now(),
+        ]);
+        SubscriptionPayment::factory()->create([
+            'clinic_subscription_id' => $subscription->id,
+            'currency' => 'MXN',
+            'amount_cents' => 2000,
+            'paid_at' => now(),
+        ]);
+
+        $this->withSpaOrigin()->getJson('/api/v1/auth/admin/clinics')
+            ->assertOk()
+            ->assertJsonPath('summary.revenue_currency', 'USD')
+            ->assertJsonPath('summary.totals.monthly_revenue', 10)
+            ->assertJsonPath('summary.totals.monthly_revenue_cents_by_currency.USD', 1000)
+            ->assertJsonPath('summary.totals.monthly_revenue_cents_by_currency.MXN', 2000);
     }
 
     private function authenticateAdmin(): void

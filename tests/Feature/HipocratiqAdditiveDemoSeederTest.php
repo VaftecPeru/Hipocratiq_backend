@@ -16,7 +16,20 @@ class HipocratiqAdditiveDemoSeederTest extends TestCase
         $this->seed(HipocratiqAdditiveDemoSeeder::class);
         $this->seed(HipocratiqAdditiveDemoSeeder::class);
 
-        $demoUsers = DB::table('users')->where('email', 'like', 'demo.additive.%@hipocratiq.test');
+        $demoEmails = [
+            'super@test.local',
+            'clinic@test.local',
+            'recep@test.local',
+            'doctor@test.local',
+            'inddoc@test.local',
+            'pat1@test.local',
+            'pat2@test.local',
+            'pat3@test.local',
+            'pat4@test.local',
+            'pat5@test.local',
+            'indpat@test.local',
+        ];
+        $demoUsers = DB::table('users')->whereIn('email', $demoEmails);
         $demoAppointments = DB::table('appointments')->where('notes', 'like', 'hipocratiq-additive-demo:%');
 
         $this->assertSame(4, DB::table('roles')->whereIn('key', [
@@ -37,7 +50,7 @@ class HipocratiqAdditiveDemoSeederTest extends TestCase
         $this->assertSame(1, DB::table('clinics')->where('tax_id', 'DEMO-HIPOCRATIQ-ADDITIVE-001')->count());
         $this->assertSame(11, $demoUsers->count());
         $this->assertSame(11, DB::table('users')
-            ->where('email', 'like', 'demo.additive.%@hipocratiq.test')
+            ->whereIn('email', $demoEmails)
             ->distinct()
             ->count('email'));
         $this->assertSame(1, DB::table('clinic_subscriptions')->where('provider_reference', 'demo-additive-clinic-subscription-001')->count());

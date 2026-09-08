@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\AdminInfrastructureController;
 use App\Http\Controllers\Api\V1\AdminMembershipController;
 use App\Http\Controllers\Api\V1\AdminNotificationController;
 use App\Http\Controllers\Api\V1\AdminPlatformSettingsController;
+use App\Http\Controllers\Api\V1\AdminSpecialtyController;
 use App\Http\Controllers\Api\V1\AdminSupportTicketController;
 use App\Http\Controllers\Api\V1\AdminSystemIncidentController;
 use App\Http\Controllers\Api\V1\AdminUserController;
@@ -323,6 +324,15 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/admin/clinics/{clinic}', [AdminClinicController::class, 'update'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.update');
+        Route::get('/admin/specialties', [AdminSpecialtyController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.specialties.index');
+        Route::post('/admin/specialties', [AdminSpecialtyController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.specialties.store');
+        Route::patch('/admin/specialties/{specialty}', [AdminSpecialtyController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.specialties.update');
         Route::get('/admin/audit-events', [AdminAuditController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.audit-events.index');

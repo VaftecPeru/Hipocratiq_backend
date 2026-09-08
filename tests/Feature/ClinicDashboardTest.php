@@ -99,6 +99,46 @@ class ClinicDashboardTest extends TestCase
             ->assertJsonPath('data.name', 'Paciente del Administrador');
     }
 
+    public function test_clinic_admin_can_update_local_emergency_policy_and_receive_effective_state(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000033',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0033');
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/settings')
+            ->assertOk()
+            ->assertJsonPath('data.clinic.emergency.is_overridden', false)
+            ->assertJsonPath('data.clinic.emergency.effective.enabled', true);
+
+        $this->withSpaOrigin()
+            ->patchJson('/api/v1/auth/clinic/settings', [
+                'preferences' => [
+                    'emergency' => [
+                        'enabled' => false,
+                        'visibility' => 'doctors_admins',
+                        'label' => 'Alerta clínica',
+                        'color' => '#F97316',
+                        'inheritance' => 'responsibles_only',
+                        'default_channel' => 'internal_alert',
+                        'escalation_minutes' => 5,
+                        'responsibles' => [['role' => 'Jefe local', 'channel' => 'Alerta interna']],
+                    ],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.clinic.preferences.emergency.label', 'Alerta clínica')
+            ->assertJsonPath('data.clinic.emergency.local.enabled', false)
+            ->assertJsonPath('data.clinic.emergency.effective.default_channel', 'internal_alert')
+            ->assertJsonPath('data.clinic.emergency.global_override', null);
+
+        self::assertSame('Alerta clínica', $clinic->fresh()->preferences['emergency']['label']);
+    }
+
     public function test_receptionist_can_access_clinic_dashboard_but_cannot_update_clinic_settings(): void
     {
         [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');

@@ -44,10 +44,9 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
     use WithoutModelEvents;
 
     /**
-     * Local-only fallback retained for compatibility with the existing demo
-     * login convention. Set DEMO_SEED_PASSWORD locally to override it.
+     * Shared only by synthetic staff accounts created for local testing.
      */
-    private const string PASSWORD = 'Hipocratiq2026!';
+    private const string PASSWORD = 'TestLocal#2026!';
 
     private const string CLINIC_SLUG = 'hipocratiq-additive-demo';
 
@@ -132,7 +131,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
         $superAdmin = $this->upsertUser([
             'name' => 'Demo Platform Administrator',
-            'email' => 'demo.additive.superadmin@hipocratiq.test',
+            'email' => 'super@test.local',
             'phone_number' => '+51990010001',
             'country_code' => 'PE',
         ], $password);
@@ -140,7 +139,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
         $clinicAdmin = $this->upsertUser([
             'name' => 'Demo Clinic Administrator',
-            'email' => 'demo.additive.clinic-admin@hipocratiq.test',
+            'email' => 'clinic@test.local',
             'phone_number' => '+51990010002',
             'country_code' => 'PE',
         ], $password);
@@ -149,7 +148,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
         $receptionist = $this->upsertUser([
             'name' => 'Demo Front Desk Coordinator',
-            'email' => 'demo.additive.receptionist@hipocratiq.test',
+            'email' => 'recep@test.local',
             'phone_number' => '+51990010003',
             'country_code' => 'PE',
         ], $password);
@@ -158,7 +157,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
         $clinicDoctor = $this->upsertUser([
             'name' => 'Demo Clinic Physician',
-            'email' => 'demo.additive.clinic-doctor@hipocratiq.test',
+            'email' => 'doctor@test.local',
             'phone_number' => '+51990010004',
             'country_code' => 'PE',
         ], $password);
@@ -179,7 +178,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
         $independentDoctor = $this->upsertUser([
             'name' => 'Demo Independent Physician',
-            'email' => 'demo.additive.independent-doctor@hipocratiq.test',
+            'email' => 'inddoc@test.local',
             'phone_number' => '+51990010005',
             'country_code' => 'PE',
         ], $password);
@@ -214,7 +213,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
             [
                 'key' => 'clinic-primary',
                 'name' => 'Demo Patient Primary',
-                'email' => 'demo.additive.patient-01@hipocratiq.test',
+                'email' => 'pat1@test.local',
                 'phone_number' => '+51990010006',
                 'date_of_birth' => '1987-04-12',
                 'sex' => 'Femenino',
@@ -228,7 +227,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
             [
                 'key' => 'clinic-follow-up',
                 'name' => 'Demo Patient Follow Up',
-                'email' => 'demo.additive.patient-02@hipocratiq.test',
+                'email' => 'pat2@test.local',
                 'phone_number' => '+51990010007',
                 'date_of_birth' => '1991-09-23',
                 'sex' => 'Masculino',
@@ -242,7 +241,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
             [
                 'key' => 'clinic-triage',
                 'name' => 'Demo Patient Triage',
-                'email' => 'demo.additive.patient-03@hipocratiq.test',
+                'email' => 'pat3@test.local',
                 'phone_number' => '+51990010008',
                 'date_of_birth' => '1979-01-30',
                 'sex' => 'Masculino',
@@ -256,7 +255,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
             [
                 'key' => 'clinic-preventive',
                 'name' => 'Demo Patient Preventive',
-                'email' => 'demo.additive.patient-04@hipocratiq.test',
+                'email' => 'pat4@test.local',
                 'phone_number' => '+51990010009',
                 'date_of_birth' => '1996-12-05',
                 'sex' => 'Femenino',
@@ -270,7 +269,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
             [
                 'key' => 'clinic-new',
                 'name' => 'Demo Patient New Intake',
-                'email' => 'demo.additive.patient-05@hipocratiq.test',
+                'email' => 'pat5@test.local',
                 'phone_number' => '+51990010010',
                 'date_of_birth' => '2000-06-18',
                 'sex' => 'Otro',
@@ -308,7 +307,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
         $independentPatientUser = $this->upsertUser([
             'name' => 'Demo Independent Patient',
-            'email' => 'demo.additive.independent-patient@hipocratiq.test',
+            'email' => 'indpat@test.local',
             'phone_number' => '+51990010011',
             'country_code' => 'PE',
         ], null);
@@ -489,9 +488,7 @@ class HipocratiqAdditiveDemoSeeder extends Seeder
 
     private function demoPassword(): string
     {
-        $configured = env('DEMO_SEED_PASSWORD');
-
-        return is_string($configured) && trim($configured) !== '' ? $configured : self::PASSWORD;
+        return self::PASSWORD;
     }
 
     private function upsertClinic(): Clinic

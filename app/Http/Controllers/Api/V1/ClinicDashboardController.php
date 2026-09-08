@@ -30,12 +30,14 @@ use App\Models\ClinicMembership;
 use App\Models\PatientIntake;
 use App\Models\PatientProfile;
 use App\Models\User;
+use App\Support\Clinical\EmergencyPolicyResolver;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ClinicDashboardController extends Controller
@@ -47,6 +49,8 @@ class ClinicDashboardController extends Controller
         'signatures' => true,
         'backups' => true,
     ];
+
+    public function __construct(private readonly EmergencyPolicyResolver $emergencyPolicies) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -416,37 +420,51 @@ class ClinicDashboardController extends Controller
         ClinicSettingsUpdateRequest $request,
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
-        $clinic = $this->clinic($request);
-        $validated = $request->validated();
-        $before = $clinic->only(['name', 'contact_phone', 'address']);
-        $before['preferences'] = $this->clinicPreferences($clinic);
+        $clinic = DB::transaction(function () use ($request, $audit): Clinic {
+            $clinic = $this->clinic($request);
+            $validated = $request->validated();
+            $before = $clinic->only(['name', 'contact_phone', 'address']);
+            $before['preferences'] = $this->clinicPreferences($clinic);
 
-        if (is_array($validated['preferences'] ?? null)) {
-            $validated['preferences'] = array_replace(
-                $before['preferences'],
-                $validated['preferences'],
-            );
-        }
+            if (is_array($validated['preferences'] ?? null)) {
+                $incomingPreferences = $validated['preferences'];
+                $storedPreferences = is_array($clinic->preferences) ? $clinic->preferences : [];
+                $validated['preferences'] = array_replace(
+                    self::DEFAULT_CLINIC_PREFERENCES,
+                    $storedPreferences,
+                    $incomingPreferences,
+                );
 
-        $clinic->fill($validated)->save();
+                if (is_array($incomingPreferences['emergency'] ?? null)) {
+                    $validated['preferences']['emergency'] = array_replace(
+                        $this->emergencyPolicies->localPolicy($clinic),
+                        $incomingPreferences['emergency'],
+                    );
+                }
+            }
 
-        $audit->handle(
-            $request->user(),
-            $request,
-            'clinic_settings',
-            'clinic_settings_updated',
-            Clinic::class,
-            $clinic->id,
-            $clinic->name,
-            clinic: $clinic,
-            metadata: [
-                'before' => $before,
-                'after' => [
-                    ...$clinic->only(['name', 'contact_phone', 'address']),
-                    'preferences' => $this->clinicPreferences($clinic),
+            $clinic->fill($validated)->save();
+
+            $audit->handle(
+                $request->user(),
+                $request,
+                'clinic_settings',
+                'clinic_settings_updated',
+                Clinic::class,
+                $clinic->id,
+                $clinic->name,
+                clinic: $clinic,
+                metadata: [
+                    'before' => $before,
+                    'after' => [
+                        ...$clinic->only(['name', 'contact_phone', 'address']),
+                        'preferences' => $this->clinicPreferences($clinic),
+                    ],
                 ],
-            ],
-        );
+            );
+
+            return $clinic;
+        });
 
         return response()->json([
             'success' => true,
@@ -818,7 +836,6 @@ class ClinicDashboardController extends Controller
         ];
     }
 
-    /** @return Relation */
     private function appointmentsQuery(Clinic $clinic): Relation
     {
         return $clinic->appointments()->with([
@@ -831,6 +848,8 @@ class ClinicDashboardController extends Controller
     /** @return array<string, mixed> */
     private function serializeClinic(Clinic $clinic): array
     {
+        $preferences = $this->clinicPreferences($clinic);
+
         return [
             'id' => $clinic->id,
             'name' => $clinic->name,
@@ -838,19 +857,23 @@ class ClinicDashboardController extends Controller
             'contact_phone' => $clinic->contact_phone,
             'address' => $clinic->address,
             'status' => $clinic->status->value,
-            'preferences' => $this->clinicPreferences($clinic),
+            'preferences' => $preferences,
+            'emergency' => $this->emergencyPolicies->resolve($clinic),
         ];
     }
 
-    /** @return array{maintenance: bool, audit: bool, signatures: bool, backups: bool} */
+    /** @return array<string, mixed> */
     private function clinicPreferences(Clinic $clinic): array
     {
         $stored = is_array($clinic->preferences) ? $clinic->preferences : [];
 
-        return array_replace(
-            self::DEFAULT_CLINIC_PREFERENCES,
-            array_intersect_key($stored, self::DEFAULT_CLINIC_PREFERENCES),
-        );
+        return [
+            ...array_replace(
+                self::DEFAULT_CLINIC_PREFERENCES,
+                array_intersect_key($stored, self::DEFAULT_CLINIC_PREFERENCES),
+            ),
+            'emergency' => $this->emergencyPolicies->localPolicy($clinic),
+        ];
     }
 
     /** @return array<string, mixed> */
