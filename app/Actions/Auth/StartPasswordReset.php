@@ -22,6 +22,7 @@ final class StartPasswordReset
     public function handle(array $data): OtpChallenge
     {
         $identifier = (string) $data['identifier'];
+        $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
         $user = str_contains($identifier, '@')
             ? User::query()->where('email', strtolower($identifier))->first()
             : User::query()->where('phone_number', PhoneNumber::fromE164($identifier)->value)->first();
@@ -29,9 +30,9 @@ final class StartPasswordReset
         if (
             $user === null
             || $user->password === null
-            || ! $user->hasRole(RoleKey::SuperAdmin)
             || $user->phone_verified_at === null
             || $user->status !== UserStatus::Active
+            || ($client === AuthenticationClient::Mobile && ($user?->hasRole(RoleKey::SuperAdmin) ?? false))
         ) {
             $this->recordEvent->handle($user, 'password_reset_failed', 'failure');
 
@@ -43,7 +44,7 @@ final class StartPasswordReset
         return $this->issueOtpChallenge->handle(
             $user,
             OtpPurpose::PasswordReset,
-            AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value),
+            $client,
             AuthenticationContext::Staff,
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,

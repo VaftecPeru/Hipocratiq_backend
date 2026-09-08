@@ -2,6 +2,8 @@
 
 namespace App\Actions\Auth;
 
+use App\Billing\SubscriptionPurchase;
+use App\Contracts\BillingGateway;
 use App\Enums\BillingCycle;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\ClinicStatus;
@@ -20,12 +22,14 @@ use App\Support\PhoneNumber;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 final class CompleteClinicRegistration
 {
     public function __construct(
         private ClinicRegistrationDraftStore $draftStore,
         private RecordAuthenticationEvent $recordEvent,
+        private BillingGateway $billingGateway,
     ) {}
 
     /** @return array{user: User, clinic: Clinic} */
@@ -35,90 +39,145 @@ final class CompleteClinicRegistration
         $planKey = $draft['plan']['key'] ?? null;
         $billingCycle = $draft['plan']['billing_cycle'] ?? null;
 
-        if (! is_string($planKey) || ! in_array($planKey, ['basic', 'professional'], true)) {
+        if (
+            ! is_string($planKey)
+            || ! in_array($planKey, ['basic', 'professional'], true)
+            || ! is_string($billingCycle)
+            || BillingCycle::tryFrom($billingCycle) === null
+        ) {
             throw ValidationException::withMessages(['plan' => ['Selecciona un plan válido.']]);
         }
 
         $adminPhone = PhoneNumber::from($data['admin_phone_number'], $data['country_code']);
         $contactPhone = PhoneNumber::from($data['contact_phone'], $data['country_code']);
+        $plan = Plan::query()
+            ->where('key', $planKey)
+            ->where('is_active', true)
+            ->where('publicly_selectable', true)
+            ->first();
 
-        $result = DB::transaction(function () use ($data, $planKey, $billingCycle, $adminPhone, $contactPhone): array {
-            if (User::query()->where('email', $data['admin_email'])->orWhere('phone_number', $adminPhone->value)->exists()) {
-                throw ValidationException::withMessages(['admin_email' => ['El correo o teléfono del administrador ya está registrado.']]);
-            }
+        if ($plan === null) {
+            throw ValidationException::withMessages(['plan' => ['El plan seleccionado no está disponible.']]);
+        }
 
-            if (Clinic::query()->where('tax_id', $data['tax_id'])->exists()) {
-                throw ValidationException::withMessages(['tax_id' => ['La clínica ya está registrada.']]);
-            }
+        $verifiedOtp = $draft['otp'] ?? null;
 
-            $plan = Plan::query()
-                ->where('key', $planKey)
-                ->where('is_active', true)
-                ->where('publicly_selectable', true)
-                ->first();
+        if (! is_array($verifiedOtp) || ! is_string($verifiedOtp['challenge_id'] ?? null)) {
+            throw ValidationException::withMessages(['code' => ['El código OTP no está disponible.']]);
+        }
 
-            if ($plan === null) {
-                throw ValidationException::withMessages(['plan' => ['El plan seleccionado no está disponible.']]);
-            }
+        if (User::query()->where('email', $data['admin_email'])->orWhere('phone_number', $adminPhone->value)->exists()) {
+            throw ValidationException::withMessages(['admin_email' => ['El correo o teléfono del administrador ya está registrado.']]);
+        }
 
-            $clinic = Clinic::query()->create([
-                'name' => $data['clinic_name'],
-                'slug' => $this->uniqueSlug($data['clinic_name']),
-                'tax_id' => $data['tax_id'],
-                'country_code' => $data['country_code'],
-                'contact_phone' => $contactPhone->value,
-                'address' => $data['address'],
-                'status' => ClinicStatus::Active,
-            ]);
+        if (Clinic::query()->where('tax_id', $data['tax_id'])->exists()) {
+            throw ValidationException::withMessages(['tax_id' => ['La clínica ya está registrada.']]);
+        }
 
-            $user = User::query()->create([
-                'name' => $data['admin_name'],
-                'email' => $data['admin_email'],
-                'phone_number' => $adminPhone->value,
-                'country_code' => $adminPhone->countryCode,
-                'password' => $data['password_hash'],
-                'status' => UserStatus::Active,
-                'onboarding_status' => OnboardingStatus::Completed,
-                'phone_verified_at' => now(),
-            ]);
+        $amount = $billingCycle === BillingCycle::Annual->value
+            ? $plan->annual_price_cents
+            : $plan->monthly_price_cents;
+        $idempotencyKey = 'clinic_registration:'.hash('sha256', $token);
+        $receipt = $this->billingGateway->purchase(new SubscriptionPurchase(
+            idempotencyKey: $idempotencyKey,
+            amountCents: $amount,
+            currency: $plan->currency,
+            subjectType: 'clinic',
+            planKey: $planKey,
+            billingCycle: $billingCycle,
+        ));
 
-            $role = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
-            $user->clinicMemberships()->create([
-                'clinic_id' => $clinic->id,
-                'role_id' => $role->id,
-                'status' => ClinicMembershipStatus::Active,
-            ]);
+        $this->draftStore->consumeVerifiedOtp($token, $verifiedOtp['challenge_id']);
 
-            $reference = 'sim_sub_'.Str::lower(Str::random(24));
-            $subscription = ClinicSubscription::query()->create([
-                'clinic_id' => $clinic->id,
-                'plan_id' => $plan->id,
-                'billing_cycle' => BillingCycle::from($billingCycle),
-                'status' => SubscriptionStatus::Active,
-                'starts_at' => now(),
-                'provider' => 'simulated',
-                'provider_reference' => $reference,
-            ]);
+        try {
+            $result = DB::transaction(function () use (
+                $data,
+                $billingCycle,
+                $adminPhone,
+                $contactPhone,
+                $plan,
+                $receipt,
+                $idempotencyKey,
+                $amount,
+            ): array {
+                if (User::query()->where('email', $data['admin_email'])->orWhere('phone_number', $adminPhone->value)->exists()) {
+                    throw ValidationException::withMessages(['admin_email' => ['El correo o teléfono del administrador ya está registrado.']]);
+                }
 
-            $amount = $billingCycle === BillingCycle::Annual->value
-                ? $plan->annual_price_cents
-                : $plan->monthly_price_cents;
+                if (Clinic::query()->where('tax_id', $data['tax_id'])->exists()) {
+                    throw ValidationException::withMessages(['tax_id' => ['La clínica ya está registrada.']]);
+                }
 
-            SubscriptionPayment::query()->create([
-                'clinic_subscription_id' => $subscription->id,
-                'idempotency_key' => $reference,
-                'amount_cents' => $amount,
-                'currency' => $plan->currency,
-                'status' => 'succeeded',
-                'provider' => 'simulated',
-                'provider_reference' => 'sim_pay_'.Str::lower(Str::random(24)),
-                'paid_at' => now(),
-            ]);
+                $lockedPlan = Plan::query()
+                    ->lockForUpdate()
+                    ->whereKey($plan->id)
+                    ->where('is_active', true)
+                    ->where('publicly_selectable', true)
+                    ->first();
 
-            return compact('user', 'clinic');
-        }, attempts: 3);
+                if ($lockedPlan === null) {
+                    throw ValidationException::withMessages(['plan' => ['El plan seleccionado no está disponible.']]);
+                }
 
-        $this->recordEvent->handle($result['user'], 'clinic_registration_completed', metadata: [
+                $clinic = Clinic::query()->create([
+                    'name' => $data['clinic_name'],
+                    'slug' => $this->uniqueSlug($data['clinic_name']),
+                    'tax_id' => $data['tax_id'],
+                    'country_code' => $data['country_code'],
+                    'contact_phone' => $contactPhone->value,
+                    'address' => $data['address'],
+                    'status' => ClinicStatus::Active,
+                ]);
+
+                $user = User::query()->create([
+                    'name' => $data['admin_name'],
+                    'email' => $data['admin_email'],
+                    'phone_number' => $adminPhone->value,
+                    'country_code' => $adminPhone->countryCode,
+                    'password' => $data['password_hash'],
+                    'status' => UserStatus::Active,
+                    'onboarding_status' => OnboardingStatus::Completed,
+                    'phone_verified_at' => now(),
+                ]);
+
+                $role = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
+                $user->roles()->attach($role);
+                $user->clinicMemberships()->create([
+                    'clinic_id' => $clinic->id,
+                    'role_id' => $role->id,
+                    'status' => ClinicMembershipStatus::Active,
+                ]);
+
+                $subscription = ClinicSubscription::query()->create([
+                    'clinic_id' => $clinic->id,
+                    'plan_id' => $lockedPlan->id,
+                    'billing_cycle' => BillingCycle::from($billingCycle),
+                    'status' => SubscriptionStatus::Active,
+                    'starts_at' => now(),
+                    'provider' => $receipt->provider,
+                    'provider_reference' => $receipt->subscriptionReference,
+                ]);
+
+                SubscriptionPayment::query()->create([
+                    'clinic_subscription_id' => $subscription->id,
+                    'idempotency_key' => $idempotencyKey,
+                    'amount_cents' => $amount,
+                    'currency' => $lockedPlan->currency,
+                    'status' => 'succeeded',
+                    'provider' => $receipt->provider,
+                    'provider_reference' => $receipt->paymentReference,
+                    'paid_at' => $receipt->paidAt,
+                ]);
+
+                return compact('user', 'clinic');
+            }, attempts: 3);
+        } catch (Throwable $exception) {
+            $this->draftStore->restoreVerifiedOtp($token, $verifiedOtp);
+
+            throw $exception;
+        }
+
+        $this->recordEvent->handleSafely($result['user'], 'clinic_registration_completed', metadata: [
             'clinic_id' => $result['clinic']->id,
             'plan' => $planKey,
         ]);

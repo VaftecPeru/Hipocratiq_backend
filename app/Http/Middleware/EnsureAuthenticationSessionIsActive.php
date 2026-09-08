@@ -3,9 +3,12 @@
 namespace App\Http\Middleware;
 
 use App\Actions\Auth\RecordAuthenticationEvent;
+use App\Enums\AuthenticationClient;
+use App\Enums\AuthenticationContext;
 use App\Enums\UserStatus;
 use App\Models\AuthenticationSession;
 use App\Services\Auth\AuthenticationSessionKey;
+use App\Support\Auth\MobileDeviceProof;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -38,8 +41,26 @@ class EnsureAuthenticationSessionIsActive
                 ], 403);
             }
 
+            if ($this->isMobileToken($accessToken) && ! MobileDeviceProof::requestMatches(
+                $request,
+                $accessToken->device_name,
+                $accessToken->device_id_hash,
+            )) {
+                $accessToken->delete();
+                $this->recordEvent->handleSafely($user, 'mobile_token_revoked', metadata: [
+                    'reason' => 'device_mismatch',
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'code' => 'DEVICE_MISMATCH',
+                    'message' => 'La credencial no pertenece a este dispositivo.',
+                ], 401);
+            }
+
             $user->withAccessToken($accessToken);
             $request->setUserResolver(fn () => $user);
+            $request->attributes->set('actor_context', $this->mobileActorContext($accessToken));
 
             return $next($request);
         }
@@ -100,6 +121,30 @@ class EnsureAuthenticationSessionIsActive
             $session->update(['last_seen_at' => now()]);
         }
 
+        $request->attributes->set('actor_context', $session->actor_context);
+
         return $next($request);
+    }
+
+    private function mobileActorContext(PersonalAccessToken $accessToken): ?string
+    {
+        if ($accessToken->actor_context instanceof AuthenticationContext) {
+            return $accessToken->actor_context->value;
+        }
+
+        foreach ($accessToken->abilities as $ability) {
+            if (is_string($ability) && AuthenticationContext::tryFrom($ability) !== null) {
+                return $ability;
+            }
+        }
+
+        return null;
+    }
+
+    private function isMobileToken(PersonalAccessToken $accessToken): bool
+    {
+        return $accessToken->client_type instanceof AuthenticationClient
+            ? $accessToken->client_type === AuthenticationClient::Mobile
+            : $accessToken->client_type === AuthenticationClient::Mobile->value;
     }
 }

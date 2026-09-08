@@ -1,6 +1,10 @@
 <?php
 
 return [
+    // Cuando es true, se permiten proveedores de demo (SMS array, OTP fijo y
+    // billing simulado) aun con APP_ENV=production. Uso exclusivo para demos
+    // controladas; mantener en false en un entorno productivo real.
+    'demo_mode' => (bool) env('DEMO_MODE', false),
     'otp' => [
         'ttl_minutes' => (int) env('OTP_TTL_MINUTES', 5),
         'max_attempts' => (int) env('OTP_MAX_ATTEMPTS', 5),
@@ -14,5 +18,8 @@ return [
     ],
     'mobile_token' => [
         'ttl_minutes' => (int) env('AUTH_MOBILE_TOKEN_MINUTES', 43200),
+    ],
+    'invitation' => [
+        'ttl_minutes' => (int) env('AUTH_INVITATION_TTL_MINUTES', 1440),
     ],
 ];

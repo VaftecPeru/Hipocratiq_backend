@@ -10,6 +10,7 @@ use App\Actions\Auth\StartMobileSession;
 use App\Actions\Auth\StartPasswordReset;
 use App\Actions\Auth\VerifyOtpChallenge;
 use App\Enums\AuthenticationClient;
+use App\Enums\AuthenticationContext;
 use App\Enums\OtpPurpose;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\RequestOtpRequest;
@@ -17,6 +18,7 @@ use App\Http\Requests\Api\V1\Auth\VerifyAuthenticationOtpRequest;
 use App\Http\Resources\UserResource;
 use App\Models\OtpChallenge;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
 
 class OtpAuthenticationController extends Controller
 {
@@ -41,6 +43,7 @@ class OtpAuthenticationController extends Controller
                 'next_step' => 'verify_otp',
                 'expires_in' => max(0, (int) ceil(now()->diffInSeconds($challenge->expires_at))),
                 'resend_after' => config('authentication.otp.resend_seconds'),
+                'resends_remaining' => max(0, config('authentication.otp.max_resends') - $challenge->resend_count),
             ],
         ], 202);
     }
@@ -54,7 +57,23 @@ class OtpAuthenticationController extends Controller
     ): JsonResponse {
         $data = $request->validated();
         $purpose = OtpPurpose::from($data['purpose']);
-        $user = $verifyOtpChallenge->handle($data['challenge_id'], $data['code'], $purpose);
+        $challenge = OtpChallenge::query()->find($data['challenge_id']);
+
+        if ($challenge?->actor_context === AuthenticationContext::Receptionist
+            && $purpose === OtpPurpose::Registration) {
+            throw ValidationException::withMessages([
+                'challenge_id' => ['La activación requiere una invitación válida.'],
+            ]);
+        }
+
+        $user = $verifyOtpChallenge->handle(
+            $data['challenge_id'],
+            $data['code'],
+            $purpose,
+            AuthenticationClient::from($data['client_type']),
+            $data['device_name'] ?? null,
+            $data['device_id'] ?? null,
+        );
         $challenge = OtpChallenge::query()->findOrFail($data['challenge_id']);
 
         if ($purpose === OtpPurpose::PasswordReset) {
@@ -81,6 +100,7 @@ class OtpAuthenticationController extends Controller
                     'access_token' => $token->plainTextToken,
                     'expires_at' => $token->accessToken->expires_at,
                     'user' => new UserResource($user),
+                    'actor_context' => $challenge->actor_context->value,
                     'next_step' => $purpose === OtpPurpose::Registration ? 'select_plan' : null,
                 ],
             ]);

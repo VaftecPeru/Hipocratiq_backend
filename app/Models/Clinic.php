@@ -9,8 +9,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
-#[Fillable(['name', 'slug', 'tax_id', 'country_code', 'contact_phone', 'address', 'status'])]
+#[Fillable(['name', 'slug', 'tax_id', 'country_code', 'contact_phone', 'address', 'status', 'preferences'])]
 class Clinic extends Model
 {
     /** @use HasFactory<ClinicFactory> */
@@ -33,13 +34,51 @@ class Clinic extends Model
         return $this->hasMany(ClinicSubscription::class);
     }
 
+    public function latestSubscription(): HasOne
+    {
+        return $this->hasOne(ClinicSubscription::class)->latestOfMany('starts_at');
+    }
+
     public function doctorProfiles(): HasMany
     {
         return $this->hasMany(DoctorProfile::class);
     }
 
+    public function patientProfiles(): HasMany
+    {
+        return $this->hasMany(PatientProfile::class);
+    }
+
+    public function appointments(): HasMany
+    {
+        return $this->hasMany(Appointment::class);
+    }
+
+    public function patientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class);
+    }
+
+    public function clinicalHistoryRecords(): HasMany
+    {
+        return $this->hasMany(ClinicalHistoryRecord::class);
+    }
+
+    public function consultations(): HasMany
+    {
+        return $this->hasMany(Consultation::class);
+    }
+
+    public function supportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class);
+    }
+
     protected function casts(): array
     {
-        return ['status' => ClinicStatus::class];
+        return [
+            'status' => ClinicStatus::class,
+            'preferences' => 'array',
+        ];
     }
 }

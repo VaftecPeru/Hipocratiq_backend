@@ -2,15 +2,21 @@
 
 namespace App\Providers;
 
+use App\Contracts\BillingGateway;
 use App\Contracts\SmsSender;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
+use App\Models\ClinicMembership;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\RandomOtpCodeGenerator;
+use App\Services\Billing\SimulatedBillingGateway;
+use App\Services\Billing\UnavailableBillingGateway;
 use App\Services\Sms\ArraySmsSender;
 use App\Services\Sms\TwilioSmsSender;
+use App\Support\Authorization\RolePermissionCatalog;
 use App\Support\PhoneNumber;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -19,6 +25,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use InvalidArgumentException;
+use Laravel\Sanctum\Sanctum;
 use LogicException;
 
 class AppServiceProvider extends ServiceProvider
@@ -41,17 +48,31 @@ class AppServiceProvider extends ServiceProvider
                 default => throw new LogicException('El proveedor SMS configurado no está disponible.'),
             },
         );
+        $this->app->singleton(
+            BillingGateway::class,
+            fn () => match (config('billing.driver')) {
+                'simulated' => $this->app->make(SimulatedBillingGateway::class),
+                'unavailable' => $this->app->make(UnavailableBillingGateway::class),
+                default => throw new LogicException('El proveedor de facturación configurado no está disponible.'),
+            },
+        );
     }
 
     public function boot(): void
     {
-        if ($this->app->runningInConsole() === false) {
+        Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
+        if ($this->app->runningInConsole() === false && config('authentication.demo_mode') !== true) {
             if ($this->app->isProduction() && config('sms.driver') === 'array') {
                 throw new LogicException('Configura un proveedor SMS antes de ejecutar en producción.');
             }
 
             if ($this->app->isProduction() && config('authentication.otp.fixed_code')) {
                 throw new LogicException('OTP_FIXED_CODE no puede usarse en producción.');
+            }
+
+            if ($this->app->isProduction() && config('billing.driver') === 'simulated') {
+                throw new LogicException('BILLING_DRIVER=simulated no puede usarse en producción.');
             }
         }
 
@@ -60,6 +81,31 @@ class AppServiceProvider extends ServiceProvider
         Gate::before(fn (User $user, string $ability): ?bool => (
             $user->status === UserStatus::Active && $user->hasRole(RoleKey::SuperAdmin)
         ) ? true : null);
+
+        foreach (RolePermissionCatalog::abilities() as $ability) {
+            Gate::define($ability, static function (User $user) use ($ability): bool {
+                $membership = request()->attributes->get('clinic_membership');
+
+                if (! $membership instanceof ClinicMembership
+                    || (string) $membership->user_id !== (string) $user->getKey()) {
+                    return false;
+                }
+
+                $roleKey = $membership->role?->key;
+
+                return is_string($roleKey) && RolePermissionCatalog::allows($roleKey, $ability);
+            });
+        }
+
+        // En modo demo aflojamos los throttles: las corridas repetidas de la
+        // demo desde la misma IP/teléfono no deben quedar bloqueadas hasta una
+        // hora. En producción real (demo_mode=false) se mantienen los límites
+        // estrictos definidos más abajo.
+        if (config('authentication.demo_mode') === true) {
+            $this->configureDemoRateLimiters();
+
+            return;
+        }
 
         RateLimiter::for('auth-register', fn (Request $request) => [
             Limit::perMinute(10)->by('register-ip:'.$request->ip()),
@@ -95,6 +141,30 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(10)->by('clinic-registration-otp-ip:'.$request->ip()),
             Limit::perHour(5)->by('clinic-registration-otp-draft:'.$this->registrationDraftRateLimitKey($request)),
         ]);
+    }
+
+    /**
+     * Límites relajados solo para el modo demo. Mantenemos un techo por minuto
+     * y por IP suficiente para frenar abusos evidentes, pero eliminamos los
+     * bloqueos por hora que dejaban la demo inutilizable tras varias corridas.
+     */
+    private function configureDemoRateLimiters(): void
+    {
+        $names = [
+            'auth-register',
+            'auth-login',
+            'auth-otp',
+            'auth-otp-request',
+            'clinic-registration',
+            'registration-plan',
+            'clinic-registration-otp',
+        ];
+
+        foreach ($names as $name) {
+            RateLimiter::for($name, fn (Request $request) => [
+                Limit::perMinute(120)->by('demo-'.$name.'-ip:'.$request->ip()),
+            ]);
+        }
     }
 
     private function phoneRateLimitKey(Request $request): string

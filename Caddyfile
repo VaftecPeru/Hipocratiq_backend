@@ -1,0 +1,18 @@
+{
+    # Global options
+    auto_https off
+}
+
+:8000 {
+    root * /app/public
+    
+    encode gzip
+    
+    try_files {path} /index.php?{query}
+    
+    php_server {
+        resolve_root_symlink
+    }
+    
+    file_server
+}

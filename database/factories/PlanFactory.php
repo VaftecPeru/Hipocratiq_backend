@@ -20,6 +20,7 @@ class PlanFactory extends Factory
         return [
             'key' => 'basic',
             'name' => fake()->words(2, true),
+            'description' => fake()->sentence(),
             'monthly_price_cents' => fake()->numberBetween(2900, 14900),
             'annual_price_cents' => fake()->numberBetween(29000, 149000),
             'currency' => 'USD',

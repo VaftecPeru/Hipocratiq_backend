@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
 use App\Http\Requests\Api\V1\Auth\VerifyOtpRequest;
 use App\Http\Resources\UserResource;
+use App\Models\OtpChallenge;
 use Illuminate\Http\JsonResponse;
 
 class LoginController extends Controller
@@ -25,6 +26,7 @@ class LoginController extends Controller
                 'next_step' => 'verify_otp',
                 'expires_in' => max(0, (int) ceil(now()->diffInSeconds($challenge->expires_at))),
                 'resend_after' => config('authentication.otp.resend_seconds'),
+                'resends_remaining' => max(0, config('authentication.otp.max_resends') - $challenge->resend_count),
             ],
         ], 202);
     }
@@ -39,13 +41,15 @@ class LoginController extends Controller
             $request->string('code')->toString(),
             OtpPurpose::Login,
         );
+        $challenge = OtpChallenge::query()->findOrFail($request->string('challenge_id')->toString());
 
-        $startSession->handle($request, $user);
+        $startSession->handle($request, $user, $challenge->actor_context);
 
         return response()->json([
             'success' => true,
             'data' => [
                 'user' => new UserResource($user),
+                'actor_context' => $challenge->actor_context->value,
             ],
         ]);
     }

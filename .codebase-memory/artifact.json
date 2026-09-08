@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "86d8f5484687d26a8a14249b0d7b020e31a58c78",
+    "indexed_at": "2026-08-10T23:13:58Z",
+    "project": "saas-hip-back-api",
+    "nodes": 1757,
+    "edges": 5714,
+    "original_size": 6488064,
+    "compressed_size": 1044565,
+    "compression_level": 3
+}

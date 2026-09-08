@@ -9,6 +9,7 @@ use App\Models\AuthenticationSession;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use RuntimeException;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
@@ -35,11 +36,13 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
 
         $login
             ->assertAccepted()
-            ->assertJsonPath('data.next_step', 'verify_otp');
+            ->assertJsonPath('data.next_step', 'verify_otp')
+            ->assertJsonPath('data.resends_remaining', config('authentication.otp.max_resends'));
         $this->assertGuest();
 
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
@@ -54,6 +57,7 @@ class LoginTest extends TestCase
 
         $sessionCookie = $verification->getCookie(config('session.cookie'));
         $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue());
+        $this->withSpaOrigin()->getJson('/api/v1/auth/admin/clinics')->assertOk();
 
         $logout = $this->withSpaOrigin()->postJson('/api/v1/auth/logout');
 
@@ -79,11 +83,41 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'WrongPassword123',
+            'requested_role' => 'super_admin',
         ])->assertUnprocessable()->assertJsonValidationErrors('phone_number');
 
         $this->assertGuest();
         $this->assertDatabaseCount('otp_challenges', 0);
         $this->assertSame('login_failed', AuthenticationEvent::query()->sole()->event);
+    }
+
+    public function test_audit_failure_does_not_interrupt_logout(): void
+    {
+        [$user, $cookieName, $cookieValue] = $this->authenticatedUser();
+
+        Event::listen(
+            'eloquent.creating: '.AuthenticationEvent::class,
+            function (AuthenticationEvent $event): void {
+                if ($event->event === 'logout') {
+                    throw new RuntimeException('Authentication audit unavailable.');
+                }
+            },
+        );
+
+        $this->withCookie($cookieName, $cookieValue)
+            ->withSpaOrigin()
+            ->postJson('/api/v1/auth/logout')
+            ->assertNoContent();
+
+        $this->withCookie($cookieName, $cookieValue)
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/me')
+            ->assertUnauthorized();
+        $this->assertSame('logout', AuthenticationSession::query()->sole()->revoked_reason);
+        $this->assertDatabaseMissing('authentication_events', [
+            'user_id' => $user->id,
+            'event' => 'logout',
+        ]);
     }
 
     public function test_otp_delivery_failure_returns_service_unavailable_without_persisting_challenge(): void
@@ -104,6 +138,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
 
         $response
@@ -128,6 +163,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ])->assertUnprocessable()->assertJsonValidationErrors('phone_number');
 
         $this->assertGuest();
@@ -138,6 +174,47 @@ class LoginTest extends TestCase
         $this->withSpaOrigin()->getJson('/api/v1/auth/me')
             ->assertUnauthorized()
             ->assertJsonPath('code', 'UNAUTHENTICATED');
+    }
+
+    public function test_legacy_web_login_rejects_role_mismatch_without_issuing_an_otp(): void
+    {
+        User::factory()->superAdmin()->create([
+            'phone_number' => '+525512345678',
+            'password' => 'SecurePass123',
+        ]);
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 1234 5678',
+            'password' => 'SecurePass123',
+            'actor_context' => 'staff',
+            'requested_role' => 'clinic_admin',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('phone_number')
+            ->assertJsonPath('errors.phone_number.0', 'Las credenciales proporcionadas no son correctas.');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseCount('authentication_sessions', 0);
+    }
+
+    public function test_legacy_web_login_without_requested_role_does_not_issue_an_otp(): void
+    {
+        User::factory()->superAdmin()->create([
+            'phone_number' => '+525512345678',
+            'password' => 'SecurePass123',
+        ]);
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 1234 5678',
+            'password' => 'SecurePass123',
+            'actor_context' => 'staff',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('phone_number')
+            ->assertJsonPath('errors.phone_number.0', 'Las credenciales proporcionadas no son correctas.');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
+        $this->assertDatabaseCount('authentication_sessions', 0);
     }
 
     public function test_suspended_user_cannot_finish_pending_login(): void
@@ -151,6 +228,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
 
         $user->update(['status' => UserStatus::Suspended]);
@@ -209,6 +287,7 @@ class LoginTest extends TestCase
             'country_code' => 'MX',
             'phone_number' => '55 1234 5678',
             'password' => 'SecurePass123',
+            'requested_role' => 'super_admin',
         ]);
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
             'challenge_id' => $login->json('data.challenge_id'),

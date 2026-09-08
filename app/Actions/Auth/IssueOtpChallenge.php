@@ -5,6 +5,7 @@ namespace App\Actions\Auth;
 use App\Contracts\SmsSender;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Models\OtpChallenge;
 use App\Models\User;
@@ -13,6 +14,7 @@ use App\Services\Auth\OtpHasher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 use Throwable;
 
@@ -35,19 +37,38 @@ final class IssueOtpChallenge
         ?string $deviceIdHash = null,
         ?string $flowId = null,
         int $resendCount = 0,
+        ?string $expectedLatestChallengeId = null,
     ): OtpChallenge {
-        return DB::transaction(function () use ($user, $purpose, $client, $context, $deviceName, $deviceId, $deviceIdHash, $flowId, $resendCount): OtpChallenge {
+        [$challenge, $code, $phoneNumber] = DB::transaction(function () use (
+            $user,
+            $purpose,
+            $client,
+            $context,
+            $deviceName,
+            $deviceId,
+            $deviceIdHash,
+            $flowId,
+            $resendCount,
+            $expectedLatestChallengeId,
+        ): array {
             $lockedUser = User::query()->lockForUpdate()->findOrFail($user->id);
-            $id = (string) Str::uuid();
-            $code = $this->codeGenerator->generate();
-
-            OtpChallenge::query()
+            $latestChallenge = OtpChallenge::query()
                 ->whereBelongsTo($lockedUser)
                 ->where('purpose', $purpose->value)
-                ->whereNull('consumed_at')
-                ->whereNull('invalidated_at')
-                ->update(['invalidated_at' => now()]);
+                ->orderByDesc('delivery_sequence')
+                ->first();
 
+            if (
+                $expectedLatestChallengeId !== null
+                && $latestChallenge?->id !== $expectedLatestChallengeId
+            ) {
+                throw ValidationException::withMessages([
+                    'challenge_id' => ['El desafío OTP fue reemplazado. Solicita el código más reciente.'],
+                ]);
+            }
+
+            $id = (string) Str::uuid();
+            $code = $this->codeGenerator->generate();
             $challenge = $lockedUser->otpChallenges()->create([
                 'id' => $id,
                 'flow_id' => $flowId ?? $id,
@@ -59,31 +80,105 @@ final class IssueOtpChallenge
                 'code_hash' => $this->hasher->make($id, $code),
                 'attempts' => 0,
                 'max_attempts' => config('authentication.otp.max_attempts'),
-                'resend_count' => $resendCount,
+                'resend_count' => $expectedLatestChallengeId === null
+                    ? $resendCount
+                    : ($latestChallenge?->resend_count ?? $resendCount) + 1,
+                'delivery_status' => OtpDeliveryStatus::Pending,
+                'delivery_sequence' => ($latestChallenge?->delivery_sequence ?? 0) + 1,
                 'sent_at' => now(),
                 'expires_at' => now()->addMinutes(config('authentication.otp.ttl_minutes')),
             ]);
 
-            try {
-                $this->smsSender->send(
-                    $lockedUser->phone_number,
-                    "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
-                );
-            } catch (Throwable $exception) {
-                Log::error('OTP delivery failed.', [
-                    'challenge_id' => $challenge->id,
-                    'provider_error' => $exception::class,
-                ]);
+            return [$challenge, $code, $lockedUser->phone_number];
+        });
 
-                throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.', $exception);
-            }
+        try {
+            $this->smsSender->send(
+                $phoneNumber,
+                "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
+            );
+        } catch (Throwable $exception) {
+            $this->discardPendingChallenge($challenge->id);
 
-            $this->recordEvent->handle($lockedUser, 'otp_sent', metadata: [
+            Log::error('OTP delivery failed.', [
                 'challenge_id' => $challenge->id,
-                'purpose' => $purpose->value,
+                'provider_error' => $exception::class,
             ]);
 
-            return $challenge;
+            throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.', $exception);
+        }
+
+        $confirmedChallenge = DB::transaction(function () use ($challenge, $user, $purpose): ?OtpChallenge {
+            $lockedUser = User::query()->lockForUpdate()->findOrFail($user->id);
+            $pendingChallenge = OtpChallenge::query()
+                ->lockForUpdate()
+                ->find($challenge->id);
+
+            if (
+                $pendingChallenge === null
+                || $pendingChallenge->delivery_status !== OtpDeliveryStatus::Pending
+            ) {
+                return null;
+            }
+
+            $latestChallenge = OtpChallenge::query()
+                ->whereBelongsTo($lockedUser)
+                ->where('purpose', $purpose->value)
+                ->orderByDesc('delivery_sequence')
+                ->first();
+
+            if ($latestChallenge?->id !== $pendingChallenge->id) {
+                $pendingChallenge->update([
+                    'delivery_status' => OtpDeliveryStatus::Failed,
+                    'invalidated_at' => now(),
+                    'code_hash' => null,
+                ]);
+
+                return null;
+            }
+
+            OtpChallenge::query()
+                ->whereBelongsTo($lockedUser)
+                ->where('purpose', $purpose->value)
+                ->whereKeyNot($pendingChallenge->id)
+                ->where('delivery_status', OtpDeliveryStatus::Sent->value)
+                ->whereNull('consumed_at')
+                ->whereNull('invalidated_at')
+                ->update(['invalidated_at' => now()]);
+
+            $pendingChallenge->update([
+                'delivery_status' => OtpDeliveryStatus::Sent,
+                'sent_at' => now(),
+            ]);
+
+            return $pendingChallenge->fresh();
+        });
+
+        if ($confirmedChallenge === null) {
+            throw new ServiceUnavailableHttpException(
+                null,
+                'El código OTP fue reemplazado antes de confirmar su entrega.',
+            );
+        }
+
+        $this->recordEvent->handleSafely($user, 'otp_sent', metadata: [
+            'challenge_id' => $confirmedChallenge->id,
+            'purpose' => $purpose->value,
+        ]);
+
+        return $confirmedChallenge;
+    }
+
+    private function discardPendingChallenge(string $challengeId): void
+    {
+        DB::transaction(function () use ($challengeId): void {
+            $challenge = OtpChallenge::query()
+                ->lockForUpdate()
+                ->find($challengeId);
+
+            if ($challenge?->delivery_status === OtpDeliveryStatus::Pending) {
+                $challenge->delete();
+            }
         });
     }
 }

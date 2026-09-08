@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
 use App\Models\Clinic;
+use App\Models\PersonalAccessToken;
 use App\Models\Plan;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Sms\ArraySmsSender;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Tests\Support\FixedOtpCodeGenerator;
@@ -54,6 +56,8 @@ class ClinicRegistrationTest extends TestCase
         $this->assertDatabaseCount('clinic_memberships', 1);
         $this->assertDatabaseCount('clinic_subscriptions', 1);
         $this->assertDatabaseCount('subscription_payments', 1);
+        $this->assertDatabaseCount('role_user', 1);
+        $this->assertTrue(User::query()->sole()->hasRole(RoleKey::ClinicAdmin));
         $this->assertAuthenticated();
         $sessionCookie = $verify->getCookie(config('session.cookie'));
         $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue())->withSpaOrigin()->getJson('/api/v1/auth/clinic/dashboard')
@@ -65,14 +69,114 @@ class ClinicRegistrationTest extends TestCase
             'purpose' => 'login',
             'identifier' => 'ana@clinica.test',
             'actor_context' => 'staff',
+            'requested_role' => 'clinic_admin',
             'password' => 'SecurePass123',
         ]);
         $login->assertAccepted();
-        $this->withSpaOrigin()->postJson('/api/v1/auth/otp/verify', [
+        $relogin = $this->withSpaOrigin()->postJson('/api/v1/auth/otp/verify', [
             'purpose' => 'login',
             'challenge_id' => $login->json('data.challenge_id'),
             'code' => '123456',
-        ])->assertOk()->assertJsonPath('data.actor_context', 'clinic_admin');
+        ]);
+        $relogin->assertOk()->assertJsonPath('data.actor_context', 'clinic_admin');
+        $reloginCookie = $relogin->getCookie(config('session.cookie'));
+        $this->withCookie($reloginCookie->getName(), $reloginCookie->getValue())
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertOk();
+
+        $this->withCookie($reloginCookie->getName(), $reloginCookie->getValue())
+            ->withSpaOrigin()
+            ->postJson('/api/v1/auth/logout')
+            ->assertNoContent();
+        $legacyLogin = $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 8765 4321',
+            'password' => 'SecurePass123',
+            'requested_role' => 'clinic_admin',
+        ]);
+        $legacyLogin->assertAccepted();
+        $legacyVerification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
+            'challenge_id' => $legacyLogin->json('data.challenge_id'),
+            'code' => '123456',
+        ]);
+        $legacyVerification->assertOk()->assertJsonPath('data.actor_context', 'clinic_admin');
+        $legacyCookie = $legacyVerification->getCookie(config('session.cookie'));
+        $this->withCookie($legacyCookie->getName(), $legacyCookie->getValue())
+            ->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/dashboard')
+            ->assertOk();
+    }
+
+    public function test_clinic_can_register_on_mobile_with_a_device_bound_draft(): void
+    {
+        $deviceName = 'Clinic phone';
+        $deviceId = 'clinic-device-0001';
+        $draft = $this->postJson('/api/v1/auth/register/clinic/draft', $this->payload() + [
+            'client_type' => 'mobile',
+            'device_name' => $deviceName,
+            'device_id' => $deviceId,
+        ]);
+
+        $draft
+            ->assertCreated()
+            ->assertJsonPath('data.next_step', 'select_plan')
+            ->assertJsonStructure(['data' => ['draft_token']]);
+        $draftToken = $draft->json('data.draft_token');
+
+        $plan = $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/clinic/plan', [
+                'plan' => 'basic',
+                'billing_cycle' => 'annual',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.next_step', 'verify_otp');
+
+        $verification = $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/clinic/verify-otp', [
+                'challenge_id' => $plan->json('data.challenge_id'),
+                'code' => '123456',
+            ])
+            ->assertOk();
+
+        $verification
+            ->assertJsonPath('data.actor_context', 'clinic_admin')
+            ->assertJsonPath('data.next_step', 'success');
+        $token = PersonalAccessToken::query()->where('tokenable_id', User::query()->sole()->id)->sole();
+        $this->assertSame('mobile', $token->client_type->value);
+        $this->assertSame('clinic_admin', $token->actor_context->value);
+        $this->assertSame(hash('sha256', $deviceId), $token->device_id_hash);
+    }
+
+    public function test_clinic_admin_cannot_bypass_password_using_patient_context(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/draft', $this->payload());
+        $cookie = $draft->getCookie('clinic_registration');
+        $plan = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/plan', [
+            'plan' => 'basic',
+            'billing_cycle' => 'monthly',
+        ]);
+        $verification = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/verify-otp', [
+            'challenge_id' => $plan->json('data.challenge_id'),
+            'code' => '123456',
+        ]);
+        $sessionCookie = $verification->getCookie(config('session.cookie'));
+        $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/logout')->assertNoContent();
+
+        $user = User::query()->sole();
+        $user->patientProfile()->create();
+
+        $this->postJson('/api/v1/auth/otp/request', [
+            'purpose' => 'login',
+            'identifier' => 'ana@clinica.test',
+            'actor_context' => 'patient',
+            'client_type' => 'mobile',
+            'requested_role' => 'clinic_admin',
+            'device_name' => 'Untrusted device',
+            'device_id' => 'untrusted-installation',
+        ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
+
+        $this->assertDatabaseCount('otp_challenges', 0);
     }
 
     public function test_registration_without_plan_does_not_create_domain_records(): void
@@ -113,6 +217,34 @@ class ClinicRegistrationTest extends TestCase
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('clinics', 0);
         $this->assertDatabaseCount('clinic_subscriptions', 0);
+    }
+
+    public function test_missing_clinic_admin_role_rolls_back_registration_records(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/draft', $this->payload());
+        $cookie = $draft->getCookie('clinic_registration');
+        $plan = $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/plan', [
+            'plan' => 'basic',
+            'billing_cycle' => 'monthly',
+        ]);
+
+        Role::query()->where('key', RoleKey::ClinicAdmin->value)->delete();
+
+        $this->withoutExceptionHandling();
+        $this->assertThrows(
+            fn () => $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/verify-otp', [
+                'challenge_id' => $plan->json('data.challenge_id'),
+                'code' => '123456',
+            ]),
+            ModelNotFoundException::class,
+        );
+
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('clinics', 0);
+        $this->assertDatabaseCount('clinic_memberships', 0);
+        $this->assertDatabaseCount('clinic_subscriptions', 0);
+        $this->assertDatabaseCount('subscription_payments', 0);
+        $this->assertDatabaseCount('role_user', 0);
     }
 
     public function test_clinic_otp_expires_at_exactly_five_minutes(): void
@@ -188,5 +320,16 @@ class ClinicRegistrationTest extends TestCase
     private function withSpaOrigin(): static
     {
         return $this->withCredentials()->withHeader('Origin', 'http://localhost:3000');
+    }
+
+    /** @return array<string, string> */
+    private function mobileDraftHeaders(string $draftToken, string $deviceName, string $deviceId): array
+    {
+        return [
+            'X-Client-Type' => 'mobile',
+            'X-Device-Name' => $deviceName,
+            'X-Device-ID' => $deviceId,
+            'X-Registration-Token' => $draftToken,
+        ];
     }
 }

@@ -5,6 +5,7 @@ namespace App\Actions\Auth;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
 use App\Enums\OnboardingStatus;
+use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Enums\UserStatus;
 use App\Models\Clinic;
@@ -13,6 +14,7 @@ use App\Models\User;
 use App\Support\PhoneNumber;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 final class RegisterPatient
 {
@@ -27,7 +29,7 @@ final class RegisterPatient
             ? PhoneNumber::from($data['phone_number'], $data['country_code'])
             : PhoneNumber::fromE164($data['phone_number']);
 
-        return DB::transaction(function () use ($data, $phoneNumber): OtpChallenge {
+        $user = DB::transaction(function () use ($data, $phoneNumber): User {
             if (User::query()->where('phone_number', $phoneNumber->value)->exists()) {
                 throw ValidationException::withMessages([
                     'phone_number' => ['El número de teléfono ya está registrado.'],
@@ -60,6 +62,10 @@ final class RegisterPatient
                 'clinic_id' => $clinic->id,
             ]);
 
+            return $user;
+        });
+
+        try {
             return $this->issueOtpChallenge->handle(
                 $user,
                 OtpPurpose::Registration,
@@ -68,6 +74,35 @@ final class RegisterPatient
                 $data['device_name'] ?? null,
                 $data['device_id'] ?? null,
             );
+        } catch (Throwable $exception) {
+            $this->discardUndeliveredRegistration($user->id);
+
+            throw $exception;
+        }
+    }
+
+    private function discardUndeliveredRegistration(int $userId): void
+    {
+        DB::transaction(function () use ($userId): void {
+            $user = User::query()->lockForUpdate()->find($userId);
+
+            if (
+                $user === null
+                || $user->status !== UserStatus::PendingVerification
+                || $user->phone_verified_at !== null
+            ) {
+                return;
+            }
+
+            $hasDeliveredChallenge = $user->otpChallenges()
+                ->where('delivery_status', OtpDeliveryStatus::Sent->value)
+                ->whereNull('consumed_at')
+                ->whereNull('invalidated_at')
+                ->exists();
+
+            if (! $hasDeliveredChallenge) {
+                $user->delete();
+            }
         });
     }
 }

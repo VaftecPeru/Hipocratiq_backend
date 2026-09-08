@@ -16,10 +16,20 @@ final class StartMobileSession
         string $deviceName,
         string $deviceIdHash,
     ): NewAccessToken {
+        $deviceName = trim($deviceName);
         $tokenName = sprintf('mobile:%s:%s', substr($deviceIdHash, 0, 16), $deviceName);
-        $user->tokens()->where('name', $tokenName)->delete();
+        $user->tokens()
+            ->where('client_type', 'mobile')
+            ->where('device_id_hash', $deviceIdHash)
+            ->delete();
         $expiresAt = now()->addMinutes(config('authentication.mobile_token.ttl_minutes'));
         $token = $user->createToken($tokenName, [$context->value], $expiresAt);
+        $token->accessToken->forceFill([
+            'client_type' => 'mobile',
+            'actor_context' => $context,
+            'device_name' => $deviceName,
+            'device_id_hash' => $deviceIdHash,
+        ])->save();
 
         $user->update(['last_login_at' => now()]);
         $this->recordEvent->handle($user, 'mobile_login_succeeded', metadata: [

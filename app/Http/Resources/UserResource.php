@@ -17,7 +17,7 @@ class UserResource extends JsonResource
             ->with(['clinic.subscriptions' => fn ($query) => $query->where('status', 'active')->with('plan')->latest('starts_at')])
             ->first();
         $doctorProfile = $this->doctorProfile()
-            ->with(['clinic', 'subscriptions' => fn ($query) => $query->where('status', 'active')->with('plan')->latest('starts_at')])
+            ->with(['clinic', 'specialtyCatalog', 'subspecialtyCatalog', 'subscriptions' => fn ($query) => $query->where('status', 'active')->with('plan')->latest('starts_at')])
             ->first();
 
         return [
@@ -48,6 +48,10 @@ class UserResource extends JsonResource
             'doctor' => $doctorProfile === null ? null : [
                 'medical_license' => $doctorProfile->medical_license,
                 'specialty' => $doctorProfile->specialty,
+                'specialty_id' => $doctorProfile->specialty_id,
+                'subspecialty_id' => $doctorProfile->subspecialty_id,
+                'specialty_catalog' => $doctorProfile->specialtyCatalog?->only(['id', 'code', 'name']),
+                'subspecialty_catalog' => $doctorProfile->subspecialtyCatalog?->only(['id', 'code', 'name']),
                 'practice_type' => $doctorProfile->practice_type,
                 'clinic' => $doctorProfile->clinic?->only(['id', 'name']),
                 'plan' => $doctorProfile->subscriptions->first()?->plan?->key,

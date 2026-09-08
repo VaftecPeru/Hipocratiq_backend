@@ -27,6 +27,18 @@ Los clientes móviles reciben un token Bearer al verificar un OTP:
 Authorization: Bearer <access_token>
 ```
 
+### Encabezados móviles
+
+Además del token Bearer, cada petición móvil debe enviar la identidad del dispositivo:
+
+```http
+X-Client-Type: mobile
+X-Device-Name: Pixel 10
+X-Device-ID: installation-uuid
+```
+
+`X-Device-ID` debe tener entre 16 y 255 caracteres y solo puede contener letras, números y los caracteres `.`, `_`, `~`, `:`, `-`. El cliente puede enviar estos valores en el body cuando el endpoint lo documenta, pero los encabezados son obligatorios para las rutas protegidas y para continuar un draft móvil. El token de un draft nunca se envía en la URL: usa `X-Registration-Token: <draft_token>`.
+
 Las rutas protegidas requieren `auth:sanctum` y una sesión de autenticación activa. Las rutas de administración requieren además el permiso `manage-platform`.
 
 ## Respuestas y errores
@@ -56,7 +68,7 @@ Estados relevantes:
 | Estado | Uso |
 | ---: | --- |
 | `201` | Draft de clínica o médico creado |
-| `202` | OTP solicitado o reenviado; el envío continúa como desafío |
+| `202` | OTP solicitado o reenviado después de confirmar la entrega con el proveedor |
 | `200` | Operación exitosa |
 | `204` | Logout exitoso sin contenido |
 | `401` | No autenticado (`UNAUTHENTICATED`) |
@@ -64,7 +76,7 @@ Estados relevantes:
 | `419` | CSRF inválido (`CSRF_TOKEN_MISMATCH`) |
 | `422` | Payload inválido, draft expirado, plan faltante u OTP inválido |
 | `429` | Rate limit excedido; respeta `Retry-After` |
-| `503` | Proveedor OTP no disponible (`OTP_DELIVERY_UNAVAILABLE`) o Redis requerido no disponible en health |
+| `503` | Proveedor OTP (`OTP_DELIVERY_UNAVAILABLE`), facturación (`BILLING_UNAVAILABLE`) o Redis requerido no disponible |
 
 ## Política OTP
 
@@ -90,6 +102,8 @@ Al solicitar o reenviar un desafío, `data` incluye:
 
 `expires_in`, `resend_after` y `resends_remaining` son valores dinámicos; el cliente no debe asumir que permanecen constantes después de un reenvío.
 
+La reserva del desafío y la llamada al proveedor SMS se ejecutan en fases separadas. El proveedor nunca se invoca mientras exista una transacción de base de datos o un lock de draft; el desafío nuevo solo queda activo cuando la entrega se confirma. Si un reenvío falla, el OTP anterior permanece disponible.
+
 ## Endpoints públicos
 
 | Método | Ruta | Descripción |
@@ -98,6 +112,7 @@ Al solicitar o reenviar un desafío, `data` incluye:
 | `GET` | `/api/health` | Comprueba Redis configurado para caché, limitador, locks y sesión |
 | `GET` | `/api/v1/auth/register/clinic/plans` | Planes activos y seleccionables públicamente |
 | `GET` | `/api/v1/auth/register/doctor/clinics` | Clínicas activas con suscripción activa |
+| `GET` | `/api/v1/auth/register/doctor/specialties` | Especialidades activas y sus subespecialidades |
 | `GET` | `/api/v1/auth/register/patient/clinics` | Clínicas activas disponibles para pacientes |
 
 Las listas de clínicas devuelven `id`, `name`, `country_code` y `address`, ordenadas por nombre.
@@ -128,6 +143,8 @@ Payload:
 
 La respuesta es `201`, establece la cookie HttpOnly `clinic_registration` durante 30 minutos y devuelve `next_step: select_plan`. La contraseña nunca se guarda en el draft en texto plano.
 
+Para móvil, agrega `client_type: mobile`, `device_name` y `device_id`. La respuesta mantiene `201`, no crea cookie y devuelve `data.draft_token`. Conserva ese token solo en memoria segura del flujo.
+
 ### 2. Seleccionar plan
 
 `POST /api/v1/auth/register/clinic/plan`
@@ -140,6 +157,8 @@ Requiere la cookie del paso anterior:
   "billing_cycle": "monthly"
 }
 ```
+
+En móvil, envía el mismo body con `X-Registration-Token: <draft_token>` y los tres encabezados de dispositivo. La respuesta no cambia: devuelve el desafío OTP y `next_step: verify_otp`.
 
 `plan` puede ser `basic` o `professional`; `billing_cycle` puede ser `monthly` o `annual`. La respuesta crea el desafío OTP y devuelve `next_step: verify_otp`.
 
@@ -154,13 +173,15 @@ Requiere la cookie del paso anterior:
 }
 ```
 
-Solo después de plan válido y OTP correcto se crean la cuenta, clínica, membresía y suscripción. La cookie `clinic_registration` se elimina al finalizar.
+Solo después de plan válido, OTP correcto y cobro confirmado se crean la cuenta, clínica, membresía y suscripción. La cookie `clinic_registration` se elimina al finalizar. Si facturación devuelve `503 BILLING_UNAVAILABLE`, no se crean registros y el mismo OTP puede reintentarse.
 
 ### Reenviar OTP
 
 `POST /api/v1/auth/register/clinic/resend-otp`
 
 No requiere body; requiere la cookie del draft. Está sujeto al cooldown y al máximo de cinco reenvíos.
+
+En móvil no requiere body, pero requiere `X-Registration-Token` y los encabezados de dispositivo. El draft y el desafío se rechazan si pertenecen a otro dispositivo.
 
 ## Registro de médico
 
@@ -194,6 +215,8 @@ Payload base:
 
 `practice_type` es `clinic` o `independent`. Para `clinic`, `clinic_id` es obligatorio y debe pertenecer a una clínica activa con plan vigente. Para `independent`, `clinic_id` debe ser `null` y la respuesta devuelve `next_step: select_plan`.
 
+Para móvil, incluye `client_type: mobile`, `device_name` y `device_id`. El draft devuelve `draft_token`; el token se envía posteriormente mediante `X-Registration-Token`.
+
 Un médico de clínica recibe OTP inmediatamente porque la clínica cubre su plan. Un médico independiente debe completar el paso de plan antes de recibir el OTP.
 
 La cookie del flujo es `doctor_registration`.
@@ -220,7 +243,64 @@ POST /api/v1/auth/register/doctor/verify-otp
 POST /api/v1/auth/register/doctor/resend-otp
 ```
 
-La verificación usa `challenge_id` y `code` como en el registro de clínica.
+La verificación usa `challenge_id` y `code` como en el registro de clínica. Para médicos independientes, la activación requiere facturación disponible y un fallo `BILLING_UNAVAILABLE` conserva el OTP. Los médicos cubiertos por una clínica no invocan el gateway de cobro.
+
+El médico de clínica puede recibir `challenge_id` desde la respuesta inicial del draft. El médico independiente lo recibe después de seleccionar el plan. En ambos casos, las peticiones móviles deben conservar el mismo draft token y los mismos encabezados de dispositivo.
+
+## Invitación y activación de recepción
+
+La creación de cuentas de recepción desde móvil es exclusivamente por invitación. La ruta directa `/api/v1/auth/clinic/members` continúa disponible para el portal web, pero rechaza tokens móviles con `403`; una cuenta móvil debe usar el flujo siguiente.
+
+### Crear invitación
+
+`POST /api/v1/auth/clinic/receptionist-invitations`
+
+Requiere una sesión activa de `clinic_admin`, acceso a una clínica activa y el permiso `clinic.members.manage`. El body es:
+
+```json
+{
+  "name": "María López",
+  "email": "maria.recepcion@example.com",
+  "country_code": "PE",
+  "phone_number": "912345678"
+}
+```
+
+La respuesta `201` devuelve `invitation_token`, `expires_at` y `next_step: activate`. El token se muestra una sola vez y se almacena únicamente como hash en el backend. No compartas el token en logs ni lo incluyas en una URL.
+
+### Solicitar código de activación
+
+`POST /api/v1/auth/receptionist/activation/request`
+
+```json
+{
+  "invitation_token": "token-de-64-caracteres",
+  "client_type": "mobile",
+  "device_name": "Teléfono de recepción",
+  "device_id": "reception-installation-1"
+}
+```
+
+La respuesta `202` devuelve `challenge_id`, `next_step: verify_otp`, `expires_in` y `resend_after`. El backend crea una cuenta pendiente vinculada a la invitación y al dispositivo, sin activar el acceso todavía.
+
+### Verificar y activar
+
+`POST /api/v1/auth/receptionist/activation/verify`
+
+```json
+{
+  "invitation_token": "token-de-64-caracteres",
+  "client_type": "mobile",
+  "challenge_id": "uuid-del-desafio",
+  "code": "123456",
+  "device_name": "Teléfono de recepción",
+  "device_id": "reception-installation-1",
+  "password": "UnaClaveSegura123!",
+  "password_confirmation": "UnaClaveSegura123!"
+}
+```
+
+Después de validar invitación, desafío, código y dispositivo, la respuesta `200` devuelve token Bearer, usuario, `actor_context: receptionist` y `next_step: success`. La invitación queda aceptada y el token móvil queda ligado al mismo dispositivo. Un desafío de recepción no puede verificarse mediante el endpoint OTP genérico.
 
 ## Registro de paciente
 
@@ -292,7 +372,7 @@ La respuesta es `202` con `challenge_id`; finaliza con `POST /api/v1/auth/login/
 
 `POST /api/v1/auth/otp/request`
 
-Los propósitos son `registration`, `login` y `password_reset`. El cliente puede ser `web` o `mobile`; el contexto puede ser `patient`, `staff`, `clinic_admin` o `doctor`.
+Los propósitos son `registration`, `login` y `password_reset`. El cliente puede ser `web` o `mobile`. El request solo acepta los contextos públicos `patient` y `staff`; `clinic_admin` y `doctor` son contextos internos resueltos por el backend después de validar credenciales y relaciones.
 
 Ejemplo de registro móvil:
 
@@ -311,7 +391,9 @@ Ejemplo de registro móvil:
 }
 ```
 
-Para `login` o `password_reset`, usa `identifier` con correo o teléfono E.164. Un reset de contraseña requiere `password` y `password_confirmation` al verificar.
+Para `login` o `password_reset`, usa `identifier` con correo o teléfono E.164. Un reset de contraseña requiere `password` y `password_confirmation` al verificar. Las cuentas de superadmin y soporte deben recuperar su contraseña desde el portal web, no desde el cliente móvil.
+
+En login móvil, `requested_role` es obligatorio y debe coincidir exactamente con la cuenta: `patient`, `doctor`, `clinic_admin` o `receptionist`. El cliente usa `actor_context: patient` para pacientes y `actor_context: staff` para los demás roles. `super_admin` y soporte no son roles móviles y deben autenticarse mediante el portal web.
 
 ### Verificar OTP genérico
 
@@ -339,8 +421,30 @@ Todas estas rutas requieren autenticación:
 | `POST` | `/api/v1/auth/logout-all` | Revoca sesiones y tokens |
 | `GET` | `/api/v1/auth/clinic/dashboard` | Acceso a clínica activa |
 | `GET` | `/api/v1/auth/admin/clinics` | Permiso `manage-platform` |
+| `PATCH` | `/api/v1/auth/admin/clinics/{clinic}` | Actualiza datos, plan o estado de una clínica |
+| `GET` | `/api/v1/auth/admin/users` | Lista y resume usuarios de todos los países |
+| `PATCH` | `/api/v1/auth/admin/users/{user}` | Actualiza perfil o estado; revoca sesiones al bloquear |
+| `POST` | `/api/v1/auth/admin/users/{user}/messages` | Envía un correo de soporte y registra auditoría |
 
 `/me` devuelve usuario, roles, perfiles, contexto y clínica/plan relacionados. `logout-all` revoca tokens móviles y sesiones activas.
+
+Las peticiones móviles protegidas deben repetir `X-Client-Type`, `X-Device-Name` y `X-Device-ID`. Si la identidad no coincide con el token, el backend revoca ese token y devuelve `401 DEVICE_MISMATCH`.
+
+### Listado administrativo de clínicas
+
+`GET /api/v1/auth/admin/clinics` requiere una sesión web con contexto `staff` y permiso `manage-platform`. Acepta:
+
+| Parámetro | Regla |
+| --- | --- |
+| `page` | Entero desde 1 |
+| `per_page` | Entero entre 1 y 100; predeterminado 10 |
+| `search` | Nombre o dirección, máximo 100 caracteres |
+| `country_code` | `MX`, `PE` o `US` |
+| `plan` | `basic`, `professional` o `enterprise` |
+| `status` | `active` o `suspended` |
+| `city` | Coincidencia parcial sobre dirección, máximo 255 caracteres |
+
+La respuesta contiene únicamente la página solicitada en `data`, metadatos en `meta` (`current_page`, `from`, `last_page`, `per_page`, `to`, `total`) y agregados globales reales en `summary` (`totals`, `plan_distribution`, `recent_activity`). Una página vacía devuelve `data: []`; nunca se sustituye por fixtures.
 
 ## Límites de tráfico
 
@@ -378,6 +482,8 @@ curl.exe -c cookies.txt -b cookies.txt -H "Accept: application/json" -H "Content
 
 Para pruebas locales con `SMS_DRIVER=array`, los tests usan un generador OTP fijo. No habilites `OTP_FIXED_CODE` en producción.
 
+La facturación usa `BILLING_DRIVER`. El valor seguro predeterminado es `unavailable`; `simulated` solo está permitido en desarrollo y tests, y la aplicación lo rechaza en producción. Hasta implementar y seleccionar un adapter real, los registros que requieren cobro responden `503 BILLING_UNAVAILABLE` sin activar suscripciones.
+
 ## Operación y troubleshooting
 
 ```powershell
@@ -397,16 +503,54 @@ Si `/api/health` devuelve `503`, comprueba primero el estado del contenedor Redi
 - [Configuración de caché](../config/cache.php)
 - [Conexiones Redis](../config/database.php)
 - [Configuración de sesiones](../config/session.php)
+- [Configuración de facturación](../config/billing.php)
 - [Rutas](../routes/api.php)
 - [Pruebas Redis](../tests/Feature/RedisInfrastructureTest.php)
+
+## Operación administrativa global
+
+Todas las rutas siguientes requieren sesión web `staff` y permiso `manage-platform`.
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/api/v1/auth/admin/support-tickets` | Lista tickets y devuelve métricas globales, países, agentes, SLA y escalaciones |
+| `POST` | `/api/v1/auth/admin/support-tickets` | Crea ticket, Ticket ID, vencimiento SLA, actividad inicial y notificación opcional |
+| `GET` | `/api/v1/auth/admin/support-tickets/{ticket}` | Devuelve ticket e historial completo |
+| `PATCH` | `/api/v1/auth/admin/support-tickets/{ticket}` | Actualiza estado, prioridad o responsable Superadmin |
+| `POST` | `/api/v1/auth/admin/support-tickets/{ticket}/comments` | Agrega una nota interna o comentario |
+| `GET` | `/api/v1/auth/admin/audit-events` | Unifica eventos administrativos y de autenticación |
+| `GET` | `/api/v1/auth/admin/dashboard` | Consolida KPIs, pagos, países, soporte, actividad y salud de dependencias |
+| `GET` | `/api/v1/auth/admin/monitoring` | Comprueba dependencias y resume sesiones, colas, eventos y señales críticas |
+| `GET` | `/api/v1/auth/admin/billing` | Lista pagos reales con filtros, recaudación y distribución por país |
+| `GET` | `/api/v1/auth/admin/billing/export` | Exporta el resultado filtrado en CSV y registra auditoría |
+| `GET` | `/api/v1/auth/admin/reports/export` | Exporta el resumen ejecutivo global en CSV y registra auditoría |
+| `GET` | `/api/v1/auth/admin/emergency` | Consulta política global, responsables y cobertura efectiva |
+| `PATCH` | `/api/v1/auth/admin/emergency` | Persiste la política y plantilla de responsables |
+| `POST` | `/api/v1/auth/admin/emergency/publish` | Publica por país o globalmente y registra auditoría crítica |
+| `PATCH` | `/api/v1/auth/admin/clinics/{clinic}` | Actualiza nombre, país, dirección, plan o estado |
+| `GET` | `/api/v1/auth/admin/users` | Lista usuarios globales con filtros, distribuciones y actividad |
+| `PATCH` | `/api/v1/auth/admin/users/{user}` | Actualiza datos y controla acceso del usuario |
+| `POST` | `/api/v1/auth/admin/users/{user}/messages` | Programa un mensaje por correo y copia opcional al operador |
+
+El listado de soporte acepta `search`, `clinic_id`, `country_code`, `category`, `priority`, `status`, `assigned_to_user_id`, `overdue`, `page` y `per_page`. Los SLA por prioridad son: urgente 2 horas, alta 8 horas, normal 24 horas y baja 72 horas.
+
+Auditoría acepta `search`, `user_id`, `module`, `action`, `country_code`, `critical`, `date_from`, `date_to`, `page` y `per_page`. Devuelve totales, usuarios únicos, países afectados, eventos críticos, cambios recientes y módulos con mayor actividad. Las escrituras de soporte, membresías y configuración regional registran actor, IP, país, tenant, recurso y metadatos antes/después cuando corresponde.
+
+La actualización de usuarios no modifica roles ni membresías: esos permisos se administran en su flujo dedicado. Suspender o deshabilitar revoca sesiones y tokens, y el Superadmin no puede bloquear su propia cuenta. Los mensajes requieren correo del destinatario y nunca almacenan el cuerpo en auditoría.
+
+Dashboard y monitoreo no inventan telemetría. Exponen agregados de la base transaccional y comprobaciones ejecutadas al solicitar la vista (API, base de datos, caché, cola y almacenamiento). CPU, memoria, uptime histórico, latencia p95 y deployments deben incorporarse posteriormente desde un proveedor de observabilidad.
 
 ## Versionado y mantenimiento
 
 La API pública se versiona con el prefijo `/v1`. Los cambios de validación, límites OTP, autenticación o forma de respuesta deben actualizar simultáneamente este documento, [openapi.yaml](../../documentacion/openapi.yaml) y las pruebas de `tests/Feature`.
 
-### Versión 1.1.0
+### Versión 1.2.0
 
 - Redis distribuido para caché, sesiones, locks y rate limiting.
 - Registro de paciente con clínica obligatoria y plan diferido.
 - Registro independiente de médico condicionado a selección de plan.
 - OTP con expiración, cooldown, intentos y máximo de reenvíos documentados.
+- Entrega OTP en dos fases, sin I/O de red dentro de transacciones o locks.
+- Listado administrativo paginado con filtros y agregados reales.
+- Gateway de facturación fail-closed; simulación prohibida en producción.
+- Contratos móviles para registros de doctor y clínica mediante drafts, invitaciones de recepción y tokens ligados al dispositivo.

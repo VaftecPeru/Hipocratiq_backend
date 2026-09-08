@@ -20,12 +20,19 @@ Desde `back_api`:
 Copy-Item .env.example .env
 composer install
 php artisan key:generate
-docker compose up -d
-php artisan migrate --seed
-php artisan serve --host=127.0.0.1 --port=8000
+docker compose up --build -d
 ```
 
-La API queda disponible en `http://127.0.0.1:8000`. Comprueba el estado con:
+`docker compose up` inicia PostgreSQL, Redis y la API HTTP. La API queda disponible únicamente en `http://127.0.0.1:8000`. El archivo `.env` se carga en tiempo de ejecución y debe contener un `APP_KEY` generado; no se copia dentro de la imagen.
+
+El arranque no ejecuta migraciones, seeders, workers ni cachés de configuración. Ejecuta estas operaciones manualmente solo cuando corresponda:
+
+```powershell
+docker compose exec app php artisan migrate --force --no-interaction
+docker compose exec app php artisan db:seed --class=DemoUsersSeeder --force --no-interaction
+```
+
+Comprueba el estado con:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health | ConvertTo-Json -Depth 5
@@ -39,6 +46,7 @@ La configuración local de Docker utiliza PostgreSQL en `127.0.0.1:5433` y Redis
 
 | Servicio | Uso | Persistencia |
 | --- | --- | --- |
+| API HTTP (FrankenPHP) | API Laravel para pruebas locales | Imagen de aplicación; sin workers |
 | PostgreSQL 17 | Datos de aplicación | Volumen `postgres-data` |
 | Redis 8.2.7 | Caché, drafts, sesiones, locks y rate limiting | AOF + volumen `redis-data` |
 

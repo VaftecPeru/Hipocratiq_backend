@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Actions\Auth\RecordAuthenticationEvent;
+use App\Enums\AuthenticationClient;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\AuthenticationSession;
@@ -24,10 +25,8 @@ class SessionController extends Controller
             'success' => true,
             'data' => [
                 'user' => new UserResource($request->user()),
-                'client_type' => $accessToken instanceof PersonalAccessToken ? 'mobile' : 'web',
-                'actor_context' => $accessToken instanceof PersonalAccessToken
-                    ? $accessToken->abilities[0] ?? null
-                    : $request->session()->get('actor_context'),
+                'client_type' => $this->clientType($accessToken),
+                'actor_context' => $request->attributes->get('actor_context'),
             ],
         ]);
     }
@@ -37,6 +36,14 @@ class SessionController extends Controller
         AuthenticationSessionKey $sessionKey,
         RecordAuthenticationEvent $recordEvent,
     ): JsonResponse {
+        if ($request->user()->currentAccessToken() instanceof PersonalAccessToken || ! $request->hasSession()) {
+            return response()->json([
+                'success' => false,
+                'code' => 'WEB_SESSION_REQUIRED',
+                'message' => 'Esta operación requiere una sesión web.',
+            ], 400);
+        }
+
         $currentHash = $sessionKey->make($request->session()->getId());
         $session = AuthenticationSession::query()
             ->whereBelongsTo($request->user())
@@ -59,30 +66,32 @@ class SessionController extends Controller
         AuthenticationSessionKey $sessionKey,
         RecordAuthenticationEvent $recordEvent,
     ): Response {
-        $accessToken = $request->user()->currentAccessToken();
+        $user = $request->user();
+        $accessToken = $user->currentAccessToken();
 
         if ($accessToken instanceof PersonalAccessToken) {
-            $recordEvent->handle($request->user(), 'mobile_logout', metadata: [
-                'token_id' => $accessToken->id,
-            ]);
+            $tokenId = $accessToken->id;
             $accessToken->delete();
             Auth::forgetGuards();
+            $recordEvent->handleSafely($user, 'mobile_logout', metadata: [
+                'token_id' => $tokenId,
+            ]);
 
             return response()->noContent();
         }
 
         AuthenticationSession::query()
-            ->whereBelongsTo($request->user())
+            ->whereBelongsTo($user)
             ->where('session_id_hash', $sessionKey->make($request->session()->getId()))
             ->update([
                 'revoked_at' => now(),
                 'revoked_reason' => 'logout',
             ]);
 
-        $recordEvent->handle($request->user(), 'logout');
         Auth::guard('web')->logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
+        $recordEvent->handleSafely($user, 'logout');
 
         return response()->noContent();
     }
@@ -104,14 +113,25 @@ class SessionController extends Controller
             DB::table(config('session.table', 'sessions'))->where('user_id', $user->id)->delete();
         }
 
-        $recordEvent->handle($user, 'logout_all');
-
         if ($request->hasSession()) {
             Auth::guard('web')->logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();
         }
 
+        $recordEvent->handleSafely($user, 'logout_all');
+
         return response()->noContent();
+    }
+
+    private function clientType(mixed $accessToken): string
+    {
+        if (! $accessToken instanceof PersonalAccessToken) {
+            return AuthenticationClient::Web->value;
+        }
+
+        return $accessToken->client_type instanceof AuthenticationClient
+            ? $accessToken->client_type->value
+            : (string) ($accessToken->client_type ?? AuthenticationClient::Web->value);
     }
 }

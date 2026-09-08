@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+.auth-cookies.txt
+.codebase-memory
+.phpunit.result.cache
+back_api_dump.sql
+node_modules
+vendor
+storage/framework
+storage/logs

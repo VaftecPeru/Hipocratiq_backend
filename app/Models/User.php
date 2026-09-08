@@ -55,6 +55,16 @@ class User extends Authenticatable
         return $this->hasMany(AuthenticationSession::class);
     }
 
+    public function requestedSupportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class, 'requested_by_user_id');
+    }
+
+    public function assignedSupportTickets(): HasMany
+    {
+        return $this->hasMany(SupportTicket::class, 'assigned_to_user_id');
+    }
+
     public function roles(): BelongsToMany
     {
         return $this->belongsToMany(Role::class)->withTimestamps();
@@ -63,6 +73,36 @@ class User extends Authenticatable
     public function clinicMemberships(): HasMany
     {
         return $this->hasMany(ClinicMembership::class);
+    }
+
+    public function doctorAppointments(): HasMany
+    {
+        return $this->hasMany(Appointment::class, 'doctor_user_id');
+    }
+
+    public function ownedPatients(): HasMany
+    {
+        return $this->hasMany(PatientProfile::class, 'owner_doctor_user_id');
+    }
+
+    public function registeredPatientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class, 'registered_by_user_id');
+    }
+
+    public function requestedPatientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class, 'requested_doctor_user_id');
+    }
+
+    public function doctorConsultations(): HasMany
+    {
+        return $this->hasMany(Consultation::class, 'doctor_user_id');
+    }
+
+    public function doctorClinicalHistoryRecords(): HasMany
+    {
+        return $this->hasMany(ClinicalHistoryRecord::class, 'doctor_user_id');
     }
 
     public function hasActiveClinicMembership(): bool
@@ -75,6 +115,18 @@ class User extends Authenticatable
         return $this->clinicMemberships()
             ->where('status', 'active')
             ->whereHas('role', fn ($query) => $query->where('key', RoleKey::ClinicAdmin->value))
+            ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
+                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+            }))
+            ->exists();
+    }
+
+    public function hasActiveReceptionistAccess(): bool
+    {
+        return $this->clinicMemberships()
+            ->where('status', 'active')
+            ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Receptionist->value))
             ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
             ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
                 $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
