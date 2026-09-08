@@ -13,6 +13,7 @@ use App\Models\Plan;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
+use App\Services\Notifications\ClinicalNotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
@@ -62,15 +63,42 @@ class ClinicalNotificationTest extends TestCase
             'clinic_id' => $clinic->id,
             'user_id' => $admin->id,
             'event_key' => 'emergency_published',
+            'href' => '/clinic/configuracion/emergencia',
         ]);
         $this->assertDatabaseHas('clinical_notifications', [
             'clinic_id' => $clinic->id,
             'user_id' => $doctor->id,
             'event_key' => 'emergency_published',
+            'href' => '/doctor/dashboard',
         ]);
         $this->assertDatabaseMissing('clinical_notifications', [
             'clinic_id' => $clinic->id,
             'user_id' => $receptionist->id,
+        ]);
+    }
+
+    public function test_receptionist_emergency_notification_uses_the_clinic_dashboard_destination(): void
+    {
+        $clinic = $this->createClinic();
+        $receptionist = $this->createMember($clinic, RoleKey::Receptionist, '+525510000004');
+
+        app(ClinicalNotificationService::class)->createForEmergency(
+            [$clinic],
+            [
+                'enabled' => true,
+                'visibility' => 'reception_doctors_admins',
+                'label' => 'Emergency',
+            ],
+            'emergency_activated',
+            'test',
+            'receptionist-destination-test',
+        );
+
+        $this->assertDatabaseHas('clinical_notifications', [
+            'clinic_id' => $clinic->id,
+            'user_id' => $receptionist->id,
+            'event_key' => 'emergency_activated',
+            'href' => '/clinic/dashboard',
         ]);
     }
 

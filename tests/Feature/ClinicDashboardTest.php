@@ -369,6 +369,7 @@ class ClinicDashboardTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.name', 'Recepcionista de Clínica')
             ->assertJsonPath('data.role', 'receptionist')
+            ->assertJsonPath('data.country_code', 'MX')
             ->assertJsonPath('meta.requires_password_reset', true);
 
         $user = User::query()->where('email', 'recepcionista@clinic.test')->firstOrFail();

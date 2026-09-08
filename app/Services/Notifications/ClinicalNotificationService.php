@@ -140,8 +140,10 @@ final class ClinicalNotificationService
 
     private function hrefFor(string $roleKey): string
     {
-        return $roleKey === RoleKey::Doctor->value
-            ? '/doctor/dashboard'
-            : '/clinic/configuracion/emergencia';
+        return match ($roleKey) {
+            RoleKey::Doctor->value => '/doctor/dashboard',
+            RoleKey::Receptionist->value => '/clinic/dashboard',
+            default => '/clinic/configuracion/emergencia',
+        };
     }
 }

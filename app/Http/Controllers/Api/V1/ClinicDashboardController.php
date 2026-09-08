@@ -113,7 +113,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $user->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -675,7 +675,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $user->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -716,7 +716,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $member->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -760,7 +760,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $member->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -825,7 +825,7 @@ class ClinicDashboardController extends Controller
             ->where('status', ClinicMembershipStatus::Active->value)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->get();
@@ -970,6 +970,7 @@ class ClinicDashboardController extends Controller
             'name' => $membership->user->name,
             'email' => $membership->user->email,
             'phone_number' => $membership->user->phone_number,
+            'country_code' => $membership->user->country_code,
             'status' => $membership->user->status->value,
             'role' => $membership->role->key,
             'role_name' => $membership->role->name,
