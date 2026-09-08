@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\ReceptionistActivationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\ClinicalNotificationController;
 use App\Http\Controllers\Api\V1\ClinicDashboardController;
 use App\Http\Controllers\Api\V1\ClinicReceptionistInvitationController;
 use App\Http\Controllers\Api\V1\DoctorAppointmentController;
@@ -149,6 +150,15 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/session/renew', [SessionController::class, 'renew'])->name('session.renew');
         Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
+        Route::get('/clinical/notifications', [ClinicalNotificationController::class, 'index'])
+            ->middleware('actor.context:clinic_admin,receptionist,doctor')
+            ->name('clinical.notifications.index');
+        Route::post('/clinical/notifications/read', [ClinicalNotificationController::class, 'read'])
+            ->middleware('actor.context:clinic_admin,receptionist,doctor')
+            ->name('clinical.notifications.read');
+        Route::post('/clinical/notifications/read-all', [ClinicalNotificationController::class, 'readAll'])
+            ->middleware('actor.context:clinic_admin,receptionist,doctor')
+            ->name('clinical.notifications.read-all');
         Route::get('/doctor/profile', [DoctorProfileController::class, 'show'])
             ->middleware('actor.context:doctor')
             ->name('doctor.profile.show');

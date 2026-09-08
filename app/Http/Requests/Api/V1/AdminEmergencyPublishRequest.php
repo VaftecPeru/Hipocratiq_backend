@@ -20,6 +20,7 @@ class AdminEmergencyPublishRequest extends FormRequest
             'scope' => ['sometimes', Rule::in(['all'])],
             'force' => ['sometimes', 'boolean'],
             'note' => ['nullable', 'string', 'max:500'],
+            'idempotency_key' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9._:-]+$/'],
         ];
     }
 }

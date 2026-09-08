@@ -10,13 +10,17 @@ use App\Http\Requests\Api\V1\AdminEmergencyPublishRequest;
 use App\Models\AdminAuditEvent;
 use App\Models\Clinic;
 use App\Models\PlatformSetting;
+use App\Services\Notifications\ClinicalNotificationService;
 use App\Support\Clinical\EmergencyPolicyResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class AdminEmergencyController extends Controller
 {
-    public function __construct(private readonly EmergencyPolicyResolver $emergencyPolicies) {}
+    public function __construct(
+        private readonly EmergencyPolicyResolver $emergencyPolicies,
+        private readonly ClinicalNotificationService $clinicalNotifications,
+    ) {}
 
     public function show(): JsonResponse
     {
@@ -74,10 +78,22 @@ class AdminEmergencyController extends Controller
         [$settings, $affected] = DB::transaction(function () use ($request, $audit): array {
             $settings = $this->lockedSettings();
             $data = $request->validated();
+            $idempotencyKey = $data['idempotency_key'] ?? null;
+
+            if ($idempotencyKey !== null
+                && is_array($settings->emergency_publication)
+                && ($settings->emergency_publication['idempotency_key'] ?? null) === $idempotencyKey) {
+                return [
+                    $settings,
+                    (int) ($settings->emergency_publication['affected_clinics'] ?? Clinic::query()->count()),
+                ];
+            }
+
             $publishedAt = now();
             $policy = $this->emergencyPolicies->platformPolicy($settings);
             $responsibles = $this->emergencyPolicies->platformResponsibles($settings);
             $actor = $request->user();
+            $affected = Clinic::query()->count();
             $publication = [
                 'scope' => 'all',
                 'force' => true,
@@ -90,15 +106,16 @@ class AdminEmergencyController extends Controller
                 ],
                 'policy' => $policy,
                 'responsibles' => $responsibles,
+                'idempotency_key' => $idempotencyKey,
+                'affected_clinics' => $affected,
             ];
-            $affected = Clinic::query()->count();
 
             $settings->forceFill([
                 'emergency_published_at' => $publishedAt,
                 'emergency_publication' => $publication,
             ])->save();
             $settings->refresh();
-            $audit->handle(
+            $auditEvent = $audit->handle(
                 $request->user(),
                 $request,
                 'emergency',
@@ -117,9 +134,25 @@ class AdminEmergencyController extends Controller
                     'responsibles' => $responsibles,
                     'published_by' => $publication['published_by'],
                     'published_at' => $publishedAt->toIso8601String(),
+                    'idempotency_key' => $idempotencyKey,
                 ],
                 critical: true,
             );
+
+            $notificationStats = $this->clinicalNotifications->createForEmergency(
+                Clinic::query()->where('status', ClinicStatus::Active->value)->get(),
+                $policy,
+                'emergency_published',
+                'emergency_publication',
+                (string) $auditEvent->getKey(),
+                $data['note'] ?? null,
+            );
+            $auditEvent->update([
+                'metadata' => [
+                    ...((array) $auditEvent->metadata),
+                    'notifications' => $notificationStats,
+                ],
+            ]);
 
             return [$settings, $affected];
         });

@@ -12,6 +12,7 @@ use App\Models\ClinicSubscription;
 use App\Models\DoctorProfile;
 use App\Models\PatientProfile;
 use App\Models\Plan;
+use App\Models\PlatformSetting;
 use App\Models\Role;
 use App\Models\Specialty;
 use App\Models\User;
@@ -144,6 +145,75 @@ class ClinicPatientIntakeTest extends TestCase
             'triage_priority' => 'urgent',
             'triage_notes' => 'Fiebre leve y taquicardia durante la valoración.',
         ]);
+    }
+
+    public function test_emergency_intake_uses_effective_policy_and_records_a_critical_audit_event(): void
+    {
+        $settings = PlatformSetting::query()->findOrFail(1);
+        $settings->forceFill([
+            'emergency_policy' => [
+                'enabled' => true,
+                'label' => 'Código rojo global',
+                'default_channel' => 'priority_push',
+                'escalation_minutes' => 1,
+            ],
+            'emergency_responsibles' => [
+                ['role' => 'Jefe de guardia', 'channel' => 'Push prioritario'],
+            ],
+            'emergency_published_at' => now(),
+            'emergency_publication' => [
+                'scope' => 'all',
+                'force' => true,
+                'policy' => [
+                    'enabled' => true,
+                    'label' => 'Código rojo global',
+                    'default_channel' => 'priority_push',
+                    'escalation_minutes' => 1,
+                ],
+                'responsibles' => [
+                    ['role' => 'Jefe de guardia', 'channel' => 'Push prioritario'],
+                ],
+            ],
+        ])->save();
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/patients', $this->payload([
+            'triage_priority' => 'emergency',
+            'triage_notes' => 'Dolor torácico requiere atención inmediata.',
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('data.triage.priority', 'emergency');
+
+        $this->assertDatabaseHas('admin_audit_events', [
+            'clinic_id' => $this->clinic->id,
+            'module' => 'emergency',
+            'action' => 'emergency_intake_created',
+            'is_critical' => true,
+        ]);
+    }
+
+    public function test_rejects_emergency_intake_when_effective_policy_is_disabled(): void
+    {
+        $settings = PlatformSetting::query()->findOrFail(1);
+        $settings->forceFill([
+            'emergency_policy' => ['enabled' => false],
+            'emergency_published_at' => now(),
+            'emergency_publication' => [
+                'scope' => 'all',
+                'force' => true,
+                'policy' => ['enabled' => false],
+                'responsibles' => [],
+            ],
+        ])->save();
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/patients', $this->payload([
+            'triage_priority' => 'emergency',
+            'triage_notes' => 'Ingreso urgente bloqueado por política deshabilitada.',
+        ]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('triage_priority');
+
+        $this->assertDatabaseCount('patient_intakes', 0);
+        $this->assertDatabaseMissing('users', ['email' => 'patient.intake@clinic.test']);
     }
 
     public function test_rejects_triage_values_outside_reasonable_bounds_and_rolls_back_patient(): void

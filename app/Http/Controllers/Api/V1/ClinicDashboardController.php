@@ -30,6 +30,7 @@ use App\Models\ClinicMembership;
 use App\Models\PatientIntake;
 use App\Models\PatientProfile;
 use App\Models\User;
+use App\Services\Notifications\ClinicalNotificationService;
 use App\Support\Clinical\EmergencyPolicyResolver;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
@@ -50,7 +51,10 @@ class ClinicDashboardController extends Controller
         'backups' => true,
     ];
 
-    public function __construct(private readonly EmergencyPolicyResolver $emergencyPolicies) {}
+    public function __construct(
+        private readonly EmergencyPolicyResolver $emergencyPolicies,
+        private readonly ClinicalNotificationService $clinicalNotifications,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -188,10 +192,50 @@ class ClinicDashboardController extends Controller
     public function storePatient(
         ClinicPatientStoreRequest $request,
         CreateClinicPatient $createPatient,
+        RecordAdminAuditEvent $audit,
     ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $emergencyResolution = $request->validated('triage_priority') === 'emergency'
+            ? $this->emergencyPolicies->resolve($clinic)
+            : null;
+
+        if ($emergencyResolution !== null && ! (bool) ($emergencyResolution['effective']['enabled'] ?? false)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La política de emergencias no está habilitada para esta clínica.',
+                'errors' => [
+                    'triage_priority' => ['La admisión de emergencia está deshabilitada para esta clínica.'],
+                ],
+            ], 422);
+        }
+
         $patient = $createPatient
-            ->handle($request->validated(), $this->clinic($request), $request->user())
+            ->handle($request->validated(), $clinic, $request->user())
             ->load(['user', 'latestIntake.registrar:id,name']);
+
+        if ($emergencyResolution !== null && $patient->latestIntake?->triage_priority === 'emergency') {
+            $effective = $emergencyResolution['effective'];
+
+            $audit->handle(
+                $request->user(),
+                $request,
+                'emergency',
+                'emergency_intake_created',
+                PatientProfile::class,
+                $patient->getKey(),
+                $patient->user?->name,
+                clinic: $clinic,
+                countryCode: $clinic->country_code,
+                metadata: [
+                    'patient_intake_id' => $patient->latestIntake->getKey(),
+                    'policy' => $effective,
+                    'global_override' => $emergencyResolution['global_override'],
+                    'responsibles' => $effective['responsibles'] ?? [],
+                    'delivery' => ['in_app_audit' => true, 'external_channels' => false],
+                ],
+                critical: true,
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -421,10 +465,11 @@ class ClinicDashboardController extends Controller
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
         $clinic = DB::transaction(function () use ($request, $audit): Clinic {
-            $clinic = $this->clinic($request);
+            $clinic = Clinic::query()->lockForUpdate()->findOrFail($this->clinic($request)->getKey());
             $validated = $request->validated();
             $before = $clinic->only(['name', 'contact_phone', 'address']);
             $before['preferences'] = $this->clinicPreferences($clinic);
+            $beforeEmergency = $this->emergencyPolicies->localPolicy($clinic);
 
             if (is_array($validated['preferences'] ?? null)) {
                 $incomingPreferences = $validated['preferences'];
@@ -444,6 +489,7 @@ class ClinicDashboardController extends Controller
             }
 
             $clinic->fill($validated)->save();
+            $afterEmergency = $this->emergencyPolicies->localPolicy($clinic);
 
             $audit->handle(
                 $request->user(),
@@ -462,6 +508,44 @@ class ClinicDashboardController extends Controller
                     ],
                 ],
             );
+
+            if (! (bool) ($beforeEmergency['enabled'] ?? false)
+                && (bool) ($afterEmergency['enabled'] ?? false)) {
+                $resolution = $this->emergencyPolicies->resolve($clinic);
+
+                if (! (bool) ($resolution['is_overridden'] ?? false)) {
+                    $emergencyAudit = $audit->handle(
+                        $request->user(),
+                        $request,
+                        'emergency',
+                        'emergency_activated',
+                        Clinic::class,
+                        $clinic->getKey(),
+                        $clinic->name,
+                        clinic: $clinic,
+                        countryCode: $clinic->country_code,
+                        metadata: [
+                            'policy' => $resolution['effective'],
+                            'responsibles' => $resolution['effective']['responsibles'] ?? [],
+                            'delivery' => ['in_app' => true, 'external_channels' => false],
+                        ],
+                        critical: true,
+                    );
+                    $notificationStats = $this->clinicalNotifications->createForEmergency(
+                        [$clinic],
+                        $resolution['effective'],
+                        'emergency_activated',
+                        'emergency_activation',
+                        (string) $emergencyAudit->getKey(),
+                    );
+                    $emergencyAudit->update([
+                        'metadata' => [
+                            ...((array) $emergencyAudit->metadata),
+                            'notifications' => $notificationStats,
+                        ],
+                    ]);
+                }
+            }
 
             return $clinic;
         });
