@@ -23,8 +23,12 @@ use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\ReceptionistActivationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\ClinicalNotificationController;
+use App\Http\Controllers\Api\V1\ClinicBillingController;
 use App\Http\Controllers\Api\V1\ClinicDashboardController;
+use App\Http\Controllers\Api\V1\ClinicEpidemiologyController;
+use App\Http\Controllers\Api\V1\ClinicMessagesController;
 use App\Http\Controllers\Api\V1\ClinicReceptionistInvitationController;
+use App\Http\Controllers\Api\V1\ClinicReceptionistSettingsController;
 use App\Http\Controllers\Api\V1\DoctorAppointmentController;
 use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
@@ -32,6 +36,7 @@ use App\Http\Controllers\Api\V1\DoctorDashboardController;
 use App\Http\Controllers\Api\V1\DoctorPatientController;
 use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
+use App\Http\Controllers\Api\V1\DoctorWorkspaceController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
@@ -219,6 +224,48 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/doctor/consultations/{consultation}', [DoctorConsultationController::class, 'update'])
             ->middleware('actor.context:doctor')
             ->name('doctor.consultations.update');
+        Route::get('/doctor/prescriptions', [DoctorWorkspaceController::class, 'prescriptions'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.prescriptions.index');
+        Route::post('/doctor/prescriptions', [DoctorWorkspaceController::class, 'storePrescription'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.prescriptions.store');
+        Route::patch('/doctor/prescriptions/{prescription}', [DoctorWorkspaceController::class, 'updatePrescription'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.prescriptions.update');
+        Route::get('/doctor/laboratory', [DoctorWorkspaceController::class, 'laboratory'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.laboratory.index');
+        Route::post('/doctor/laboratory', [DoctorWorkspaceController::class, 'storeLaboratoryOrder'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.laboratory.store');
+        Route::patch('/doctor/laboratory/{order}/status', [DoctorWorkspaceController::class, 'updateLaboratoryOrderStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.laboratory.status.update');
+        Route::get('/doctor/teleconsultations', [DoctorWorkspaceController::class, 'teleconsultations'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.teleconsultations.index');
+        Route::post('/doctor/teleconsultations', [DoctorWorkspaceController::class, 'storeTeleconsultation'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.teleconsultations.store');
+        Route::patch('/doctor/teleconsultations/{teleconsultation}/status', [DoctorWorkspaceController::class, 'updateTeleconsultationStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.teleconsultations.status.update');
+        Route::get('/doctor/messages', [DoctorWorkspaceController::class, 'messages'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.messages.index');
+        Route::post('/doctor/messages', [DoctorWorkspaceController::class, 'storeMessage'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.messages.store');
+        Route::patch('/doctor/messages/{message}/read', [DoctorWorkspaceController::class, 'markMessageRead'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.messages.read');
+        Route::get('/doctor/reports', [DoctorWorkspaceController::class, 'reports'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.reports.show');
+        Route::get('/doctor/epidemiology', [DoctorWorkspaceController::class, 'epidemiology'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.epidemiology.show');
 
         Route::get('/clinic/dashboard', [ClinicDashboardController::class, 'show'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
@@ -280,6 +327,36 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/clinic/settings', [ClinicDashboardController::class, 'updateSettings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.settings.manage'])
             ->name('clinic.settings.update');
+        Route::get('/clinic/epidemiology', [ClinicEpidemiologyController::class, 'show'])
+            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->name('clinic.epidemiology.show');
+        Route::prefix('clinic/messages')->name('clinic.messages.')->group(function (): void {
+            Route::middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])->group(function (): void {
+                Route::get('/', [ClinicMessagesController::class, 'index'])->name('index');
+                Route::post('/', [ClinicMessagesController::class, 'store'])->name('store');
+                Route::patch('/{message}/read', [ClinicMessagesController::class, 'markRead'])->name('read');
+            });
+        });
+        Route::prefix('clinic/receptionist/settings')->name('clinic.receptionist.settings.')->group(function (): void {
+            Route::get('/', [ClinicReceptionistSettingsController::class, 'show'])
+                ->middleware(['actor.context:receptionist', 'clinic.access'])
+                ->name('show');
+            Route::patch('/', [ClinicReceptionistSettingsController::class, 'update'])
+                ->middleware(['actor.context:receptionist', 'clinic.access'])
+                ->name('update');
+        });
+        Route::prefix('clinic/billing')->name('clinic.billing.')->group(function (): void {
+            Route::middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])->group(function (): void {
+                Route::get('/invoices', [ClinicBillingController::class, 'index'])->name('invoices.index');
+                Route::get('/invoices/{invoice}', [ClinicBillingController::class, 'show'])->name('invoices.show');
+                Route::post('/invoices/{invoice}/payments', [ClinicBillingController::class, 'storePayment'])->name('payments.store');
+                Route::get('/report', [ClinicBillingController::class, 'report'])->name('report');
+            });
+            Route::middleware(['actor.context:clinic_admin', 'clinic.access'])->group(function (): void {
+                Route::post('/invoices', [ClinicBillingController::class, 'store'])->name('invoices.store');
+                Route::get('/subscription', [ClinicBillingController::class, 'subscription'])->name('subscription.show');
+            });
+        });
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');

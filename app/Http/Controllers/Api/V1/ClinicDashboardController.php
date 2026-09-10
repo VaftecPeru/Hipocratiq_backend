@@ -31,6 +31,7 @@ use App\Models\PatientIntake;
 use App\Models\PatientProfile;
 use App\Models\User;
 use App\Services\Notifications\ClinicalNotificationService;
+use App\Support\Clinical\DoctorScheduling;
 use App\Support\Clinical\EmergencyPolicyResolver;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
@@ -54,6 +55,7 @@ class ClinicDashboardController extends Controller
     public function __construct(
         private readonly EmergencyPolicyResolver $emergencyPolicies,
         private readonly ClinicalNotificationService $clinicalNotifications,
+        private readonly DoctorScheduling $doctorScheduling,
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -593,29 +595,33 @@ class ClinicDashboardController extends Controller
     ): JsonResponse {
         $clinic = $this->clinic($request);
         $this->clinicAppointment($clinic, $appointment);
+        $validated = $request->validated();
 
-        if (array_key_exists('doctor_user_id', $request->validated())) {
-            $doctorIsClinicMember = $clinic->memberships()
-                ->where('user_id', $request->validated('doctor_user_id'))
-                ->where('status', ClinicMembershipStatus::Active->value)
-                ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Doctor->value))
-                ->exists();
+        $appointment = DB::transaction(function () use ($appointment, $clinic, $validated): Appointment {
+            $lockedAppointment = Appointment::query()
+                ->whereKey($appointment->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $this->clinicAppointment($clinic, $lockedAppointment);
 
-            if (! $doctorIsClinicMember) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'El médico no es miembro activo de esta clínica.',
-                    'errors' => ['doctor_user_id' => ['El médico no es miembro activo de esta clínica.']],
-                ], 422);
+            if (array_key_exists('doctor_user_id', $validated) || array_key_exists('scheduled_at', $validated)) {
+                $doctorProfile = $this->doctorScheduling->resolveClinicDoctor(
+                    $clinic,
+                    (int) ($validated['doctor_user_id'] ?? $lockedAppointment->doctor_user_id),
+                    true,
+                );
+                $scheduledAt = $validated['scheduled_at'] ?? $lockedAppointment->scheduled_at;
+                $this->doctorScheduling->assertBookable($doctorProfile, $clinic, Carbon::parse((string) $scheduledAt), $lockedAppointment->id);
             }
-        }
 
-        $appointment->update($request->validated());
-        $appointment->load([
-            'patientProfile.user:id,name,email,phone_number',
-            'doctor:id,name',
-            'doctor.doctorProfile:id,user_id,specialty',
-        ]);
+            $lockedAppointment->update($validated);
+
+            return $lockedAppointment->fresh([
+                'patientProfile.user:id,name,email,phone_number',
+                'doctor:id,name',
+                'doctor.doctorProfile:id,user_id,specialty',
+            ]);
+        });
 
         $audit->handle(
             $request->user(),
@@ -638,15 +644,28 @@ class ClinicDashboardController extends Controller
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
         $clinic = $this->clinic($request);
-        $this->clinicAppointment($clinic, $appointment);
+        $nextStatus = AppointmentStatus::from((string) $request->validated('status'));
+        $result = DB::transaction(function () use ($appointment, $clinic, $nextStatus): array {
+            $lockedAppointment = Appointment::query()
+                ->whereKey($appointment->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $this->clinicAppointment($clinic, $lockedAppointment);
+            $previousStatus = $lockedAppointment->status->value;
+            $this->doctorScheduling->assertAppointmentStatusTransition($lockedAppointment->status, $nextStatus);
+            $lockedAppointment->update(['status' => $nextStatus]);
+            $lockedAppointment->load([
+                'patientProfile.user:id,name,email,phone_number',
+                'doctor:id,name',
+                'doctor.doctorProfile:id,user_id,specialty',
+            ]);
 
-        $previousStatus = $appointment->status->value;
-        $appointment->update(['status' => $request->validated('status')]);
-        $appointment->load([
-            'patientProfile.user:id,name,email,phone_number',
-            'doctor:id,name',
-            'doctor.doctorProfile:id,user_id,specialty',
-        ]);
+            return [
+                'appointment' => $lockedAppointment,
+                'previous_status' => $previousStatus,
+            ];
+        });
+        $appointment = $result['appointment'];
 
         $audit->handle(
             $request->user(),
@@ -657,7 +676,7 @@ class ClinicDashboardController extends Controller
             $appointment->id,
             null,
             clinic: $clinic,
-            metadata: ['from' => $previousStatus, 'to' => $request->validated('status')],
+            metadata: ['from' => $result['previous_status'], 'to' => $request->validated('status')],
         );
 
         return response()->json(['success' => true, 'data' => $this->serializeAppointment($appointment)]);
@@ -922,11 +941,27 @@ class ClinicDashboardController extends Controller
 
     private function appointmentsQuery(Clinic $clinic): Relation
     {
-        return $clinic->appointments()->with([
-            'patientProfile.user:id,name,email,phone_number',
-            'doctor:id,name',
-            'doctor.doctorProfile:id,user_id,specialty',
-        ]);
+        return $clinic->appointments()
+            ->where(function (Builder $query) use ($clinic): void {
+                $query
+                    ->whereNull('doctor_user_id')
+                    ->orWhereHas('doctor', function (Builder $doctorQuery) use ($clinic): void {
+                        $doctorQuery
+                            ->where('status', UserStatus::Active->value)
+                            ->whereHas('doctorProfile', fn (Builder $profileQuery): Builder => $profileQuery->where('clinic_id', $clinic->id))
+                            ->whereHas('clinicMemberships', function (Builder $membershipQuery) use ($clinic): void {
+                                $membershipQuery
+                                    ->where('clinic_id', $clinic->id)
+                                    ->where('status', ClinicMembershipStatus::Active->value)
+                                    ->whereHas('role', fn (Builder $roleQuery): Builder => $roleQuery->where('key', RoleKey::Doctor->value));
+                            });
+                    });
+            })
+            ->with([
+                'patientProfile.user:id,name,email,phone_number',
+                'doctor:id,name',
+                'doctor.doctorProfile:id,user_id,specialty',
+            ]);
     }
 
     /** @return array<string, mixed> */

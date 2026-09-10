@@ -105,11 +105,11 @@ class DoctorAppointmentController extends Controller
         $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $data = $request->validated();
         $appointment = DB::transaction(function () use ($appointment, $clinic, $data, $doctor, $scheduling): Appointment {
+            $lockedAppointment = Appointment::query()->whereKey($appointment->id)->lockForUpdate()->firstOrFail();
             $profile = DoctorProfile::query()
                 ->where('user_id', $doctor->id)
                 ->lockForUpdate()
                 ->firstOrFail();
-            $lockedAppointment = Appointment::query()->whereKey($appointment->id)->lockForUpdate()->firstOrFail();
             $this->assertAppointmentOwned($doctor, $clinic, $lockedAppointment);
 
             if (array_key_exists('scheduled_at', $data)) {
@@ -140,11 +140,11 @@ class DoctorAppointmentController extends Controller
         $doctor = $request->user();
         $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $appointment = DB::transaction(function () use ($appointment, $clinic, $doctor, $scheduling): Appointment {
+            $lockedAppointment = Appointment::query()->whereKey($appointment->id)->lockForUpdate()->firstOrFail();
             DoctorProfile::query()
                 ->where('user_id', $doctor->id)
                 ->lockForUpdate()
                 ->firstOrFail();
-            $lockedAppointment = Appointment::query()->whereKey($appointment->id)->lockForUpdate()->firstOrFail();
             $this->assertAppointmentOwned($doctor, $clinic, $lockedAppointment);
 
             if (in_array($lockedAppointment->status, [AppointmentStatus::Completed, AppointmentStatus::NoShow], true)) {
@@ -178,11 +178,11 @@ class DoctorAppointmentController extends Controller
         $nextStatus = AppointmentStatus::from((string) $request->validated('status'));
 
         $appointment = DB::transaction(function () use ($appointment, $clinic, $doctor, $nextStatus, $scheduling): Appointment {
+            $lockedAppointment = Appointment::query()->whereKey($appointment->id)->lockForUpdate()->firstOrFail();
             DoctorProfile::query()
                 ->where('user_id', $doctor->id)
                 ->lockForUpdate()
                 ->firstOrFail();
-            $lockedAppointment = Appointment::query()->whereKey($appointment->id)->lockForUpdate()->firstOrFail();
             $this->assertAppointmentOwned($doctor, $clinic, $lockedAppointment);
             $scheduling->assertAppointmentStatusTransition($lockedAppointment->status, $nextStatus);
             $lockedAppointment->update(['status' => $nextStatus]);
