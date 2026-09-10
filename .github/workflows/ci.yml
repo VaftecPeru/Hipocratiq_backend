@@ -63,17 +63,26 @@ jobs:
           echo "OTP_FIXED_CODE=123456" >> .env
 
       - name: Check code style
-        run: |
-          vendor/bin/pint --format agent
-          git diff --binary > /tmp/integration-format.patch
-          echo FORMAT_PATCH_START
-          base64 -w 0 /tmp/integration-format.patch
-          echo
-          echo FORMAT_PATCH_END
+        run: vendor/bin/pint --test
 
       - name: Run tests
         run: composer test
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'
+
+      - name: Validate PostgreSQL migrations
+        run: php artisan migrate --force --no-interaction
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: back_api
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          DB_URL: ''
+
+      - name: Build backend Docker image
+        run: docker build --tag hipocratiq-backend:ci .
 

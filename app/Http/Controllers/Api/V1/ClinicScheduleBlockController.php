@@ -13,7 +13,8 @@ use Illuminate\Http\Request;
 
 class ClinicScheduleBlockController extends Controller
 {
-    public function scheduleBlocks(Request $request): JsonResponse{
+    public function scheduleBlocks(Request $request): JsonResponse
+    {
         $validated = $request->validate([
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
@@ -41,13 +42,13 @@ class ClinicScheduleBlockController extends Controller
         return response()->json([
             'success' => true,
             'data' => $blocks->map(
-                fn (ClinicScheduleBlock $block): array =>$this->serializeScheduleBlock($block)
+                fn (ClinicScheduleBlock $block): array => $this->serializeScheduleBlock($block)
             )->values(),
         ]);
     }
 
-
-    public function storeScheduleBlock(ClinicScheduleBlockStoreRequest $request, CreateClinicScheduleBlock $createScheduleBlock): JsonResponse {
+    public function storeScheduleBlock(ClinicScheduleBlockStoreRequest $request, CreateClinicScheduleBlock $createScheduleBlock): JsonResponse
+    {
         $block = $createScheduleBlock
             ->handle(
                 $request->validated(),
@@ -65,7 +66,8 @@ class ClinicScheduleBlockController extends Controller
         ], 201);
     }
 
-    public function destroyScheduleBlock(Request $request,int $scheduleBlock,): JsonResponse {
+    public function destroyScheduleBlock(Request $request, int $scheduleBlock): JsonResponse
+    {
         $clinic = $this->clinic($request);
 
         $block = ClinicScheduleBlock::query()
@@ -81,46 +83,42 @@ class ClinicScheduleBlockController extends Controller
         ]);
     }
 
-
     private function clinic(Request $request): Clinic
     {
         return $request->attributes->get('clinic');
     }
 
     /** @return array<string, mixed> */
-
     private function serializeScheduleBlock(
-    ClinicScheduleBlock $block,
-): array {
-    return [
-        'id' => $block->id,
+        ClinicScheduleBlock $block,
+    ): array {
+        return [
+            'id' => $block->id,
 
-        'starts_at' => $block->starts_at?->toIso8601String(),
-        'ends_at' => $block->ends_at?->toIso8601String(),
+            'starts_at' => $block->starts_at?->toIso8601String(),
+            'ends_at' => $block->ends_at?->toIso8601String(),
 
-        'scheduled_date' => $block->starts_at?->toDateString(),
-        'start_time' => $block->starts_at?->format('H:i'),
-        'end_time' => $block->ends_at?->format('H:i'),
+            'scheduled_date' => $block->starts_at?->toDateString(),
+            'start_time' => $block->starts_at?->format('H:i'),
+            'end_time' => $block->ends_at?->format('H:i'),
 
-        'reason' => $block->reason,
+            'reason' => $block->reason,
 
-        'scope' => $block->doctor_user_id === null
-            ? 'clinic'
-            : 'doctor',
+            'scope' => $block->doctor_user_id === null
+                ? 'clinic'
+                : 'doctor',
 
-        'doctor' => $block->doctor === null
-            ? null
-            : [
-                'id' => $block->doctor->id,
-                'name' => $block->doctor->name,
+            'doctor' => $block->doctor === null
+                ? null
+                : [
+                    'id' => $block->doctor->id,
+                    'name' => $block->doctor->name,
+                ],
+
+            'created_by' => [
+                'id' => $block->creator->id,
+                'name' => $block->creator->name,
             ],
-
-        'created_by' => [
-            'id' => $block->creator->id,
-            'name' => $block->creator->name,
-        ],
-    ];
-}
-
-
+        ];
+    }
 }

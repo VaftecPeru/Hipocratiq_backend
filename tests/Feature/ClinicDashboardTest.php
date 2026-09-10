@@ -8,6 +8,7 @@ use App\Enums\RoleScope;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
+use App\Models\ClinicScheduleBlock;
 use App\Models\ClinicSubscription;
 use App\Models\DoctorProfile;
 use App\Models\PatientProfile;
@@ -17,6 +18,8 @@ use App\Models\Specialty;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Support\Authorization\RolePermissionCatalog;
+use App\Support\Clinical\DoctorScheduling;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Tests\Support\FixedOtpCodeGenerator;
@@ -757,13 +760,13 @@ class ClinicDashboardTest extends TestCase
         $payload = ['patient_profile_id' => $patient->id, 'doctor_user_id' => $doctor->id, 'scheduled_at' => $start->toIso8601String(), 'appointment_type' => 'Consulta'];
         $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/appointments', $payload)
             ->assertUnprocessable()->assertJsonValidationErrors(['scheduled_at']);
-        $availability = app(\App\Support\Clinical\DoctorScheduling::class)->availability($profile, $clinic, \Carbon\CarbonImmutable::parse($start));
+        $availability = app(DoctorScheduling::class)->availability($profile, $clinic, CarbonImmutable::parse($start));
         $slot = collect($availability['slots'])->firstWhere('time', '10:00');
         $this->assertFalse($slot['available']);
         $this->assertSame('blocked', $slot['reason']);
 
         $foreignClinic = Clinic::factory()->create();
-        $foreignBlock = \App\Models\ClinicScheduleBlock::query()->create([
+        $foreignBlock = ClinicScheduleBlock::query()->create([
             'clinic_id' => $foreignClinic->id, 'created_by_user_id' => $receptionist->id,
             'starts_at' => $start, 'ends_at' => $start->copy()->addHour(),
         ]);
@@ -774,7 +777,7 @@ class ClinicDashboardTest extends TestCase
 
         $this->withSpaOrigin()->deleteJson('/api/v1/auth/clinic/schedule-blocks/'.$block['id'])->assertOk();
         $appointment = $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/appointments', $payload)->assertCreated()->json('data');
-        $laterBlock = \App\Models\ClinicScheduleBlock::query()->create([
+        $laterBlock = ClinicScheduleBlock::query()->create([
             'clinic_id' => $clinic->id, 'created_by_user_id' => $receptionist->id,
             'starts_at' => $start->copy()->addHours(2), 'ends_at' => $start->copy()->addHours(3),
         ]);

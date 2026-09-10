@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ClinicScheduleBlock extends Model
 {
-     public function clinic(): BelongsTo
+    public function clinic(): BelongsTo
     {
         return $this->belongsTo(Clinic::class);
     }

@@ -4,18 +4,18 @@ namespace App\Actions\Clinic;
 
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\RoleKey;
+use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicScheduleBlock;
 use App\Models\DoctorProfile;
 use App\Models\User;
-use App\Models\Appointment;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 final class CreateClinicScheduleBlock
 {
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function handle(
         array $data,

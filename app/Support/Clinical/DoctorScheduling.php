@@ -110,8 +110,7 @@ final class DoctorScheduling
             $slotEnd = $slotStart->copy()->addMinutes($duration);
             $blockingAppointment = $this->blockingAppointment($appointments, $slotStart, $slotEnd, $buffer);
             $isPast = $slotStart->lessThan($now);
-            $isBlocked = $blocks->contains(fn (ClinicScheduleBlock $block): bool =>
-                $slotStart->lessThan($block->ends_at) && $slotEnd->greaterThan($block->starts_at));
+            $isBlocked = $blocks->contains(fn (ClinicScheduleBlock $block): bool => $slotStart->lessThan($block->ends_at) && $slotEnd->greaterThan($block->starts_at));
 
             $slots[] = [
                 'time' => $slotStart->format('H:i'),

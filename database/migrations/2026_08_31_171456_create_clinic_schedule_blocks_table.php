@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-         Schema::create('clinic_schedule_blocks', function (Blueprint $table): void {
+        Schema::create('clinic_schedule_blocks', function (Blueprint $table): void {
             $table->id();
 
             $table->foreignId('clinic_id')
@@ -50,4 +50,3 @@ return new class extends Migration
         Schema::dropIfExists('clinic_schedule_blocks');
     }
 };
-

@@ -835,7 +835,7 @@ class ClinicDashboardController extends Controller
     public function destroyAppointment(
         Request $request,
         int $appointment,
-    ): JsonResponse {   
+    ): JsonResponse {
         $clinic = $this->clinic($request);
 
         $appointmentModel = $clinic
@@ -850,7 +850,6 @@ class ClinicDashboardController extends Controller
             'message' => 'Cita eliminada correctamente.',
         ]);
     }
-
 
     private function clinic(Request $request): Clinic
     {
