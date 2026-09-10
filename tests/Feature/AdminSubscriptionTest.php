@@ -74,6 +74,35 @@ class AdminSubscriptionTest extends TestCase
             ->assertJsonValidationErrors(['clinic_id', 'plan_id', 'billing_cycle', 'starts_at']);
     }
 
+    public function test_subscription_creation_requires_an_active_clinic_and_rejects_duplicates(): void
+    {
+        $inactiveClinic = Clinic::factory()->create(['status' => 'suspended']);
+        $activeClinic = Clinic::factory()->create();
+        $plan = Plan::factory()->create();
+        ClinicSubscription::factory()->create(['clinic_id' => $activeClinic->id, 'plan_id' => $plan->id]);
+        $this->authenticateAdmin();
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/admin/memberships/subscriptions', [
+                'clinic_id' => $inactiveClinic->id,
+                'plan_id' => $plan->id,
+                'billing_cycle' => BillingCycle::Monthly->value,
+                'starts_at' => now()->toDateString(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['clinic_id']);
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/admin/memberships/subscriptions', [
+                'clinic_id' => $activeClinic->id,
+                'plan_id' => $plan->id,
+                'billing_cycle' => BillingCycle::Monthly->value,
+                'starts_at' => now()->toDateString(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['clinic_id']);
+    }
+
     public function test_super_admin_can_upgrade_a_subscription(): void
     {
         $clinic = Clinic::factory()->create();

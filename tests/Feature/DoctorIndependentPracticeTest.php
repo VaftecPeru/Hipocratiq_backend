@@ -16,7 +16,9 @@ use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Database\Seeders\ClinicalHistorySectionSeeder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
 
@@ -124,7 +126,7 @@ class DoctorIndependentPracticeTest extends TestCase
     public function test_independent_doctor_can_create_update_list_and_cancel_appointment(): void
     {
         $patient = $this->ownedPatient('+525510000406');
-        $scheduledAt = now()->addDay()->setTime(10, 0);
+        $scheduledAt = now()->nextWeekday()->setTime(10, 0);
 
         $response = $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/appointments', [
             'patient_profile_id' => $patient->id,
@@ -143,13 +145,13 @@ class DoctorIndependentPracticeTest extends TestCase
         ]);
 
         $this->withSpaOrigin()
-            ->getJson('/api/v1/auth/doctor/appointments?from='.now()->toDateString().'&to='.now()->addDays(2)->toDateString())
+            ->getJson('/api/v1/auth/doctor/appointments?from='.$scheduledAt->toDateString().'&to='.$scheduledAt->copy()->addDay()->toDateString())
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $appointmentId)
             ->assertJsonPath('meta.summary.pending', 1);
 
-        $updatedAt = now()->addDays(2)->setTime(11, 30);
+        $updatedAt = $scheduledAt->copy()->addWeek()->setTime(11, 30);
         $this->withSpaOrigin()
             ->patchJson("/api/v1/auth/doctor/appointments/{$appointmentId}", [
                 'scheduled_at' => $updatedAt->toIso8601String(),
@@ -168,6 +170,62 @@ class DoctorIndependentPracticeTest extends TestCase
             'status' => 'canceled',
             'notes' => 'Horario actualizado.',
         ]);
+    }
+
+    public function test_doctor_appointment_mutations_acquire_shared_locks_in_the_same_order(): void
+    {
+        $patient = $this->ownedPatient('+525510000413');
+        $scheduledAt = now()->nextWeekday()->setTime(10, 0);
+        $appointment = Appointment::query()->create([
+            'clinic_id' => null,
+            'patient_profile_id' => $patient->id,
+            'doctor_user_id' => $this->doctor->id,
+            'scheduled_at' => $scheduledAt,
+            'status' => 'pending',
+            'appointment_type' => 'control',
+        ]);
+        $lockTables = [];
+        $captureLocks = false;
+
+        DB::listen(function (QueryExecuted $query) use (&$captureLocks, &$lockTables): void {
+            if (! $captureLocks || $query->connection->transactionLevel() !== 2) {
+                return;
+            }
+
+            $sql = strtolower($query->sql);
+            $appointmentTable = (new Appointment)->getTable();
+            $doctorProfileTable = (new DoctorProfile)->getTable();
+
+            if (str_contains($sql, ' from "'.$appointmentTable.'"')) {
+                $lockTables[] = $appointmentTable;
+            } elseif (str_contains($sql, ' from "'.$doctorProfileTable.'"')) {
+                $lockTables[] = $doctorProfileTable;
+            }
+        });
+
+        $assertLockOrder = function (callable $request) use (&$captureLocks, &$lockTables): void {
+            $lockTables = [];
+            $captureLocks = true;
+            $request()->assertOk();
+            $captureLocks = false;
+
+            self::assertSame([
+                (new Appointment)->getTable(),
+                (new DoctorProfile)->getTable(),
+            ], array_slice($lockTables, 0, 2));
+        };
+
+        $assertLockOrder(fn () => $this->withSpaOrigin()->patchJson(
+            "/api/v1/auth/doctor/appointments/{$appointment->id}",
+            ['scheduled_at' => $scheduledAt->copy()->addWeek()->toIso8601String()],
+        ));
+        $assertLockOrder(fn () => $this->withSpaOrigin()->patchJson(
+            "/api/v1/auth/doctor/appointments/{$appointment->id}/status",
+            ['status' => 'confirmed'],
+        ));
+        $assertLockOrder(fn () => $this->withSpaOrigin()->postJson(
+            "/api/v1/auth/doctor/appointments/{$appointment->id}/cancel",
+        ));
     }
 
     public function test_independent_doctor_can_create_and_read_consultation_without_clinic(): void

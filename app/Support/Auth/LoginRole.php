@@ -17,6 +17,17 @@ final class LoginRole
         ];
     }
 
+    /** @return list<string> */
+    public static function mobileRoles(): array
+    {
+        return [
+            RoleKey::ClinicAdmin->value,
+            RoleKey::Receptionist->value,
+            RoleKey::Doctor->value,
+            'patient',
+        ];
+    }
+
     public static function isExactStaffRole(?string $role): bool
     {
         return in_array($role, self::exactStaffRoles(), true);

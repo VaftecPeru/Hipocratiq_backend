@@ -33,7 +33,7 @@ class LoginRequest extends FormRequest
                     }
                 },
             ],
-            'client_type' => ['required', Rule::enum(AuthenticationClient::class)],
+            'client_type' => ['required', Rule::in([AuthenticationClient::Web->value])],
             'actor_context' => [
                 'required',
                 Rule::enum(AuthenticationContext::class)->only([

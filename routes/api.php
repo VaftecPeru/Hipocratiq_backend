@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\V1\AdminInfrastructureController;
 use App\Http\Controllers\Api\V1\AdminMembershipController;
 use App\Http\Controllers\Api\V1\AdminNotificationController;
 use App\Http\Controllers\Api\V1\AdminPlatformSettingsController;
+use App\Http\Controllers\Api\V1\AdminSpecialtyController;
 use App\Http\Controllers\Api\V1\AdminSupportTicketController;
 use App\Http\Controllers\Api\V1\AdminSystemIncidentController;
 use App\Http\Controllers\Api\V1\AdminUserController;
@@ -19,8 +20,16 @@ use App\Http\Controllers\Api\V1\Auth\LoginController;
 use App\Http\Controllers\Api\V1\Auth\OtpAuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\PatientRegistrationController;
+use App\Http\Controllers\Api\V1\Auth\ReceptionistActivationController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\ClinicalNotificationController;
+use App\Http\Controllers\Api\V1\ClinicBillingController;
 use App\Http\Controllers\Api\V1\ClinicDashboardController;
+use App\Http\Controllers\Api\V1\ClinicEpidemiologyController;
+use App\Http\Controllers\Api\V1\ClinicMessagesController;
+use App\Http\Controllers\Api\V1\ClinicReceptionistInvitationController;
+use App\Http\Controllers\Api\V1\ClinicReceptionistSettingsController;
+use App\Http\Controllers\Api\V1\ClinicScheduleBlockController;
 use App\Http\Controllers\Api\V1\DoctorAppointmentController;
 use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
@@ -28,6 +37,7 @@ use App\Http\Controllers\Api\V1\DoctorDashboardController;
 use App\Http\Controllers\Api\V1\DoctorPatientController;
 use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
+use App\Http\Controllers\Api\V1\DoctorWorkspaceController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
@@ -132,6 +142,12 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
     Route::post('/otp/resend', [OtpController::class, 'store'])
         ->middleware('throttle:auth-otp')
         ->name('otp.resend');
+    Route::post('/receptionist/activation/request', [ReceptionistActivationController::class, 'request'])
+        ->middleware('throttle:auth-otp-request')
+        ->name('receptionist.activation.request');
+    Route::post('/receptionist/activation/verify', [ReceptionistActivationController::class, 'verify'])
+        ->middleware('throttle:auth-otp')
+        ->name('receptionist.activation.verify');
     Route::get('/platform-settings', [AdminPlatformSettingsController::class, 'publicShow'])
         ->name('platform-settings.show');
 
@@ -140,6 +156,15 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/session/renew', [SessionController::class, 'renew'])->name('session.renew');
         Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
+        Route::get('/clinical/notifications', [ClinicalNotificationController::class, 'index'])
+            ->middleware('actor.context:clinic_admin,receptionist,doctor')
+            ->name('clinical.notifications.index');
+        Route::post('/clinical/notifications/read', [ClinicalNotificationController::class, 'read'])
+            ->middleware('actor.context:clinic_admin,receptionist,doctor')
+            ->name('clinical.notifications.read');
+        Route::post('/clinical/notifications/read-all', [ClinicalNotificationController::class, 'readAll'])
+            ->middleware('actor.context:clinic_admin,receptionist,doctor')
+            ->name('clinical.notifications.read-all');
         Route::get('/doctor/profile', [DoctorProfileController::class, 'show'])
             ->middleware('actor.context:doctor')
             ->name('doctor.profile.show');
@@ -200,6 +225,48 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/doctor/consultations/{consultation}', [DoctorConsultationController::class, 'update'])
             ->middleware('actor.context:doctor')
             ->name('doctor.consultations.update');
+        Route::get('/doctor/prescriptions', [DoctorWorkspaceController::class, 'prescriptions'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.prescriptions.index');
+        Route::post('/doctor/prescriptions', [DoctorWorkspaceController::class, 'storePrescription'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.prescriptions.store');
+        Route::patch('/doctor/prescriptions/{prescription}', [DoctorWorkspaceController::class, 'updatePrescription'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.prescriptions.update');
+        Route::get('/doctor/laboratory', [DoctorWorkspaceController::class, 'laboratory'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.laboratory.index');
+        Route::post('/doctor/laboratory', [DoctorWorkspaceController::class, 'storeLaboratoryOrder'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.laboratory.store');
+        Route::patch('/doctor/laboratory/{order}/status', [DoctorWorkspaceController::class, 'updateLaboratoryOrderStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.laboratory.status.update');
+        Route::get('/doctor/teleconsultations', [DoctorWorkspaceController::class, 'teleconsultations'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.teleconsultations.index');
+        Route::post('/doctor/teleconsultations', [DoctorWorkspaceController::class, 'storeTeleconsultation'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.teleconsultations.store');
+        Route::patch('/doctor/teleconsultations/{teleconsultation}/status', [DoctorWorkspaceController::class, 'updateTeleconsultationStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.teleconsultations.status.update');
+        Route::get('/doctor/messages', [DoctorWorkspaceController::class, 'messages'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.messages.index');
+        Route::post('/doctor/messages', [DoctorWorkspaceController::class, 'storeMessage'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.messages.store');
+        Route::patch('/doctor/messages/{message}/read', [DoctorWorkspaceController::class, 'markMessageRead'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.messages.read');
+        Route::get('/doctor/reports', [DoctorWorkspaceController::class, 'reports'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.reports.show');
+        Route::get('/doctor/epidemiology', [DoctorWorkspaceController::class, 'epidemiology'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.epidemiology.show');
 
         Route::get('/clinic/dashboard', [ClinicDashboardController::class, 'show'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
@@ -210,6 +277,9 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/clinic/members', [ClinicDashboardController::class, 'storeMember'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.store');
+        Route::post('/clinic/receptionist-invitations', [ClinicReceptionistInvitationController::class, 'store'])
+            ->middleware(['actor.context:clinic_admin', 'clinic.access', 'can:clinic.members.manage'])
+            ->name('clinic.receptionist-invitations.store');
         Route::post('/clinic/members/doctors', [ClinicDashboardController::class, 'storeDoctor'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.members.manage'])
             ->name('clinic.members.doctors.store');
@@ -244,20 +314,62 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.appointments.index');
         Route::post('/clinic/appointments', [ClinicDashboardController::class, 'storeAppointment'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.appointments.store');
         Route::patch('/clinic/appointments/{appointment}', [ClinicDashboardController::class, 'updateAppointment'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.appointments.update');
         Route::patch('/clinic/appointments/{appointment}/status', [ClinicDashboardController::class, 'updateAppointmentStatus'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.appointments.status.update');
+        Route::delete('/clinic/appointments/{appointment}', [ClinicDashboardController::class, 'destroyAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.appointments.destroy');
+        Route::get('/clinic/schedule-blocks', [ClinicScheduleBlockController::class, 'scheduleBlocks'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.schedule-blocks.index');
+        Route::post('/clinic/schedule-blocks', [ClinicScheduleBlockController::class, 'storeScheduleBlock'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.schedule-blocks.store');
+        Route::delete('/clinic/schedule-blocks/{scheduleBlock}', [ClinicScheduleBlockController::class, 'destroyScheduleBlock'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.schedule-blocks.destroy');
         Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');
         Route::patch('/clinic/settings', [ClinicDashboardController::class, 'updateSettings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.settings.manage'])
             ->name('clinic.settings.update');
+        Route::get('/clinic/epidemiology', [ClinicEpidemiologyController::class, 'show'])
+            ->middleware(['actor.context:clinic_admin', 'clinic.access'])
+            ->name('clinic.epidemiology.show');
+        Route::prefix('clinic/messages')->name('clinic.messages.')->group(function (): void {
+            Route::middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])->group(function (): void {
+                Route::get('/', [ClinicMessagesController::class, 'index'])->name('index');
+                Route::post('/', [ClinicMessagesController::class, 'store'])->name('store');
+                Route::patch('/{message}/read', [ClinicMessagesController::class, 'markRead'])->name('read');
+            });
+        });
+        Route::prefix('clinic/receptionist/settings')->name('clinic.receptionist.settings.')->group(function (): void {
+            Route::get('/', [ClinicReceptionistSettingsController::class, 'show'])
+                ->middleware(['actor.context:receptionist', 'clinic.access'])
+                ->name('show');
+            Route::patch('/', [ClinicReceptionistSettingsController::class, 'update'])
+                ->middleware(['actor.context:receptionist', 'clinic.access'])
+                ->name('update');
+        });
+        Route::prefix('clinic/billing')->name('clinic.billing.')->group(function (): void {
+            Route::middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])->group(function (): void {
+                Route::get('/invoices', [ClinicBillingController::class, 'index'])->name('invoices.index');
+                Route::get('/invoices/{invoice}', [ClinicBillingController::class, 'show'])->name('invoices.show');
+                Route::post('/invoices/{invoice}/payments', [ClinicBillingController::class, 'storePayment'])->name('payments.store');
+                Route::get('/report', [ClinicBillingController::class, 'report'])->name('report');
+            });
+            Route::middleware(['actor.context:clinic_admin', 'clinic.access'])->group(function (): void {
+                Route::post('/invoices', [ClinicBillingController::class, 'store'])->name('invoices.store');
+                Route::get('/subscription', [ClinicBillingController::class, 'subscription'])->name('subscription.show');
+            });
+        });
         Route::get('/admin/clinics', [AdminClinicController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.index');
@@ -312,6 +424,15 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/admin/clinics/{clinic}', [AdminClinicController::class, 'update'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.clinics.update');
+        Route::get('/admin/specialties', [AdminSpecialtyController::class, 'index'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.specialties.index');
+        Route::post('/admin/specialties', [AdminSpecialtyController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.specialties.store');
+        Route::patch('/admin/specialties/{specialty}', [AdminSpecialtyController::class, 'update'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.specialties.update');
         Route::get('/admin/audit-events', [AdminAuditController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.audit-events.index');

@@ -6,6 +6,7 @@ use App\Enums\RoleKey;
 use App\Enums\RoleScope;
 use App\Models\Clinic;
 use App\Models\ClinicSubscription;
+use App\Models\PersonalAccessToken;
 use App\Models\Plan;
 use App\Models\Role;
 use App\Models\User;
@@ -55,6 +56,62 @@ class DoctorRegistrationTest extends TestCase
         $this->assertDatabaseHas('clinic_memberships', ['clinic_id' => $clinic->id, 'status' => 'active']);
         $this->assertDatabaseCount('doctor_subscriptions', 0);
         $this->assertAuthenticated();
+    }
+
+    public function test_independent_doctor_can_register_on_mobile_with_a_device_bound_draft(): void
+    {
+        $deviceName = 'Doctor phone';
+        $deviceId = 'doctor-device-0001';
+        $draft = $this->postJson('/api/v1/auth/register/doctor/draft', $this->payload([
+            'client_type' => 'mobile',
+            'device_name' => $deviceName,
+            'device_id' => $deviceId,
+        ]));
+
+        $draft
+            ->assertCreated()
+            ->assertJsonPath('data.next_step', 'select_plan')
+            ->assertJsonStructure(['data' => ['draft_token']]);
+        $draftToken = $draft->json('data.draft_token');
+
+        $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, 'different-device-0001'))
+            ->postJson('/api/v1/auth/register/doctor/plan', [
+                'plan' => 'basic',
+                'billing_cycle' => 'monthly',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('registration');
+
+        $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/clinic/plan', [
+                'plan' => 'basic',
+                'billing_cycle' => 'monthly',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('registration');
+
+        $plan = $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/doctor/plan', [
+                'plan' => 'basic',
+                'billing_cycle' => 'monthly',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.next_step', 'verify_otp');
+
+        $verification = $this->withHeaders($this->mobileDraftHeaders($draftToken, $deviceName, $deviceId))
+            ->postJson('/api/v1/auth/register/doctor/verify-otp', [
+                'challenge_id' => $plan->json('data.challenge_id'),
+                'code' => '123456',
+            ])
+            ->assertOk();
+
+        $verification
+            ->assertJsonPath('data.actor_context', 'doctor')
+            ->assertJsonPath('data.next_step', 'success');
+        $token = PersonalAccessToken::query()->where('tokenable_id', User::query()->sole()->id)->sole();
+        $this->assertSame('mobile', $token->client_type->value);
+        $this->assertSame('doctor', $token->actor_context->value);
+        $this->assertSame(hash('sha256', $deviceId), $token->device_id_hash);
     }
 
     public function test_clinic_without_active_plan_is_rejected_before_otp(): void
@@ -143,6 +200,7 @@ class DoctorRegistrationTest extends TestCase
             'identifier' => 'medico@example.test',
             'actor_context' => 'patient',
             'client_type' => 'mobile',
+            'requested_role' => 'doctor',
             'device_name' => 'Untrusted device',
             'device_id' => 'untrusted-installation',
         ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
@@ -231,5 +289,16 @@ class DoctorRegistrationTest extends TestCase
     private function withSpaOrigin(): static
     {
         return $this->withCredentials()->withHeader('Origin', 'http://localhost:3000');
+    }
+
+    /** @return array<string, string> */
+    private function mobileDraftHeaders(string $draftToken, string $deviceName, string $deviceId): array
+    {
+        return [
+            'X-Client-Type' => 'mobile',
+            'X-Device-Name' => $deviceName,
+            'X-Device-ID' => $deviceId,
+            'X-Registration-Token' => $draftToken,
+        ];
     }
 }

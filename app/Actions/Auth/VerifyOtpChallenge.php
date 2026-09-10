@@ -2,6 +2,7 @@
 
 namespace App\Actions\Auth;
 
+use App\Enums\AuthenticationClient;
 use App\Enums\OnboardingStatus;
 use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
@@ -9,6 +10,7 @@ use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
 use App\Models\User;
 use App\Services\Auth\OtpHasher;
+use App\Support\Auth\MobileDeviceProof;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -19,9 +21,15 @@ final class VerifyOtpChallenge
         private RecordAuthenticationEvent $recordEvent,
     ) {}
 
-    public function handle(string $challengeId, string $code, OtpPurpose $purpose): User
-    {
-        $result = DB::transaction(function () use ($challengeId, $code, $purpose): array {
+    public function handle(
+        string $challengeId,
+        string $code,
+        OtpPurpose $purpose,
+        AuthenticationClient $client = AuthenticationClient::Web,
+        ?string $deviceName = null,
+        ?string $deviceId = null,
+    ): User {
+        $result = DB::transaction(function () use ($challengeId, $code, $purpose, $client, $deviceName, $deviceId): array {
             $challenge = OtpChallenge::query()
                 ->with('user')
                 ->lockForUpdate()
@@ -29,6 +37,15 @@ final class VerifyOtpChallenge
 
             if ($challenge === null || $challenge->purpose !== $purpose) {
                 return ['user' => null, 'error' => 'El código no es válido.'];
+            }
+
+            if ($challenge->client_type !== $client || ($client === AuthenticationClient::Mobile && ! MobileDeviceProof::matches(
+                $challenge->device_name,
+                $challenge->device_id_hash,
+                $deviceName,
+                $deviceId,
+            ))) {
+                return ['user' => $challenge->user, 'error' => 'El código no es válido.'];
             }
 
             $expectedStatus = $purpose === OtpPurpose::Registration

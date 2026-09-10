@@ -70,3 +70,19 @@ jobs:
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'
+
+      - name: Validate PostgreSQL migrations
+        run: php artisan migrate --force --no-interaction
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: back_api
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          DB_URL: ''
+
+      - name: Build backend Docker image
+        run: docker build --tag hipocratiq-backend:ci .
+

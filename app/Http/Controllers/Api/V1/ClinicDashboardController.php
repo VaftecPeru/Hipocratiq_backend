@@ -30,12 +30,16 @@ use App\Models\ClinicMembership;
 use App\Models\PatientIntake;
 use App\Models\PatientProfile;
 use App\Models\User;
+use App\Services\Notifications\ClinicalNotificationService;
+use App\Support\Clinical\DoctorScheduling;
+use App\Support\Clinical\EmergencyPolicyResolver;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ClinicDashboardController extends Controller
@@ -47,6 +51,12 @@ class ClinicDashboardController extends Controller
         'signatures' => true,
         'backups' => true,
     ];
+
+    public function __construct(
+        private readonly EmergencyPolicyResolver $emergencyPolicies,
+        private readonly ClinicalNotificationService $clinicalNotifications,
+        private readonly DoctorScheduling $doctorScheduling,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -105,7 +115,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $user->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -184,10 +194,50 @@ class ClinicDashboardController extends Controller
     public function storePatient(
         ClinicPatientStoreRequest $request,
         CreateClinicPatient $createPatient,
+        RecordAdminAuditEvent $audit,
     ): JsonResponse {
+        $clinic = $this->clinic($request);
+        $emergencyResolution = $request->validated('triage_priority') === 'emergency'
+            ? $this->emergencyPolicies->resolve($clinic)
+            : null;
+
+        if ($emergencyResolution !== null && ! (bool) ($emergencyResolution['effective']['enabled'] ?? false)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La política de emergencias no está habilitada para esta clínica.',
+                'errors' => [
+                    'triage_priority' => ['La admisión de emergencia está deshabilitada para esta clínica.'],
+                ],
+            ], 422);
+        }
+
         $patient = $createPatient
-            ->handle($request->validated(), $this->clinic($request), $request->user())
+            ->handle($request->validated(), $clinic, $request->user())
             ->load(['user', 'latestIntake.registrar:id,name']);
+
+        if ($emergencyResolution !== null && $patient->latestIntake?->triage_priority === 'emergency') {
+            $effective = $emergencyResolution['effective'];
+
+            $audit->handle(
+                $request->user(),
+                $request,
+                'emergency',
+                'emergency_intake_created',
+                PatientProfile::class,
+                $patient->getKey(),
+                $patient->user?->name,
+                clinic: $clinic,
+                countryCode: $clinic->country_code,
+                metadata: [
+                    'patient_intake_id' => $patient->latestIntake->getKey(),
+                    'policy' => $effective,
+                    'global_override' => $emergencyResolution['global_override'],
+                    'responsibles' => $effective['responsibles'] ?? [],
+                    'delivery' => ['in_app_audit' => true, 'external_channels' => false],
+                ],
+                critical: true,
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -416,37 +466,91 @@ class ClinicDashboardController extends Controller
         ClinicSettingsUpdateRequest $request,
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
-        $clinic = $this->clinic($request);
-        $validated = $request->validated();
-        $before = $clinic->only(['name', 'contact_phone', 'address']);
-        $before['preferences'] = $this->clinicPreferences($clinic);
+        $clinic = DB::transaction(function () use ($request, $audit): Clinic {
+            $clinic = Clinic::query()->lockForUpdate()->findOrFail($this->clinic($request)->getKey());
+            $validated = $request->validated();
+            $before = $clinic->only(['name', 'contact_phone', 'address']);
+            $before['preferences'] = $this->clinicPreferences($clinic);
+            $beforeEmergency = $this->emergencyPolicies->localPolicy($clinic);
 
-        if (is_array($validated['preferences'] ?? null)) {
-            $validated['preferences'] = array_replace(
-                $before['preferences'],
-                $validated['preferences'],
-            );
-        }
+            if (is_array($validated['preferences'] ?? null)) {
+                $incomingPreferences = $validated['preferences'];
+                $storedPreferences = is_array($clinic->preferences) ? $clinic->preferences : [];
+                $validated['preferences'] = array_replace(
+                    self::DEFAULT_CLINIC_PREFERENCES,
+                    $storedPreferences,
+                    $incomingPreferences,
+                );
 
-        $clinic->fill($validated)->save();
+                if (is_array($incomingPreferences['emergency'] ?? null)) {
+                    $validated['preferences']['emergency'] = array_replace(
+                        $this->emergencyPolicies->localPolicy($clinic),
+                        $incomingPreferences['emergency'],
+                    );
+                }
+            }
 
-        $audit->handle(
-            $request->user(),
-            $request,
-            'clinic_settings',
-            'clinic_settings_updated',
-            Clinic::class,
-            $clinic->id,
-            $clinic->name,
-            clinic: $clinic,
-            metadata: [
-                'before' => $before,
-                'after' => [
-                    ...$clinic->only(['name', 'contact_phone', 'address']),
-                    'preferences' => $this->clinicPreferences($clinic),
+            $clinic->fill($validated)->save();
+            $afterEmergency = $this->emergencyPolicies->localPolicy($clinic);
+
+            $audit->handle(
+                $request->user(),
+                $request,
+                'clinic_settings',
+                'clinic_settings_updated',
+                Clinic::class,
+                $clinic->id,
+                $clinic->name,
+                clinic: $clinic,
+                metadata: [
+                    'before' => $before,
+                    'after' => [
+                        ...$clinic->only(['name', 'contact_phone', 'address']),
+                        'preferences' => $this->clinicPreferences($clinic),
+                    ],
                 ],
-            ],
-        );
+            );
+
+            if (! (bool) ($beforeEmergency['enabled'] ?? false)
+                && (bool) ($afterEmergency['enabled'] ?? false)) {
+                $resolution = $this->emergencyPolicies->resolve($clinic);
+
+                if (! (bool) ($resolution['is_overridden'] ?? false)) {
+                    $emergencyAudit = $audit->handle(
+                        $request->user(),
+                        $request,
+                        'emergency',
+                        'emergency_activated',
+                        Clinic::class,
+                        $clinic->getKey(),
+                        $clinic->name,
+                        clinic: $clinic,
+                        countryCode: $clinic->country_code,
+                        metadata: [
+                            'policy' => $resolution['effective'],
+                            'responsibles' => $resolution['effective']['responsibles'] ?? [],
+                            'delivery' => ['in_app' => true, 'external_channels' => false],
+                        ],
+                        critical: true,
+                    );
+                    $notificationStats = $this->clinicalNotifications->createForEmergency(
+                        [$clinic],
+                        $resolution['effective'],
+                        'emergency_activated',
+                        'emergency_activation',
+                        (string) $emergencyAudit->getKey(),
+                    );
+                    $emergencyAudit->update([
+                        'metadata' => [
+                            ...((array) $emergencyAudit->metadata),
+                            'notifications' => $notificationStats,
+                        ],
+                    ]);
+                }
+            }
+
+            return $clinic;
+        });
 
         return response()->json([
             'success' => true,
@@ -491,29 +595,33 @@ class ClinicDashboardController extends Controller
     ): JsonResponse {
         $clinic = $this->clinic($request);
         $this->clinicAppointment($clinic, $appointment);
+        $validated = $request->validated();
 
-        if (array_key_exists('doctor_user_id', $request->validated())) {
-            $doctorIsClinicMember = $clinic->memberships()
-                ->where('user_id', $request->validated('doctor_user_id'))
-                ->where('status', ClinicMembershipStatus::Active->value)
-                ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Doctor->value))
-                ->exists();
+        $appointment = DB::transaction(function () use ($appointment, $clinic, $validated): Appointment {
+            $lockedAppointment = Appointment::query()
+                ->whereKey($appointment->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $this->clinicAppointment($clinic, $lockedAppointment);
 
-            if (! $doctorIsClinicMember) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'El médico no es miembro activo de esta clínica.',
-                    'errors' => ['doctor_user_id' => ['El médico no es miembro activo de esta clínica.']],
-                ], 422);
+            if (array_key_exists('doctor_user_id', $validated) || array_key_exists('scheduled_at', $validated)) {
+                $doctorProfile = $this->doctorScheduling->resolveClinicDoctor(
+                    $clinic,
+                    (int) ($validated['doctor_user_id'] ?? $lockedAppointment->doctor_user_id),
+                    true,
+                );
+                $scheduledAt = $validated['scheduled_at'] ?? $lockedAppointment->scheduled_at;
+                $this->doctorScheduling->assertBookable($doctorProfile, $clinic, Carbon::parse((string) $scheduledAt), $lockedAppointment->id);
             }
-        }
 
-        $appointment->update($request->validated());
-        $appointment->load([
-            'patientProfile.user:id,name,email,phone_number',
-            'doctor:id,name',
-            'doctor.doctorProfile:id,user_id,specialty',
-        ]);
+            $lockedAppointment->update($validated);
+
+            return $lockedAppointment->fresh([
+                'patientProfile.user:id,name,email,phone_number',
+                'doctor:id,name',
+                'doctor.doctorProfile:id,user_id,specialty',
+            ]);
+        });
 
         $audit->handle(
             $request->user(),
@@ -536,15 +644,28 @@ class ClinicDashboardController extends Controller
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
         $clinic = $this->clinic($request);
-        $this->clinicAppointment($clinic, $appointment);
+        $nextStatus = AppointmentStatus::from((string) $request->validated('status'));
+        $result = DB::transaction(function () use ($appointment, $clinic, $nextStatus): array {
+            $lockedAppointment = Appointment::query()
+                ->whereKey($appointment->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $this->clinicAppointment($clinic, $lockedAppointment);
+            $previousStatus = $lockedAppointment->status->value;
+            $this->doctorScheduling->assertAppointmentStatusTransition($lockedAppointment->status, $nextStatus);
+            $lockedAppointment->update(['status' => $nextStatus]);
+            $lockedAppointment->load([
+                'patientProfile.user:id,name,email,phone_number',
+                'doctor:id,name',
+                'doctor.doctorProfile:id,user_id,specialty',
+            ]);
 
-        $previousStatus = $appointment->status->value;
-        $appointment->update(['status' => $request->validated('status')]);
-        $appointment->load([
-            'patientProfile.user:id,name,email,phone_number',
-            'doctor:id,name',
-            'doctor.doctorProfile:id,user_id,specialty',
-        ]);
+            return [
+                'appointment' => $lockedAppointment,
+                'previous_status' => $previousStatus,
+            ];
+        });
+        $appointment = $result['appointment'];
 
         $audit->handle(
             $request->user(),
@@ -555,7 +676,7 @@ class ClinicDashboardController extends Controller
             $appointment->id,
             null,
             clinic: $clinic,
-            metadata: ['from' => $previousStatus, 'to' => $request->validated('status')],
+            metadata: ['from' => $result['previous_status'], 'to' => $request->validated('status')],
         );
 
         return response()->json(['success' => true, 'data' => $this->serializeAppointment($appointment)]);
@@ -573,7 +694,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $user->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -614,7 +735,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $member->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -658,7 +779,7 @@ class ClinicDashboardController extends Controller
             ->where('user_id', $member->id)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->firstOrFail();
@@ -711,6 +832,25 @@ class ClinicDashboardController extends Controller
         return response()->json(['success' => true]);
     }
 
+    public function destroyAppointment(
+        Request $request,
+        int $appointment,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+
+        $appointmentModel = $clinic
+            ->appointments()
+            ->whereKey($appointment)
+            ->firstOrFail();
+
+        $appointmentModel->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cita eliminada correctamente.',
+        ]);
+    }
+
     private function clinic(Request $request): Clinic
     {
         return $request->attributes->get('clinic');
@@ -723,7 +863,7 @@ class ClinicDashboardController extends Controller
             ->where('status', ClinicMembershipStatus::Active->value)
             ->with([
                 'role:id,key,name',
-                'user:id,name,email,phone_number,status,last_login_at',
+                'user:id,name,email,phone_number,country_code,status,last_login_at',
                 'user.doctorProfile:id,user_id,clinic_id,medical_license,specialty',
             ])
             ->get();
@@ -818,19 +958,36 @@ class ClinicDashboardController extends Controller
         ];
     }
 
-    /** @return Relation */
     private function appointmentsQuery(Clinic $clinic): Relation
     {
-        return $clinic->appointments()->with([
-            'patientProfile.user:id,name,email,phone_number',
-            'doctor:id,name',
-            'doctor.doctorProfile:id,user_id,specialty',
-        ]);
+        return $clinic->appointments()
+            ->where(function (Builder $query) use ($clinic): void {
+                $query
+                    ->whereNull('doctor_user_id')
+                    ->orWhereHas('doctor', function (Builder $doctorQuery) use ($clinic): void {
+                        $doctorQuery
+                            ->where('status', UserStatus::Active->value)
+                            ->whereHas('doctorProfile', fn (Builder $profileQuery): Builder => $profileQuery->where('clinic_id', $clinic->id))
+                            ->whereHas('clinicMemberships', function (Builder $membershipQuery) use ($clinic): void {
+                                $membershipQuery
+                                    ->where('clinic_id', $clinic->id)
+                                    ->where('status', ClinicMembershipStatus::Active->value)
+                                    ->whereHas('role', fn (Builder $roleQuery): Builder => $roleQuery->where('key', RoleKey::Doctor->value));
+                            });
+                    });
+            })
+            ->with([
+                'patientProfile.user:id,name,email,phone_number',
+                'doctor:id,name',
+                'doctor.doctorProfile:id,user_id,specialty',
+            ]);
     }
 
     /** @return array<string, mixed> */
     private function serializeClinic(Clinic $clinic): array
     {
+        $preferences = $this->clinicPreferences($clinic);
+
         return [
             'id' => $clinic->id,
             'name' => $clinic->name,
@@ -838,19 +995,23 @@ class ClinicDashboardController extends Controller
             'contact_phone' => $clinic->contact_phone,
             'address' => $clinic->address,
             'status' => $clinic->status->value,
-            'preferences' => $this->clinicPreferences($clinic),
+            'preferences' => $preferences,
+            'emergency' => $this->emergencyPolicies->resolve($clinic),
         ];
     }
 
-    /** @return array{maintenance: bool, audit: bool, signatures: bool, backups: bool} */
+    /** @return array<string, mixed> */
     private function clinicPreferences(Clinic $clinic): array
     {
         $stored = is_array($clinic->preferences) ? $clinic->preferences : [];
 
-        return array_replace(
-            self::DEFAULT_CLINIC_PREFERENCES,
-            array_intersect_key($stored, self::DEFAULT_CLINIC_PREFERENCES),
-        );
+        return [
+            ...array_replace(
+                self::DEFAULT_CLINIC_PREFERENCES,
+                array_intersect_key($stored, self::DEFAULT_CLINIC_PREFERENCES),
+            ),
+            'emergency' => $this->emergencyPolicies->localPolicy($clinic),
+        ];
     }
 
     /** @return array<string, mixed> */
@@ -863,6 +1024,7 @@ class ClinicDashboardController extends Controller
             'name' => $membership->user->name,
             'email' => $membership->user->email,
             'phone_number' => $membership->user->phone_number,
+            'country_code' => $membership->user->country_code,
             'status' => $membership->user->status->value,
             'role' => $membership->role->key,
             'role_name' => $membership->role->name,
@@ -955,6 +1117,7 @@ class ClinicDashboardController extends Controller
             'appointment_type' => $appointment->appointment_type,
             'status' => $appointment->status->value,
             'status_label' => $appointment->status->label(),
+            'notes' => $appointment->notes,
             'doctor' => $appointment->doctor === null ? null : [
                 'id' => $appointment->doctor->id,
                 'name' => $appointment->doctor->name,
@@ -1035,6 +1198,7 @@ class ClinicDashboardController extends Controller
             'appointment_type' => $appointment->appointment_type,
             'status' => $appointment->status->value,
             'status_label' => $appointment->status->label(),
+            'notes' => $appointment->notes,
             'patient' => [
                 'id' => $appointment->patient_profile_id,
                 'patient_code' => 'PAC-'.str_pad((string) $appointment->patient_profile_id, 6, '0', STR_PAD_LEFT),

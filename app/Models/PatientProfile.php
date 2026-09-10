@@ -83,6 +83,11 @@ class PatientProfile extends Model
         return $this->hasMany(Consultation::class);
     }
 
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(ClinicInvoice::class);
+    }
+
     protected function casts(): array
     {
         return [

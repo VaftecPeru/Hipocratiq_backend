@@ -2,11 +2,13 @@
 
 namespace App\Actions\Auth;
 
+use App\Enums\AuthenticationClient;
 use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Enums\UserStatus;
 use App\Models\OtpChallenge;
 use App\Models\User;
+use App\Support\Auth\MobileDeviceProof;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -14,12 +16,26 @@ final class ResendOtpChallenge
 {
     public function __construct(private IssueOtpChallenge $issueOtpChallenge) {}
 
-    public function handle(string $challengeId): OtpChallenge
-    {
-        $reservation = DB::transaction(function () use ($challengeId): array {
+    public function handle(
+        string $challengeId,
+        AuthenticationClient $client = AuthenticationClient::Web,
+        ?string $deviceName = null,
+        ?string $deviceId = null,
+    ): OtpChallenge {
+        $reservation = DB::transaction(function () use ($challengeId, $client, $deviceName, $deviceId): array {
             $challenge = OtpChallenge::query()->find($challengeId);
 
-            if ($challenge === null || $challenge->consumed_at !== null) {
+            if (
+                $challenge === null
+                || $challenge->consumed_at !== null
+                || $challenge->client_type !== $client
+                || ($client === AuthenticationClient::Mobile && ! MobileDeviceProof::matches(
+                    $challenge->device_name,
+                    $challenge->device_id_hash,
+                    $deviceName,
+                    $deviceId,
+                ))
+            ) {
                 throw ValidationException::withMessages([
                     'challenge_id' => ['El desafío OTP no está disponible.'],
                 ]);

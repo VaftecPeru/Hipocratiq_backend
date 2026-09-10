@@ -117,7 +117,10 @@ class User extends Authenticatable
             ->whereHas('role', fn ($query) => $query->where('key', RoleKey::ClinicAdmin->value))
             ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
             ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                $query->where('starts_at', '<=', now())
+                    ->where(function ($query): void {
+                        $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                    });
             }))
             ->exists();
     }
@@ -129,7 +132,10 @@ class User extends Authenticatable
             ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Receptionist->value))
             ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
             ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                $query->where('starts_at', '<=', now())
+                    ->where(function ($query): void {
+                        $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                    });
             }))
             ->exists();
     }
@@ -148,7 +154,10 @@ class User extends Authenticatable
                 ->where('status', 'active')
                 ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
                 ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                    $query->where('starts_at', '<=', now())
+                        ->where(function ($query): void {
+                            $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                        });
                 }))
                 ->exists();
         }
@@ -156,7 +165,10 @@ class User extends Authenticatable
         return $profile->subscriptions()
             ->where('status', 'active')
             ->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                $query->where('starts_at', '<=', now())
+                    ->where(function ($query): void {
+                        $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                    });
             })
             ->exists();
     }

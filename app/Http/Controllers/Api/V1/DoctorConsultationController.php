@@ -28,8 +28,7 @@ class DoctorConsultationController extends Controller
         DoctorConsultationStoreRequest $request,
         PatientProfile $patient,
         DoctorScheduling $scheduling,
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $doctor = $request->user();
         $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $this->assertPatientConnected($doctor, $clinic, $patient);
@@ -114,64 +113,69 @@ class DoctorConsultationController extends Controller
         DoctorConsultationUpdateRequest $request,
         Consultation $consultation,
         DoctorScheduling $scheduling,
-    ): ConsultationResource
-    {
+    ): ConsultationResource {
         $doctor = $request->user();
         $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $this->assertConsultationAccessible($doctor, $clinic, $consultation);
 
         $data = $request->validated();
+        $consultation = DB::transaction(function () use ($data, $doctor, $clinic, $consultation, $scheduling): Consultation {
+            $lockedConsultation = Consultation::query()
+                ->whereKey($consultation->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            $this->assertConsultationAccessible($doctor, $clinic, $lockedConsultation);
+            $lockedConsultation->loadMissing(['patientProfile', 'clinicalHistoryRecord']);
 
-        if ($consultation->status === ConsultationStatus::Signed) {
-            throw ValidationException::withMessages([
-                'status' => ['Una consulta firmada no se puede modificar.'],
-            ]);
-        }
+            if ($lockedConsultation->status === ConsultationStatus::Signed) {
+                throw ValidationException::withMessages([
+                    'status' => ['Una consulta firmada no se puede modificar.'],
+                ]);
+            }
 
-        if (isset($data['appointment_id'])) {
-            $this->assertAppointmentOwned($doctor, $clinic, $consultation->patientProfile, (int) $data['appointment_id']);
-        }
+            if (isset($data['appointment_id'])) {
+                $this->assertAppointmentOwned($doctor, $clinic, $lockedConsultation->patientProfile, (int) $data['appointment_id']);
+            }
 
-        $objective = $consultation->objective;
-        if (array_key_exists('objective', $data)) {
-            $objective = $this->resolveObjective($data['objective'], $clinic, $consultation->patientProfile);
-        }
-        $nextStatus = ConsultationStatus::from($data['status'] ?? $consultation->status->value);
-        $scheduling->assertConsultationStatusTransition($consultation->status, $nextStatus);
+            $objective = $lockedConsultation->objective;
+            if (array_key_exists('objective', $data)) {
+                $objective = $this->resolveObjective($data['objective'], $clinic, $lockedConsultation->patientProfile);
+            }
+            $nextStatus = ConsultationStatus::from($data['status'] ?? $lockedConsultation->status->value);
+            $scheduling->assertConsultationStatusTransition($lockedConsultation->status, $nextStatus);
 
-        DB::transaction(function () use ($data, $doctor, $nextStatus, $objective, $consultation): void {
             $updates = [
                 'status' => $nextStatus,
-                'chief_complaint' => $data['chief_complaint'] ?? $consultation->chief_complaint,
+                'chief_complaint' => $data['chief_complaint'] ?? $lockedConsultation->chief_complaint,
                 'objective' => $objective,
-                'appointment_id' => $data['appointment_id'] ?? $consultation->appointment_id,
+                'appointment_id' => $data['appointment_id'] ?? $lockedConsultation->appointment_id,
             ];
 
-            if ($nextStatus === ConsultationStatus::Completed && $consultation->completed_at === null) {
+            if ($nextStatus === ConsultationStatus::Completed && $lockedConsultation->completed_at === null) {
                 $updates['completed_at'] = now();
             }
 
             if ($nextStatus === ConsultationStatus::Signed) {
                 $updates['signed_by_user_id'] = $doctor->id;
                 $updates['signed_at'] = now();
-                $updates['completed_at'] ??= $consultation->completed_at ?? now();
+                $updates['completed_at'] ??= $lockedConsultation->completed_at ?? now();
             }
 
-            $consultation->fill([
-                ...$updates,
-            ])->save();
+            $lockedConsultation->fill($updates)->save();
 
-            if ($consultation->clinicalHistoryRecord !== null) {
-                $consultation->clinicalHistoryRecord->fill(['objective' => $objective])->save();
+            if ($lockedConsultation->clinicalHistoryRecord !== null) {
+                $lockedConsultation->clinicalHistoryRecord->fill(['objective' => $objective])->save();
                 if (array_key_exists('sections', $data)) {
-                    $this->syncSections($consultation->clinicalHistoryRecord, $data['sections'], true);
+                    $this->syncSections($lockedConsultation->clinicalHistoryRecord, $data['sections'], true);
                 }
             }
+
+            return $lockedConsultation->fresh([
+                'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
+            ]);
         });
 
-        return new ConsultationResource($consultation->fresh([
-            'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
-        ]));
+        return new ConsultationResource($consultation);
     }
 
     private function syncSections(ClinicalHistoryRecord $record, array $sections, bool $replace = false): void

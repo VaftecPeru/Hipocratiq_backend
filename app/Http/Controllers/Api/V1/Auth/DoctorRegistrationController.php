@@ -4,15 +4,20 @@ namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Actions\Auth\CompleteDoctorRegistration;
 use App\Actions\Auth\StartAuthenticatedSession;
+use App\Actions\Auth\StartMobileSession;
+use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
 use App\Enums\DoctorPracticeType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\SelectClinicPlanRequest;
 use App\Http\Requests\Api\V1\Auth\StartDoctorRegistrationRequest;
 use App\Http\Requests\Api\V1\Auth\VerifyClinicRegistrationRequest;
+use App\Http\Resources\UserResource;
 use App\Models\Clinic;
 use App\Models\Specialty;
 use App\Services\Auth\DoctorRegistrationDraftStore;
+use App\Services\Auth\RegistrationDraftAccess;
+use App\Support\Auth\MobileDeviceProof;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -59,9 +64,12 @@ class DoctorRegistrationController extends Controller
         ]);
     }
 
-    public function draft(StartDoctorRegistrationRequest $request, DoctorRegistrationDraftStore $store): JsonResponse
-    {
+    public function draft(
+        StartDoctorRegistrationRequest $request,
+        DoctorRegistrationDraftStore $store,
+    ): JsonResponse {
         $data = $request->validated();
+        $client = AuthenticationClient::from($data['client_type']);
         if (isset($data['specialty_id'])) {
             $data['specialty'] = Specialty::query()->findOrFail($data['specialty_id'])->name;
         }
@@ -77,7 +85,11 @@ class DoctorRegistrationController extends Controller
 
         $data['doctor_phone_number'] = PhoneNumber::from($data['doctor_phone_number'], $data['country_code'])->value;
         $data['password_hash'] = Hash::make($data['password']);
-        unset($data['password'], $data['password_confirmation'], $data['terms_accepted']);
+        if ($client === AuthenticationClient::Mobile) {
+            $data['device_name'] = trim((string) $data['device_name']);
+            $data['device_id_hash'] = MobileDeviceProof::hashId((string) $data['device_id']);
+        }
+        unset($data['password'], $data['password_confirmation'], $data['terms_accepted'], $data['device_id']);
         $token = $store->create($data);
 
         $responseData = ['next_step' => 'select_plan'];
@@ -85,12 +97,25 @@ class DoctorRegistrationController extends Controller
             $responseData = [...$store->issueOtp($token), 'next_step' => 'verify_otp'];
         }
 
-        return response()->json(['success' => true, 'data' => $responseData], 201)->cookie($this->draftCookie($token));
+        if ($client === AuthenticationClient::Mobile) {
+            $responseData['draft_token'] = $token;
+        }
+
+        $response = response()->json(['success' => true, 'data' => $responseData], 201);
+
+        return $client === AuthenticationClient::Mobile
+            ? $response
+            : $response->cookie($this->draftCookie($token));
     }
 
-    public function selectPlan(SelectClinicPlanRequest $request, DoctorRegistrationDraftStore $store): JsonResponse
-    {
-        $token = $this->token($request);
+    public function selectPlan(
+        SelectClinicPlanRequest $request,
+        DoctorRegistrationDraftStore $store,
+        RegistrationDraftAccess $draftAccess,
+    ): JsonResponse {
+        $token = $draftAccess->token($request, 'doctor_registration');
+        $draft = $store->get($token);
+        $draftAccess->assertDevice($request, $draft);
         $data = $request->validated();
         $store->selectPlan($token, ['key' => $data['plan'], 'billing_cycle' => $data['billing_cycle']]);
         $challenge = $store->issueOtp($token);
@@ -103,10 +128,35 @@ class DoctorRegistrationController extends Controller
         DoctorRegistrationDraftStore $store,
         CompleteDoctorRegistration $completeRegistration,
         StartAuthenticatedSession $startSession,
+        StartMobileSession $startMobileSession,
+        RegistrationDraftAccess $draftAccess,
     ): JsonResponse {
-        $token = $this->token($request);
+        $token = $draftAccess->token($request, 'doctor_registration');
+        $draftAccess->assertDevice($request, $store->get($token));
         $draft = $store->verifyOtp($token, $request->string('challenge_id')->toString(), $request->string('code')->toString());
         $user = $completeRegistration->handle($token, $draft);
+
+        if ($draftAccess->isMobile($draft)) {
+            $mobileToken = $startMobileSession->handle(
+                $user,
+                AuthenticationContext::Doctor,
+                (string) $draft['data']['device_name'],
+                (string) $draft['data']['device_id_hash'],
+            );
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'token_type' => 'Bearer',
+                    'access_token' => $mobileToken->plainTextToken,
+                    'expires_at' => $mobileToken->accessToken->expires_at,
+                    'user' => new UserResource($user),
+                    'actor_context' => AuthenticationContext::Doctor->value,
+                    'next_step' => 'success',
+                ],
+            ]);
+        }
+
         $startSession->handle($request, $user, AuthenticationContext::Doctor);
 
         return response()->json([
@@ -115,22 +165,16 @@ class DoctorRegistrationController extends Controller
         ])->withoutCookie('doctor_registration');
     }
 
-    public function resend(Request $request, DoctorRegistrationDraftStore $store): JsonResponse
-    {
-        $challenge = $store->issueOtp($this->token($request), true);
+    public function resend(
+        Request $request,
+        DoctorRegistrationDraftStore $store,
+        RegistrationDraftAccess $draftAccess,
+    ): JsonResponse {
+        $token = $draftAccess->token($request, 'doctor_registration');
+        $draftAccess->assertDevice($request, $store->get($token));
+        $challenge = $store->issueOtp($token, true);
 
         return response()->json(['success' => true, 'data' => [...$challenge, 'next_step' => 'verify_otp']]);
-    }
-
-    private function token(Request $request): string
-    {
-        $token = $request->cookie('doctor_registration');
-
-        if (! is_string($token) || $token === '') {
-            abort(422, 'El registro temporal no está disponible.');
-        }
-
-        return $token;
     }
 
     private function draftCookie(string $token): Cookie

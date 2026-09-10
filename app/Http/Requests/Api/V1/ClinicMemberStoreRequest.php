@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Api\V1;
 
+use App\Enums\AuthenticationClient;
+use App\Models\PersonalAccessToken;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -10,7 +12,13 @@ class ClinicMemberStoreRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        $accessToken = $this->user()?->currentAccessToken();
+
+        if (! $accessToken instanceof PersonalAccessToken) {
+            return true;
+        }
+
+        return $accessToken->client_type !== AuthenticationClient::Mobile;
     }
 
     /** @return array<string, ValidationRule|array<mixed>|string> */

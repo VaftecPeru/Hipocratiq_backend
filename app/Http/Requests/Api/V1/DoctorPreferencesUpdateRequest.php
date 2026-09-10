@@ -21,7 +21,7 @@ class DoctorPreferencesUpdateRequest extends FormRequest
 
         return [
             'preferences' => ['required', 'array:working_hours,appointment_duration_minutes,buffer_minutes,teleconsultations_enabled,auto_confirm_appointments,notifications,clinical'],
-            'preferences.working_hours' => ["sometimes", "array:{$days}"],
+            'preferences.working_hours' => ['sometimes', "array:{$days}"],
             'preferences.working_hours.*' => ['sometimes', 'array:enabled,start,end'],
             'preferences.working_hours.*.enabled' => ['sometimes', 'boolean'],
             'preferences.working_hours.*.start' => ['sometimes', 'date_format:H:i'],

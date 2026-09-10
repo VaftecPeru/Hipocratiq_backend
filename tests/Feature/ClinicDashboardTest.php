@@ -8,6 +8,7 @@ use App\Enums\RoleScope;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
+use App\Models\ClinicScheduleBlock;
 use App\Models\ClinicSubscription;
 use App\Models\DoctorProfile;
 use App\Models\PatientProfile;
@@ -17,6 +18,8 @@ use App\Models\Specialty;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Support\Authorization\RolePermissionCatalog;
+use App\Support\Clinical\DoctorScheduling;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Tests\Support\FixedOtpCodeGenerator;
@@ -97,6 +100,46 @@ class ClinicDashboardTest extends TestCase
             ])
             ->assertCreated()
             ->assertJsonPath('data.name', 'Paciente del Administrador');
+    }
+
+    public function test_clinic_admin_can_update_local_emergency_policy_and_receive_effective_state(): void
+    {
+        [$clinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
+        $admin = User::factory()->create([
+            'phone_number' => '+525510000033',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $admin, $adminRole);
+        $this->authenticate($admin, '55 1000 0033');
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/settings')
+            ->assertOk()
+            ->assertJsonPath('data.clinic.emergency.is_overridden', false)
+            ->assertJsonPath('data.clinic.emergency.effective.enabled', true);
+
+        $this->withSpaOrigin()
+            ->patchJson('/api/v1/auth/clinic/settings', [
+                'preferences' => [
+                    'emergency' => [
+                        'enabled' => false,
+                        'visibility' => 'doctors_admins',
+                        'label' => 'Alerta clínica',
+                        'color' => '#F97316',
+                        'inheritance' => 'responsibles_only',
+                        'default_channel' => 'internal_alert',
+                        'escalation_minutes' => 5,
+                        'responsibles' => [['role' => 'Jefe local', 'channel' => 'Alerta interna']],
+                    ],
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.clinic.preferences.emergency.label', 'Alerta clínica')
+            ->assertJsonPath('data.clinic.emergency.local.enabled', false)
+            ->assertJsonPath('data.clinic.emergency.effective.default_channel', 'internal_alert')
+            ->assertJsonPath('data.clinic.emergency.global_override', null);
+
+        self::assertSame('Alerta clínica', $clinic->fresh()->preferences['emergency']['label']);
     }
 
     public function test_receptionist_can_access_clinic_dashboard_but_cannot_update_clinic_settings(): void
@@ -253,6 +296,124 @@ class ClinicDashboardTest extends TestCase
             ->assertJsonPath('meta.summary.confirmed', 1);
     }
 
+    public function test_clinic_appointments_enforce_doctor_schedule_status_transitions_and_active_doctors(): void
+    {
+        [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $doctorRole = Role::query()->create([
+            'key' => RoleKey::Doctor->value,
+            'name' => 'Médico',
+            'scope' => RoleScope::Organization,
+            'is_system' => true,
+        ]);
+        $receptionist = User::factory()->create([
+            'phone_number' => '+525510000006',
+            'password' => 'SecurePass123',
+        ]);
+        $activeDoctor = User::factory()->create(['name' => 'Médico Activo']);
+        $inactiveDoctor = User::factory()->create(['name' => 'Médico Inactivo', 'status' => 'suspended']);
+        $this->attachMembership($clinic, $receptionist, $receptionistRole);
+        $this->attachMembership($clinic, $activeDoctor, $doctorRole);
+        $this->attachMembership($clinic, $inactiveDoctor, $doctorRole);
+        DoctorProfile::factory()->create([
+            'user_id' => $activeDoctor->id,
+            'clinic_id' => $clinic->id,
+            'practice_type' => 'clinic',
+        ]);
+        DoctorProfile::factory()->create([
+            'user_id' => $inactiveDoctor->id,
+            'clinic_id' => $clinic->id,
+            'practice_type' => 'clinic',
+        ]);
+        $patient = User::factory()->create(['name' => 'Paciente de agenda']);
+        $patientProfile = PatientProfile::factory()->create([
+            'user_id' => $patient->id,
+            'clinic_id' => $clinic->id,
+        ]);
+        $scheduledAt = now()->addWeek()->startOfWeek()->setTime(10, 0);
+
+        $this->authenticate($receptionist, '55 1000 0006', RoleKey::Receptionist);
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/appointments', [
+                'patient_profile_id' => $patientProfile->id,
+                'doctor_user_id' => $activeDoctor->id,
+                'scheduled_at' => $scheduledAt->toIso8601String(),
+                'appointment_type' => 'Consulta general',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'pending');
+
+        $appointment = Appointment::query()->latest('id')->firstOrFail();
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/appointments', [
+                'patient_profile_id' => $patientProfile->id,
+                'doctor_user_id' => $activeDoctor->id,
+                'scheduled_at' => $scheduledAt->toIso8601String(),
+                'appointment_type' => 'Consulta duplicada',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('scheduled_at');
+
+        $secondAppointment = $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/appointments', [
+                'patient_profile_id' => $patientProfile->id,
+                'doctor_user_id' => $activeDoctor->id,
+                'scheduled_at' => $scheduledAt->copy()->addHours(2)->toIso8601String(),
+                'appointment_type' => 'Consulta reprogramable',
+            ])
+            ->assertCreated()
+            ->json('data');
+        $secondAppointmentOriginalTime = Appointment::query()->findOrFail($secondAppointment['id'])->scheduled_at;
+
+        $this->withSpaOrigin()
+            ->patchJson("/api/v1/auth/clinic/appointments/{$secondAppointment['id']}", [
+                'scheduled_at' => $scheduledAt->toIso8601String(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('scheduled_at');
+
+        self::assertTrue(Appointment::query()->findOrFail($secondAppointment['id'])->scheduled_at->equalTo($secondAppointmentOriginalTime));
+
+        $this->withSpaOrigin()
+            ->patchJson("/api/v1/auth/clinic/appointments/{$appointment->id}", [
+                'doctor_user_id' => $inactiveDoctor->id,
+                'scheduled_at' => $scheduledAt->copy()->addHours(4)->toIso8601String(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('doctor_user_id');
+
+        $this->assertDatabaseHas('appointments', [
+            'id' => $appointment->id,
+            'doctor_user_id' => $activeDoctor->id,
+        ]);
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/clinic/appointments', [
+                'patient_profile_id' => $patientProfile->id,
+                'doctor_user_id' => $inactiveDoctor->id,
+                'scheduled_at' => $scheduledAt->copy()->addHours(2)->toIso8601String(),
+                'appointment_type' => 'Médico inactivo',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('doctor_user_id');
+
+        $this->withSpaOrigin()
+            ->patchJson("/api/v1/auth/clinic/appointments/{$appointment->id}/status", ['status' => 'confirmed'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'confirmed');
+
+        $this->withSpaOrigin()
+            ->patchJson("/api/v1/auth/clinic/appointments/{$appointment->id}/status", ['status' => 'completed'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('status');
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinic/appointments?from='.$scheduledAt->toDateString().'&to='.$scheduledAt->toDateString())
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+    }
+
     public function test_receptionist_can_register_a_patient_inside_their_clinic(): void
     {
         [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
@@ -329,6 +490,7 @@ class ClinicDashboardTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.name', 'Recepcionista de Clínica')
             ->assertJsonPath('data.role', 'receptionist')
+            ->assertJsonPath('data.country_code', 'MX')
             ->assertJsonPath('meta.requires_password_reset', true);
 
         $user = User::query()->where('email', 'recepcionista@clinic.test')->firstOrFail();
@@ -573,6 +735,57 @@ class ClinicDashboardTest extends TestCase
         $this->assertFalse(RolePermissionCatalog::allows(RoleKey::ClinicAdmin->value, 'clinic.unknown.manage'));
         $this->assertFalse(Gate::forUser($user)->allows('clinic.unknown.manage'));
         $this->assertFalse(Gate::forUser($user)->allows('clinic.patients.manage'));
+    }
+
+    public function test_schedule_blocks_reject_overlapping_appointments_and_remain_scoped_to_clinic(): void
+    {
+        [$clinic, $role] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $receptionist = User::factory()->create(['phone_number' => '+525510000041', 'password' => 'SecurePass123']);
+        $this->attachMembership($clinic, $receptionist, $role);
+        $doctorRole = Role::query()->create(['key' => RoleKey::Doctor->value, 'name' => 'Médico', 'scope' => RoleScope::Organization, 'is_system' => true]);
+        $doctor = User::factory()->create();
+        $this->attachMembership($clinic, $doctor, $doctorRole);
+        $profile = DoctorProfile::factory()->create(['user_id' => $doctor->id, 'clinic_id' => $clinic->id, 'practice_type' => 'clinic']);
+        $patient = PatientProfile::factory()->create(['clinic_id' => $clinic->id]);
+        $start = now()->addWeek()->startOfWeek()->setTime(10, 0);
+        $this->authenticate($receptionist, '55 1000 0041', RoleKey::Receptionist);
+
+        $block = $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/schedule-blocks', [
+            'doctor_user_id' => $doctor->id,
+            'starts_at' => $start->toIso8601String(),
+            'ends_at' => $start->copy()->addHour()->toIso8601String(),
+            'reason' => 'Reunión',
+        ])->assertCreated()->json('data');
+
+        $payload = ['patient_profile_id' => $patient->id, 'doctor_user_id' => $doctor->id, 'scheduled_at' => $start->toIso8601String(), 'appointment_type' => 'Consulta'];
+        $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/appointments', $payload)
+            ->assertUnprocessable()->assertJsonValidationErrors(['scheduled_at']);
+        $availability = app(DoctorScheduling::class)->availability($profile, $clinic, CarbonImmutable::parse($start));
+        $slot = collect($availability['slots'])->firstWhere('time', '10:00');
+        $this->assertFalse($slot['available']);
+        $this->assertSame('blocked', $slot['reason']);
+
+        $foreignClinic = Clinic::factory()->create();
+        $foreignBlock = ClinicScheduleBlock::query()->create([
+            'clinic_id' => $foreignClinic->id, 'created_by_user_id' => $receptionist->id,
+            'starts_at' => $start, 'ends_at' => $start->copy()->addHour(),
+        ]);
+        $this->withSpaOrigin()->getJson('/api/v1/auth/clinic/schedule-blocks?from='.$start->toDateString().'&to='.$start->toDateString())
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $block['id']);
+        $this->withSpaOrigin()->deleteJson('/api/v1/auth/clinic/schedule-blocks/'.$foreignBlock->id)->assertNotFound();
+        $this->assertDatabaseHas('clinic_schedule_blocks', ['id' => $foreignBlock->id]);
+
+        $this->withSpaOrigin()->deleteJson('/api/v1/auth/clinic/schedule-blocks/'.$block['id'])->assertOk();
+        $appointment = $this->withSpaOrigin()->postJson('/api/v1/auth/clinic/appointments', $payload)->assertCreated()->json('data');
+        $laterBlock = ClinicScheduleBlock::query()->create([
+            'clinic_id' => $clinic->id, 'created_by_user_id' => $receptionist->id,
+            'starts_at' => $start->copy()->addHours(2), 'ends_at' => $start->copy()->addHours(3),
+        ]);
+        $this->withSpaOrigin()->patchJson('/api/v1/auth/clinic/appointments/'.$appointment['id'], [
+            'scheduled_at' => $start->copy()->addHours(2)->toIso8601String(),
+        ])->assertUnprocessable()->assertJsonValidationErrors(['scheduled_at']);
+        $this->withSpaOrigin()->deleteJson('/api/v1/auth/clinic/appointments/'.$appointment['id'])->assertOk();
+        $this->assertDatabaseMissing('appointments', ['id' => $appointment['id']]);
     }
 
     /** @return array{0: Clinic, 1: Role} */

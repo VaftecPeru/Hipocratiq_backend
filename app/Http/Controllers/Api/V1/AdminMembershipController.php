@@ -14,40 +14,43 @@ use App\Http\Requests\Api\V1\MembershipUpgradeRequest;
 use App\Models\ClinicSubscription;
 use App\Models\Plan;
 use App\Models\SubscriptionPayment;
+use App\Support\AdminDashboardCache;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class AdminMembershipController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
+    {
+        $payload = AdminDashboardCache::remember(
+            AdminDashboardCache::resourceKey('memberships', $request->user()?->getKey()),
+            fn (): array => $this->dashboardPayload(),
+        );
+
+        return response()->json($payload);
+    }
+
+    /** @return array<string, mixed> */
+    private function dashboardPayload(): array
     {
         $activeSubscriptions = $this->activeSubscriptionQuery()
             ->with(['clinic', 'plan'])
             ->get();
 
-        $mrrCents = (int) $activeSubscriptions
-            ->sum(fn (ClinicSubscription $subscription): int => $this->monthlyAmountCents($subscription));
+        $mrrByCurrency = $this->subscriptionTotalsByCurrency($activeSubscriptions);
 
-        return response()->json([
+        return [
             'success' => true,
             'data' => [
                 'kpis' => [
-                    'mrr' => [
-                        'usd_cents' => $mrrCents,
-                        'pen_cents' => $this->penCents($mrrCents),
-                        'change_pct' => $this->paymentChangePct(30),
-                        'change_note' => 'vs. mes anterior',
-                    ],
-                    'arr' => [
-                        'usd_cents' => $mrrCents * 12,
-                        'pen_cents' => $this->penCents($mrrCents * 12),
-                        'change_pct' => $this->paymentChangePct(365),
-                        'change_note' => 'vs. año anterior',
-                    ],
+                    'mrr' => $this->kpiMetric($mrrByCurrency, 1, 30),
+                    'arr' => $this->kpiMetric($mrrByCurrency, 12, 365),
                     'active_subscriptions' => [
                         'count' => $activeSubscriptions->count(),
                         'change_count' => $activeSubscriptions
@@ -67,9 +70,26 @@ class AdminMembershipController extends Controller
                 'subscriptions_by_plan' => $this->subscriptionsByPlan($activeSubscriptions),
                 'upcoming_renewals' => $this->upcomingRenewals($activeSubscriptions),
                 'conversion_rate' => $this->conversionRate(),
+                'currency_rates' => $this->currencyRates(),
+                'subscriptions' => ClinicSubscription::query()
+                    ->with(['clinic', 'plan'])
+                    ->latest('id')
+                    ->limit(100)
+                    ->get()
+                    ->map(fn (ClinicSubscription $subscription): array => $this->serializeSubscription($subscription))
+                    ->values()
+                    ->all(),
+                'payment_history' => SubscriptionPayment::query()
+                    ->with(['subscription.clinic', 'subscription.plan'])
+                    ->latest('id')
+                    ->limit(100)
+                    ->get()
+                    ->map(fn (SubscriptionPayment $payment): array => $this->serializePayment($payment))
+                    ->values()
+                    ->all(),
                 'generated_at' => now()->toIso8601String(),
             ],
-        ]);
+        ];
     }
 
     public function storePlan(MembershipPlanStoreRequest $request, RecordAdminAuditEvent $audit): JsonResponse
@@ -81,7 +101,7 @@ class AdminMembershipController extends Controller
             'description' => $data['description'] ?? null,
             'monthly_price_cents' => $this->dollarsToCents($data['monthly_price_usd']),
             'annual_price_cents' => $this->dollarsToCents($data['annual_price_usd']),
-            'currency' => config('memberships.currency'),
+            'currency' => strtoupper($data['currency'] ?? config('memberships.currency')),
             'features' => $data['features'],
             'publicly_selectable' => $data['publicly_selectable'] ?? true,
             'is_active' => $data['is_active'] ?? true,
@@ -107,7 +127,7 @@ class AdminMembershipController extends Controller
     public function updatePlan(Plan $plan, MembershipPlanUpdateRequest $request, RecordAdminAuditEvent $audit): JsonResponse
     {
         $data = $request->validated();
-        $before = $plan->only(['key', 'name', 'monthly_price_cents', 'annual_price_cents', 'publicly_selectable', 'is_active']);
+        $before = $plan->only(['key', 'name', 'monthly_price_cents', 'annual_price_cents', 'currency', 'publicly_selectable', 'is_active']);
         $plan->update([
             'key' => $data['key'] ?? $plan->key,
             'name' => $data['name'] ?? $plan->name,
@@ -120,6 +140,7 @@ class AdminMembershipController extends Controller
             'annual_price_cents' => isset($data['annual_price_usd'])
                 ? $this->dollarsToCents($data['annual_price_usd'])
                 : $plan->annual_price_cents,
+            'currency' => isset($data['currency']) ? strtoupper($data['currency']) : $plan->currency,
             'features' => $data['features'] ?? $plan->features,
             'publicly_selectable' => $data['publicly_selectable'] ?? $plan->publicly_selectable,
             'is_active' => $data['is_active'] ?? $plan->is_active,
@@ -150,17 +171,34 @@ class AdminMembershipController extends Controller
         $data = $request->validated();
         $startsAt = Carbon::parse($data['starts_at'])->startOfDay();
 
-        $subscription = ClinicSubscription::create([
-            'clinic_id' => $data['clinic_id'],
-            'plan_id' => $data['plan_id'],
-            'billing_cycle' => $data['billing_cycle'],
-            'status' => SubscriptionStatus::Active->value,
-            'auto_renew' => $data['auto_renew'] ?? true,
-            'starts_at' => $startsAt,
-            'ends_at' => $this->cycleEndDate($startsAt, $data['billing_cycle']),
-            'provider' => 'admin_manual',
-            'provider_reference' => 'admin-subscription-'.Str::uuid(),
-        ]);
+        $subscription = DB::transaction(function () use ($data, $startsAt): ClinicSubscription {
+            $hasActiveSubscription = ClinicSubscription::query()
+                ->where('clinic_id', $data['clinic_id'])
+                ->where('status', SubscriptionStatus::Active->value)
+                ->where(function (Builder $query): void {
+                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                })
+                ->lockForUpdate()
+                ->exists();
+
+            if ($hasActiveSubscription) {
+                throw ValidationException::withMessages([
+                    'clinic_id' => ['La clínica ya tiene una suscripción activa.'],
+                ]);
+            }
+
+            return ClinicSubscription::create([
+                'clinic_id' => $data['clinic_id'],
+                'plan_id' => $data['plan_id'],
+                'billing_cycle' => $data['billing_cycle'],
+                'status' => SubscriptionStatus::Active->value,
+                'auto_renew' => $data['auto_renew'] ?? true,
+                'starts_at' => $startsAt,
+                'ends_at' => $this->cycleEndDate($startsAt, $data['billing_cycle']),
+                'provider' => 'admin_manual',
+                'provider_reference' => 'admin-subscription-'.Str::uuid(),
+            ]);
+        });
         $subscription->load(['clinic', 'plan']);
         $audit->handle(
             $request->user(),
@@ -260,14 +298,36 @@ class AdminMembershipController extends Controller
             });
     }
 
-    private function conversionRate(): float
+    private function conversionRate(): ?float
     {
-        return (float) config('memberships.exchange_rate_usd_to_pen');
+        $rate = config('memberships.exchange_rate_usd_to_pen');
+
+        return $rate === null ? null : (float) $rate;
     }
 
-    private function penCents(int $usdCents): int
+    /** @return array<string, float|null> */
+    private function currencyRates(): array
     {
-        return (int) round($usdCents * $this->conversionRate());
+        $configuredRates = config('memberships.exchange_rates_usd', []);
+
+        return collect($this->supportedCurrencies())
+            ->mapWithKeys(fn (string $currency): array => [
+                $currency => isset($configuredRates[$currency]) ? (float) $configuredRates[$currency] : null,
+            ])
+            ->all();
+    }
+
+    /** @return list<string> */
+    private function supportedCurrencies(): array
+    {
+        return config('memberships.supported_currencies', ['USD', 'MXN', 'PEN']);
+    }
+
+    private function penCents(int $usdCents): ?int
+    {
+        $rate = $this->conversionRate();
+
+        return $rate === null ? null : (int) round($usdCents * $rate);
     }
 
     private function dollarsToCents(float|int|string $dollars): int
@@ -286,6 +346,38 @@ class AdminMembershipController extends Controller
             BillingCycle::Annual => (int) round(($plan?->annual_price_cents ?? 0) / 12),
             default => $plan?->monthly_price_cents ?? 0,
         };
+    }
+
+    /** @return array<string, int> */
+    private function subscriptionTotalsByCurrency(Collection $subscriptions): array
+    {
+        $totals = array_fill_keys($this->supportedCurrencies(), 0);
+
+        foreach ($subscriptions as $subscription) {
+            $currency = $subscription->plan?->currency ?? config('memberships.currency');
+
+            if (array_key_exists($currency, $totals)) {
+                $totals[$currency] += $this->monthlyAmountCents($subscription);
+            }
+        }
+
+        return $totals;
+    }
+
+    /** @param array<string, int> $amounts */
+    private function kpiMetric(array $amounts, int $multiplier, int $days): array
+    {
+        $scaled = collect($amounts)->map(fn (int $amount): int => $amount * $multiplier)->all();
+        $changes = $this->paymentChangePctByCurrency($days);
+
+        return [
+            'usd_cents' => (int) ($scaled['USD'] ?? 0),
+            'pen_cents' => (int) ($scaled['PEN'] ?? 0),
+            'by_currency' => $scaled,
+            'change_pct' => $changes['USD'] ?? null,
+            'change_pct_by_currency' => $changes,
+            'change_note' => 'variación por moneda',
+        ];
     }
 
     /**
@@ -310,7 +402,8 @@ class AdminMembershipController extends Controller
             : $startsAt->copy()->addMonths(1)->startOfDay();
     }
 
-    private function paymentChangePct(int $days): ?float
+    /** @return array<string, float|null> */
+    private function paymentChangePctByCurrency(int $days): array
     {
         $currentWindow = $days === 365
             ? [now()->startOfYear(), now()->endOfYear()]
@@ -322,17 +415,24 @@ class AdminMembershipController extends Controller
         $current = SubscriptionPayment::query()
             ->where('status', 'succeeded')
             ->whereBetween('paid_at', $currentWindow)
-            ->sum('amount_cents');
+            ->select('currency')
+            ->selectRaw('SUM(amount_cents) as amount_cents')
+            ->groupBy('currency')
+            ->pluck('amount_cents', 'currency');
         $previous = SubscriptionPayment::query()
             ->where('status', 'succeeded')
             ->whereBetween('paid_at', $previousWindow)
-            ->sum('amount_cents');
+            ->select('currency')
+            ->selectRaw('SUM(amount_cents) as amount_cents')
+            ->groupBy('currency')
+            ->pluck('amount_cents', 'currency');
 
-        if ($previous <= 0) {
-            return null;
-        }
+        return collect($this->supportedCurrencies())->mapWithKeys(function (string $currency) use ($current, $previous): array {
+            $currentAmount = (int) ($current[$currency] ?? 0);
+            $previousAmount = (int) ($previous[$currency] ?? 0);
 
-        return round((($current - $previous) / $previous) * 100, 1);
+            return [$currency => $previousAmount <= 0 ? null : round((($currentAmount - $previousAmount) / $previousAmount) * 100, 1)];
+        })->all();
     }
 
     private function renewalRatePercentage(Collection $subscriptions): float
@@ -382,6 +482,8 @@ class AdminMembershipController extends Controller
             'key' => $plan->key,
             'name' => $plan->name,
             'description' => $plan->description,
+            'monthly_price_cents' => $plan->monthly_price_cents,
+            'annual_price_cents' => $plan->annual_price_cents,
             'monthly_price_usd_cents' => $plan->monthly_price_cents,
             'annual_price_usd_cents' => $plan->annual_price_cents,
             'currency' => $plan->currency,
@@ -397,6 +499,7 @@ class AdminMembershipController extends Controller
     private function serializeSubscription(ClinicSubscription $subscription): array
     {
         $monthlyCents = $this->monthlyAmountCents($subscription);
+        $currency = $subscription->plan?->currency ?? config('memberships.currency');
 
         return [
             'id' => $subscription->id,
@@ -410,8 +513,29 @@ class AdminMembershipController extends Controller
             'auto_renew' => $subscription->auto_renew,
             'starts_at' => $subscription->starts_at?->toIso8601String(),
             'ends_at' => $subscription->ends_at?->toIso8601String(),
-            'monthly_usd_cents' => $monthlyCents,
-            'monthly_pen_cents' => $this->penCents($monthlyCents),
+            'amount_cents' => $monthlyCents,
+            'currency' => $currency,
+            'monthly_usd_cents' => $currency === 'USD' ? $monthlyCents : null,
+            'monthly_pen_cents' => $currency === 'USD' ? $this->penCents($monthlyCents) : ($currency === 'PEN' ? $monthlyCents : null),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function serializePayment(SubscriptionPayment $payment): array
+    {
+        return [
+            'id' => $payment->id,
+            'reference' => $payment->provider_reference,
+            'clinic' => $payment->subscription?->clinic?->name,
+            'country_code' => $payment->subscription?->clinic?->country_code,
+            'plan' => $payment->subscription?->plan?->name,
+            'status' => $payment->status,
+            'amount_cents' => $payment->amount_cents,
+            'currency' => $payment->currency,
+            'provider' => $payment->provider,
+            'paid_at' => $payment->paid_at?->toIso8601String(),
+            'refunded_at' => $payment->refunded_at?->toIso8601String(),
+            'created_at' => $payment->created_at?->toIso8601String(),
         ];
     }
 
@@ -474,7 +598,8 @@ class AdminMembershipController extends Controller
         return $subscriptions
             ->map(function (ClinicSubscription $subscription): array {
                 $renewalAt = $this->renewalDate($subscription);
-                $amountUsdCents = $this->monthlyAmountCents($subscription);
+                $amountCents = $this->monthlyAmountCents($subscription);
+                $currency = $subscription->plan?->currency ?? config('memberships.currency');
 
                 return [
                     'id' => $subscription->id,
@@ -482,8 +607,10 @@ class AdminMembershipController extends Controller
                     'clinic' => $subscription->clinic?->name,
                     'country_code' => $subscription->clinic?->country_code,
                     'plan' => $subscription->plan?->key ?? PlanKey::Basic->value,
-                    'amount_usd_cents' => $amountUsdCents,
-                    'amount_pen_cents' => $this->penCents($amountUsdCents),
+                    'amount_cents' => $amountCents,
+                    'currency' => $currency,
+                    'amount_usd_cents' => $currency === 'USD' ? $amountCents : null,
+                    'amount_pen_cents' => $currency === 'USD' ? $this->penCents($amountCents) : ($currency === 'PEN' ? $amountCents : null),
                     'renewal_at' => $renewalAt->toDateString(),
                     'auto_renew' => $subscription->auto_renew,
                 ];

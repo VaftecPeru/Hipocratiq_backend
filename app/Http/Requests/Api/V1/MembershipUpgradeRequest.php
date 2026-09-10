@@ -19,7 +19,7 @@ class MembershipUpgradeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'plan_id' => ['required', 'integer', Rule::exists('plans', 'id')],
+            'plan_id' => ['required', 'integer', Rule::exists('plans', 'id')->where(fn ($query) => $query->where('is_active', true))],
             'upgrade_at' => ['sometimes', 'date'],
         ];
     }

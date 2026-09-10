@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\V1\Auth;
 
+use App\Enums\AuthenticationClient;
 use App\Enums\DoctorPracticeType;
 use App\Models\Specialty;
 use App\Support\PhoneNumber;
@@ -21,8 +22,19 @@ class StartDoctorRegistrationRequest extends FormRequest
     public function rules(): array
     {
         $isClinicDoctor = $this->input('practice_type') === DoctorPracticeType::Clinic->value;
+        $isMobile = $this->input('client_type') === AuthenticationClient::Mobile->value;
 
         return [
+            'client_type' => ['required', Rule::in([AuthenticationClient::Web->value, AuthenticationClient::Mobile->value])],
+            'device_name' => [Rule::requiredIf($isMobile), 'nullable', 'string', 'max:100', 'not_regex:/^\s*$/'],
+            'device_id' => [
+                Rule::requiredIf($isMobile),
+                'nullable',
+                'string',
+                'min:16',
+                'max:255',
+                'regex:/\A[A-Za-z0-9._~:-]+\z/',
+            ],
             'doctor_name' => ['required', 'string', 'max:120'],
             'doctor_email' => ['required', 'email:rfc', 'max:255', 'unique:users,email'],
             'country_code' => ['required', 'string', 'in:PE,MX,US'],
@@ -65,6 +77,9 @@ class StartDoctorRegistrationRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->merge([
+            'client_type' => $this->input('client_type', $this->header('X-Client-Type', AuthenticationClient::Web->value)),
+            'device_name' => $this->input('device_name', $this->header('X-Device-Name')),
+            'device_id' => $this->input('device_id', $this->header('X-Device-ID')),
             'doctor_email' => is_string($this->input('doctor_email')) ? strtolower(trim($this->input('doctor_email'))) : $this->input('doctor_email'),
             'medical_license' => is_string($this->input('medical_license')) ? strtoupper(trim($this->input('medical_license'))) : $this->input('medical_license'),
         ]);

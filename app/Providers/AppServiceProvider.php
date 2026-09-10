@@ -7,6 +7,7 @@ use App\Contracts\SmsSender;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use App\Models\ClinicMembership;
+use App\Models\PersonalAccessToken;
 use App\Models\User;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
@@ -24,6 +25,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use InvalidArgumentException;
+use Laravel\Sanctum\Sanctum;
 use LogicException;
 
 class AppServiceProvider extends ServiceProvider
@@ -58,6 +60,8 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
+
         if ($this->app->runningInConsole() === false && config('authentication.demo_mode') !== true) {
             if ($this->app->isProduction() && config('sms.driver') === 'array') {
                 throw new LogicException('Configura un proveedor SMS antes de ejecutar en producción.');

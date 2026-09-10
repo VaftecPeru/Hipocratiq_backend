@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Actions\Auth\RecordAuthenticationEvent;
+use App\Enums\AuthenticationClient;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\AuthenticationSession;
@@ -24,7 +25,7 @@ class SessionController extends Controller
             'success' => true,
             'data' => [
                 'user' => new UserResource($request->user()),
-                'client_type' => $accessToken instanceof PersonalAccessToken ? 'mobile' : 'web',
+                'client_type' => $this->clientType($accessToken),
                 'actor_context' => $request->attributes->get('actor_context'),
             ],
         ]);
@@ -121,5 +122,16 @@ class SessionController extends Controller
         $recordEvent->handleSafely($user, 'logout_all');
 
         return response()->noContent();
+    }
+
+    private function clientType(mixed $accessToken): string
+    {
+        if (! $accessToken instanceof PersonalAccessToken) {
+            return AuthenticationClient::Web->value;
+        }
+
+        return $accessToken->client_type instanceof AuthenticationClient
+            ? $accessToken->client_type->value
+            : (string) ($accessToken->client_type ?? AuthenticationClient::Web->value);
     }
 }

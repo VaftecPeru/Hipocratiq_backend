@@ -26,6 +26,7 @@ class LoginController extends Controller
                 'next_step' => 'verify_otp',
                 'expires_in' => max(0, (int) ceil(now()->diffInSeconds($challenge->expires_at))),
                 'resend_after' => config('authentication.otp.resend_seconds'),
+                'resends_remaining' => max(0, config('authentication.otp.max_resends') - $challenge->resend_count),
             ],
         ], 202);
     }

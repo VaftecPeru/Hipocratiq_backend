@@ -22,9 +22,13 @@ class RequestOtpRequest extends FormRequest
     public function rules(): array
     {
         $isRegistration = $this->input('purpose') === OtpPurpose::Registration->value;
+        $isLogin = $this->input('purpose') === OtpPurpose::Login->value;
         $isStaffLogin = $this->input('purpose') === OtpPurpose::Login->value
             && $this->input('actor_context') === AuthenticationContext::Staff->value;
         $isMobile = $this->input('client_type') === AuthenticationClient::Mobile->value;
+        $mobileRoleRules = $isRegistration
+            ? ['patient']
+            : ($isLogin ? LoginRole::mobileRoles() : []);
         $passwordRules = match (true) {
             $isStaffLogin => ['required', 'string', 'max:72'],
             $isRegistration => ['nullable', 'string', 'confirmed', 'max:72', Password::defaults()],
@@ -42,9 +46,13 @@ class RequestOtpRequest extends FormRequest
                 ]),
             ],
             'requested_role' => [
+                Rule::requiredIf($isMobile && ($isRegistration || $isLogin)),
                 'nullable',
                 'string',
                 'max:32',
+                $isMobile && ($isRegistration || $isLogin)
+                    ? Rule::in($mobileRoleRules)
+                    : Rule::in([...LoginRole::exactStaffRoles(), AuthenticationContext::Patient->value]),
             ],
             'identifier' => [Rule::requiredIf(! $isRegistration), 'nullable', 'string', 'max:255', $this->identifierRule()],
             'name' => [Rule::requiredIf($isRegistration), 'nullable', 'string', 'max:120'],
@@ -58,8 +66,15 @@ class RequestOtpRequest extends FormRequest
             ],
             'phone_number' => [Rule::requiredIf($isRegistration), 'nullable', 'string', 'max:30', $this->phoneRule()],
             'password' => $passwordRules,
-            'device_name' => [Rule::requiredIf($isMobile), 'nullable', 'string', 'max:100'],
-            'device_id' => [Rule::requiredIf($isMobile), 'nullable', 'string', 'max:255'],
+            'device_name' => [Rule::requiredIf($isMobile), 'nullable', 'string', 'max:100', 'not_regex:/^\s*$/'],
+            'device_id' => [
+                Rule::requiredIf($isMobile),
+                'nullable',
+                'string',
+                'min:16',
+                'max:255',
+                'regex:/\A[A-Za-z0-9._~:-]+\z/',
+            ],
             'terms_accepted' => [$isRegistration ? 'accepted' : 'prohibited'],
         ];
     }
@@ -70,9 +85,10 @@ class RequestOtpRequest extends FormRequest
         $email = $this->input('email');
         $identifier = $this->input('identifier');
         $requestedRole = $this->input('requested_role');
+        $clientType = $this->input('client_type', $this->header('X-Client-Type', AuthenticationClient::Web->value));
 
         $this->merge([
-            'client_type' => $this->input('client_type', AuthenticationClient::Web->value),
+            'client_type' => $clientType,
             'actor_context' => $this->input(
                 'actor_context',
                 $purpose === OtpPurpose::Registration->value
@@ -84,6 +100,8 @@ class RequestOtpRequest extends FormRequest
                 ? strtolower($identifier)
                 : $identifier,
             'requested_role' => LoginRole::normalize(is_string($requestedRole) ? $requestedRole : null),
+            'device_name' => $this->input('device_name', $this->header('X-Device-Name')),
+            'device_id' => $this->input('device_id', $this->header('X-Device-ID')),
         ]);
     }
 

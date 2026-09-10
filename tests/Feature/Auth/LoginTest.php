@@ -41,7 +41,8 @@ class LoginTest extends TestCase
 
         $login
             ->assertAccepted()
-            ->assertJsonPath('data.next_step', 'verify_otp');
+            ->assertJsonPath('data.next_step', 'verify_otp')
+            ->assertJsonPath('data.resends_remaining', config('authentication.otp.max_resends'));
         $this->assertGuest();
 
         $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [

@@ -74,10 +74,11 @@ class SuperAdminAuthorizationTest extends TestCase
             'identifier' => 'admin@example.com',
             'actor_context' => 'staff',
             'client_type' => 'mobile',
+            'requested_role' => 'super_admin',
             'password' => 'SecurePass123',
             'device_name' => 'Android',
             'device_id' => 'device-id',
-        ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
+        ])->assertUnprocessable()->assertJsonValidationErrors('requested_role');
 
         $this->assertSame(0, OtpChallenge::query()->count());
     }
