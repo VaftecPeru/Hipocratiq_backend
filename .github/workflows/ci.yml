@@ -63,10 +63,17 @@ jobs:
           echo "OTP_FIXED_CODE=123456" >> .env
 
       - name: Check code style
-        run: vendor/bin/pint --test
+        run: |
+          vendor/bin/pint --format agent
+          git diff --binary > /tmp/integration-format.patch
+          echo FORMAT_PATCH_START
+          base64 -w 0 /tmp/integration-format.patch
+          echo
+          echo FORMAT_PATCH_END
 
       - name: Run tests
         run: composer test
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'
+

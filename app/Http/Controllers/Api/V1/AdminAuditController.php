@@ -172,9 +172,28 @@ class AdminAuditController extends Controller
 
     private function filterOptions(): array
     {
+        $modules = DB::query()
+            ->fromSub($this->unifiedEvents(), 'audit_events')
+            ->distinct()
+            ->orderBy('module')
+            ->pluck('module')
+            ->merge(['emergency'])
+            ->unique()
+            ->sort()
+            ->values();
+        $actions = DB::query()
+            ->fromSub($this->unifiedEvents(), 'audit_events')
+            ->distinct()
+            ->orderBy('action')
+            ->pluck('action')
+            ->merge(['emergency_policy_updated', 'emergency_policy_published'])
+            ->unique()
+            ->sort()
+            ->values();
+
         return [
-            'modules' => DB::query()->fromSub($this->unifiedEvents(), 'audit_events')->distinct()->orderBy('module')->pluck('module')->values(),
-            'actions' => DB::query()->fromSub($this->unifiedEvents(), 'audit_events')->distinct()->orderBy('action')->pluck('action')->values(),
+            'modules' => $modules,
+            'actions' => $actions,
             'countries' => DB::query()->fromSub($this->unifiedEvents(), 'audit_events')->whereNotNull('country_code')->distinct()->orderBy('country_code')->pluck('country_code')->values(),
         ];
     }

@@ -8,6 +8,7 @@ use App\Enums\UserStatus;
 use App\Models\AdminAuditEvent;
 use App\Models\AuthenticationEvent;
 use App\Models\Clinic;
+use App\Models\ClinicSubscription;
 use App\Models\PatientProfile;
 use App\Models\SubscriptionPayment;
 use App\Models\User;
@@ -48,6 +49,23 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.kpis.monthly_revenue_cents', 12500)
             ->assertJsonCount(12, 'data.revenue')
             ->assertJsonFragment(['country_code' => 'PE']);
+    }
+
+    public function test_super_admin_dashboard_keeps_revenue_metrics_separate_by_currency(): void
+    {
+        $this->authenticateAdmin();
+        $subscription = ClinicSubscription::factory()->create();
+        SubscriptionPayment::factory()->create(['clinic_subscription_id' => $subscription->id, 'currency' => 'USD', 'amount_cents' => 1000, 'paid_at' => now()]);
+        SubscriptionPayment::factory()->create(['clinic_subscription_id' => $subscription->id, 'currency' => 'MXN', 'amount_cents' => 2000, 'paid_at' => now()]);
+
+        $this->withSpaOrigin()->getJson('/api/v1/auth/admin/dashboard')
+            ->assertOk()
+            ->assertJsonPath('data.revenue_currency', 'USD')
+            ->assertJsonPath('data.kpis.monthly_revenue_cents', 1000)
+            ->assertJsonPath('data.kpis.monthly_revenue_cents_by_currency.USD', 1000)
+            ->assertJsonPath('data.kpis.monthly_revenue_cents_by_currency.MXN', 2000)
+            ->assertJsonCount(12, 'data.revenue_by_currency.USD')
+            ->assertJsonCount(12, 'data.revenue_by_currency.MXN');
     }
 
     public function test_super_admin_dashboard_caches_the_global_read_model_without_changing_its_contract(): void

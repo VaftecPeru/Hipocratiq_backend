@@ -19,6 +19,7 @@ class AdminEmergencyPolicyUpdateRequest extends FormRequest
         return [
             'enabled' => ['required', 'boolean'],
             'visibility' => ['required', Rule::in(['reception_doctors_admins', 'doctors_admins', 'admins_only'])],
+            'label' => ['sometimes', 'string', 'min:2', 'max:60'],
             'color' => ['required', Rule::in(['#EF2F3F', '#F97316', '#7C3AED'])],
             'inheritance' => ['required', Rule::in(['workflow_and_responsibles', 'responsibles_only', 'locked'])],
             'default_channel' => ['required', Rule::in(['priority_push', 'internal_alert', 'email', 'sms'])],

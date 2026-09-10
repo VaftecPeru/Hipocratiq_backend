@@ -22,4 +22,24 @@ class Specialty extends Model
     {
         return $this->hasMany(self::class, 'parent_id');
     }
+
+    public function doctorProfiles(): HasMany
+    {
+        return $this->hasMany(DoctorProfile::class, 'specialty_id');
+    }
+
+    public function doctorSubspecialtyProfiles(): HasMany
+    {
+        return $this->hasMany(DoctorProfile::class, 'subspecialty_id');
+    }
+
+    public function patientIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class, 'specialty_id');
+    }
+
+    public function patientSubspecialtyIntakes(): HasMany
+    {
+        return $this->hasMany(PatientIntake::class, 'subspecialty_id');
+    }
 }
