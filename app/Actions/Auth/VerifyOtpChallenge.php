@@ -4,6 +4,7 @@ namespace App\Actions\Auth;
 
 use App\Enums\AuthenticationClient;
 use App\Enums\OnboardingStatus;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Enums\UserStatus;
@@ -84,6 +85,11 @@ final class VerifyOtpChallenge
                 'consumed_at' => now(),
                 'code_hash' => null,
             ]);
+
+            if ($challenge->delivery_channel === OtpDeliveryChannel::Email
+                && $challenge->user->email_verified_at === null) {
+                $challenge->user->update(['email_verified_at' => now()]);
+            }
 
             if ($purpose === OtpPurpose::Registration) {
                 $challenge->user->update([

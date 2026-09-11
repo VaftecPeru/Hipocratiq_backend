@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use Illuminate\Database\Eloquent\Model;
@@ -22,6 +23,7 @@ class OtpChallenge extends Model
         'purpose',
         'client_type',
         'actor_context',
+        'delivery_channel',
         'device_name',
         'device_id_hash',
         'code_hash',
@@ -47,6 +49,7 @@ class OtpChallenge extends Model
             'purpose' => OtpPurpose::class,
             'client_type' => AuthenticationClient::class,
             'actor_context' => AuthenticationContext::class,
+            'delivery_channel' => OtpDeliveryChannel::class,
             'resend_count' => 'integer',
             'delivery_status' => OtpDeliveryStatus::class,
             'delivery_sequence' => 'integer',

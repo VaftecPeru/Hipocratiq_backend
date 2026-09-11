@@ -5,10 +5,12 @@ namespace App\Actions\Auth;
 use App\Contracts\SmsSender;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\OtpDeliveryStatus;
 use App\Enums\OtpPurpose;
 use App\Models\OtpChallenge;
 use App\Models\User;
+use App\Notifications\OtpCodeNotification;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\OtpHasher;
 use Illuminate\Support\Facades\DB;
@@ -38,8 +40,9 @@ final class IssueOtpChallenge
         ?string $flowId = null,
         int $resendCount = 0,
         ?string $expectedLatestChallengeId = null,
+        OtpDeliveryChannel $deliveryChannel = OtpDeliveryChannel::Phone,
     ): OtpChallenge {
-        [$challenge, $code, $phoneNumber] = DB::transaction(function () use (
+        [$challenge, $code, $lockedUser] = DB::transaction(function () use (
             $user,
             $purpose,
             $client,
@@ -50,6 +53,7 @@ final class IssueOtpChallenge
             $flowId,
             $resendCount,
             $expectedLatestChallengeId,
+            $deliveryChannel,
         ): array {
             $lockedUser = User::query()->lockForUpdate()->findOrFail($user->id);
             $latestChallenge = OtpChallenge::query()
@@ -67,6 +71,12 @@ final class IssueOtpChallenge
                 ]);
             }
 
+            if ($deliveryChannel === OtpDeliveryChannel::Email && blank($lockedUser->email)) {
+                throw ValidationException::withMessages([
+                    'identifier' => ['La cuenta no tiene un correo electrónico disponible para recibir el código.'],
+                ]);
+            }
+
             $id = (string) Str::uuid();
             $code = $this->codeGenerator->generate();
             $challenge = $lockedUser->otpChallenges()->create([
@@ -75,6 +85,7 @@ final class IssueOtpChallenge
                 'purpose' => $purpose,
                 'client_type' => $client,
                 'actor_context' => $context,
+                'delivery_channel' => $deliveryChannel,
                 'device_name' => $deviceName,
                 'device_id_hash' => $deviceIdHash ?? ($deviceId === null ? null : hash('sha256', $deviceId)),
                 'code_hash' => $this->hasher->make($id, $code),
@@ -89,19 +100,17 @@ final class IssueOtpChallenge
                 'expires_at' => now()->addMinutes(config('authentication.otp.ttl_minutes')),
             ]);
 
-            return [$challenge, $code, $lockedUser->phone_number];
+            return [$challenge, $code, $lockedUser];
         });
 
         try {
-            $this->smsSender->send(
-                $phoneNumber,
-                "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
-            );
+            $this->deliverCode($lockedUser, $code, $deliveryChannel);
         } catch (Throwable $exception) {
             $this->discardPendingChallenge($challenge->id);
 
             Log::error('OTP delivery failed.', [
                 'challenge_id' => $challenge->id,
+                'delivery_channel' => $deliveryChannel->value,
                 'provider_error' => $exception::class,
             ]);
 
@@ -164,9 +173,27 @@ final class IssueOtpChallenge
         $this->recordEvent->handleSafely($user, 'otp_sent', metadata: [
             'challenge_id' => $confirmedChallenge->id,
             'purpose' => $purpose->value,
+            'delivery_channel' => $deliveryChannel->value,
         ]);
 
         return $confirmedChallenge;
+    }
+
+    private function deliverCode(User $user, string $code, OtpDeliveryChannel $deliveryChannel): void
+    {
+        if ($deliveryChannel === OtpDeliveryChannel::Email) {
+            $user->notify(new OtpCodeNotification(
+                $code,
+                (int) config('authentication.otp.ttl_minutes'),
+            ));
+
+            return;
+        }
+
+        $this->smsSender->send(
+            $user->phone_number,
+            "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
+        );
     }
 
     private function discardPendingChallenge(string $challengeId): void
