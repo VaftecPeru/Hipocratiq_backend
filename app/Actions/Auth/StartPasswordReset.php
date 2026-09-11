@@ -4,6 +4,7 @@ namespace App\Actions\Auth;
 
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\OtpPurpose;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
@@ -23,14 +24,17 @@ final class StartPasswordReset
     {
         $identifier = (string) $data['identifier'];
         $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
-        $user = str_contains($identifier, '@')
+        $deliveryChannel = str_contains($identifier, '@')
+            ? OtpDeliveryChannel::Email
+            : OtpDeliveryChannel::Phone;
+        $user = $deliveryChannel === OtpDeliveryChannel::Email
             ? User::query()->where('email', strtolower($identifier))->first()
             : User::query()->where('phone_number', PhoneNumber::fromE164($identifier)->value)->first();
 
         if (
             $user === null
             || $user->password === null
-            || $user->phone_verified_at === null
+            || ! $this->isDeliveryIdentityVerified($user, $deliveryChannel)
             || $user->status !== UserStatus::Active
             || ($client === AuthenticationClient::Mobile && ($user?->hasRole(RoleKey::SuperAdmin) ?? false))
         ) {
@@ -48,6 +52,14 @@ final class StartPasswordReset
             AuthenticationContext::Staff,
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,
+            deliveryChannel: $deliveryChannel,
         );
+    }
+
+    private function isDeliveryIdentityVerified(User $user, OtpDeliveryChannel $deliveryChannel): bool
+    {
+        return $deliveryChannel === OtpDeliveryChannel::Email
+            ? $user->email_verified_at !== null
+            : $user->phone_verified_at !== null;
     }
 }
