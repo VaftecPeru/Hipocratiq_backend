@@ -40,6 +40,31 @@ final class StartLogin
             $isReceptionist,
             $isDoctor,
         );
+        $isPatient = $user?->patientProfile()->exists() ?? false;
+
+        if (
+            $user !== null
+            && $user->status === UserStatus::Active
+            && in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
+            && $this->hasExactRequestedRole($requestedRole, $context, $client)
+            && $this->requestedRoleMatchesContext($requestedRole, $context)
+            && ! $this->userHasRequestedRole(
+                $requestedRole,
+                $isSuperAdmin,
+                $isClinicAdmin,
+                $isReceptionist,
+                $isDoctor,
+                $isPatient,
+            )
+        ) {
+            $this->recordEvent->handle($user, 'login_failed', 'failure');
+
+            $field = isset($data['identifier']) ? 'identifier' : 'phone_number';
+
+            throw ValidationException::withMessages([
+                $field => ['El usuario no corresponde al rol seleccionado. Verifica el tipo de acceso e inténtalo nuevamente.'],
+            ]);
+        }
 
         if (
             $user === null
@@ -48,16 +73,8 @@ final class StartLogin
             || ! $this->requestedRoleMatchesContext($requestedRole, $context)
             || ! $this->isDeliveryIdentityUsable($user, $deliveryChannel)
             || $user->status !== UserStatus::Active
-            || ! $this->userHasRequestedRole(
-                $requestedRole,
-                $isSuperAdmin,
-                $isClinicAdmin,
-                $isReceptionist,
-                $isDoctor,
-                $user?->patientProfile()->exists() ?? false,
-            )
             || ($context === AuthenticationContext::Patient && (
-                ! $user->patientProfile()->exists()
+                ! $isPatient
                 || $user->hasRole(RoleKey::SuperAdmin)
                 || $isClinicAdmin
                 || $isReceptionist
