@@ -102,6 +102,7 @@ final class ResendOtpChallenge
             $reservation['flow_id'],
             $latestChallenge->resend_count + 1,
             $latestChallenge->id,
+            $latestChallenge->delivery_channel,
         );
     }
 }
