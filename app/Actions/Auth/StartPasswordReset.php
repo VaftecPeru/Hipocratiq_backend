@@ -34,7 +34,7 @@ final class StartPasswordReset
         if (
             $user === null
             || $user->password === null
-            || ! $this->isDeliveryIdentityVerified($user, $deliveryChannel)
+            || ! $this->isDeliveryIdentityUsable($user, $deliveryChannel)
             || $user->status !== UserStatus::Active
             || ($client === AuthenticationClient::Mobile && ($user?->hasRole(RoleKey::SuperAdmin) ?? false))
         ) {
@@ -56,10 +56,12 @@ final class StartPasswordReset
         );
     }
 
-    private function isDeliveryIdentityVerified(User $user, OtpDeliveryChannel $deliveryChannel): bool
+    private function isDeliveryIdentityUsable(User $user, OtpDeliveryChannel $deliveryChannel): bool
     {
-        return $deliveryChannel === OtpDeliveryChannel::Email
-            ? $user->email_verified_at !== null
-            : $user->phone_verified_at !== null;
+        if ($deliveryChannel === OtpDeliveryChannel::Email) {
+            return is_string($user->email) && $user->email !== '';
+        }
+
+        return $user->phone_verified_at !== null;
     }
 }
