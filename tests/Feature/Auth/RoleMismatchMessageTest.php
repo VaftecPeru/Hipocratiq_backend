@@ -2,8 +2,8 @@
 
 namespace Tests\Feature\Auth;
 
-use App\Services\Auth\OtpCodeGenerator;
 use App\Models\User;
+use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
