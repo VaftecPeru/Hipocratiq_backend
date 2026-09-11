@@ -246,7 +246,7 @@ class OtpAuthenticationTest extends TestCase
         $this->withSpaOrigin()->postJson('/api/v1/auth/otp/request', $payload)
             ->assertUnprocessable()
             ->assertJsonValidationErrors('identifier')
-            ->assertJsonPath('errors.identifier.0', 'Las credenciales proporcionadas no son correctas.');
+            ->assertJsonPath('errors.identifier.0', 'El usuario no corresponde al rol seleccionado. Verifica el tipo de acceso e inténtalo nuevamente.');
 
         $this->assertDatabaseCount('otp_challenges', 0);
         $this->assertDatabaseCount('authentication_sessions', 0);
