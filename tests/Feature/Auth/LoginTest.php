@@ -3,13 +3,17 @@
 namespace Tests\Feature\Auth;
 
 use App\Contracts\SmsSender;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\UserStatus;
 use App\Models\AuthenticationEvent;
 use App\Models\AuthenticationSession;
+use App\Models\OtpChallenge;
 use App\Models\User;
+use App\Notifications\OtpCodeNotification;
 use App\Services\Auth\OtpCodeGenerator;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use RuntimeException;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
@@ -120,10 +124,13 @@ class LoginTest extends TestCase
         ]);
     }
 
-    public function test_otp_delivery_failure_returns_service_unavailable_without_persisting_challenge(): void
+    public function test_web_phone_login_delivers_otp_by_email_when_sms_provider_is_unavailable(): void
     {
-        User::factory()->superAdmin()->create([
+        Notification::fake();
+
+        $user = User::factory()->superAdmin()->create([
             'phone_number' => '+525512345678',
+            'email' => 'admin@example.com',
             'password' => 'SecurePass123',
         ]);
         $this->app->instance(SmsSender::class, new class implements SmsSender
@@ -142,14 +149,17 @@ class LoginTest extends TestCase
         ]);
 
         $response
-            ->assertServiceUnavailable()
-            ->assertJson([
-                'success' => false,
-                'code' => 'OTP_DELIVERY_UNAVAILABLE',
-                'message' => 'No se pudo enviar el código OTP.',
-            ]);
-        $this->assertDatabaseCount('otp_challenges', 0);
-        $this->assertDatabaseMissing('authentication_events', ['event' => 'otp_sent']);
+            ->assertAccepted()
+            ->assertJsonPath('data.next_step', 'verify_otp');
+
+        $challenge = OtpChallenge::query()->findOrFail($response->json('data.challenge_id'));
+        $this->assertSame(OtpDeliveryChannel::Email, $challenge->delivery_channel);
+        Notification::assertSentTo($user, OtpCodeNotification::class);
+        $this->assertDatabaseHas('authentication_events', [
+            'user_id' => $user->id,
+            'event' => 'otp_sent',
+            'outcome' => 'success',
+        ]);
     }
 
     public function test_unverified_user_cannot_start_login(): void
