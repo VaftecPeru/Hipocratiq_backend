@@ -83,6 +83,16 @@ class PatientProfile extends Model
         return $this->hasMany(Consultation::class);
     }
 
+    public function prescriptions(): HasMany
+    {
+        return $this->hasMany(DoctorPrescription::class);
+    }
+
+    public function laboratoryOrders(): HasMany
+    {
+        return $this->hasMany(LaboratoryOrder::class);
+    }
+
     public function invoices(): HasMany
     {
         return $this->hasMany(ClinicInvoice::class);

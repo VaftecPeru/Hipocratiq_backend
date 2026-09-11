@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\V1\DoctorPatientController;
 use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
 use App\Http\Controllers\Api\V1\DoctorWorkspaceController;
+use App\Http\Controllers\Api\V1\PatientPortalController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Route;
@@ -155,6 +156,18 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/session/renew', [SessionController::class, 'renew'])->name('session.renew');
         Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
+        Route::prefix('patient')->name('patient.')->middleware('actor.context:patient')->group(function (): void {
+            Route::get('/profile', [PatientPortalController::class, 'profile'])->name('profile.show');
+            Route::patch('/profile', [PatientPortalController::class, 'updateProfile'])->name('profile.update');
+            Route::get('/appointments', [PatientPortalController::class, 'appointments'])->name('appointments.index');
+            Route::get('/history', [PatientPortalController::class, 'history'])->name('history.index');
+            Route::get('/prescriptions', [PatientPortalController::class, 'prescriptions'])->name('prescriptions.index');
+            Route::get('/results', [PatientPortalController::class, 'results'])->name('results.index');
+            Route::get('/triage', [PatientPortalController::class, 'triage'])->name('triage.show');
+            Route::post('/triage', [PatientPortalController::class, 'storeTriage'])->name('triage.store');
+            Route::get('/membership', [PatientPortalController::class, 'membership'])->name('membership.show');
+            Route::get('/epidemiology', [PatientPortalController::class, 'epidemiology'])->name('epidemiology.show');
+        });
         Route::get('/clinical/notifications', [ClinicalNotificationController::class, 'index'])
             ->middleware('actor.context:clinic_admin,receptionist,doctor')
             ->name('clinical.notifications.index');
