@@ -15,7 +15,7 @@ use App\Services\Auth\RandomOtpCodeGenerator;
 use App\Services\Billing\SimulatedBillingGateway;
 use App\Services\Billing\UnavailableBillingGateway;
 use App\Services\Sms\ArraySmsSender;
-use App\Services\Sms\TwilioSmsSender;
+use App\Services\Sms\UnavailableSmsSender;
 use App\Support\Authorization\RolePermissionCatalog;
 use App\Support\PhoneNumber;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -40,11 +40,12 @@ class AppServiceProvider extends ServiceProvider
                 : new RandomOtpCodeGenerator;
         });
         $this->app->singleton(ArraySmsSender::class);
+        $this->app->singleton(UnavailableSmsSender::class);
         $this->app->singleton(
             SmsSender::class,
             fn () => match (config('sms.driver')) {
                 'array' => $this->app->make(ArraySmsSender::class),
-                'twilio' => $this->app->make(TwilioSmsSender::class),
+                'unavailable' => $this->app->make(UnavailableSmsSender::class),
                 default => throw new LogicException('El proveedor SMS configurado no está disponible.'),
             },
         );
@@ -63,10 +64,6 @@ class AppServiceProvider extends ServiceProvider
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
 
         if ($this->app->runningInConsole() === false && config('authentication.demo_mode') !== true) {
-            if ($this->app->isProduction() && config('sms.driver') === 'array') {
-                throw new LogicException('Configura un proveedor SMS antes de ejecutar en producción.');
-            }
-
             if ($this->app->isProduction() && config('authentication.otp.fixed_code')) {
                 throw new LogicException('OTP_FIXED_CODE no puede usarse en producción.');
             }
@@ -97,10 +94,6 @@ class AppServiceProvider extends ServiceProvider
             });
         }
 
-        // En modo demo aflojamos los throttles: las corridas repetidas de la
-        // demo desde la misma IP/teléfono no deben quedar bloqueadas hasta una
-        // hora. En producción real (demo_mode=false) se mantienen los límites
-        // estrictos definidos más abajo.
         if (config('authentication.demo_mode') === true) {
             $this->configureDemoRateLimiters();
 
@@ -143,11 +136,6 @@ class AppServiceProvider extends ServiceProvider
         ]);
     }
 
-    /**
-     * Límites relajados solo para el modo demo. Mantenemos un techo por minuto
-     * y por IP suficiente para frenar abusos evidentes, pero eliminamos los
-     * bloqueos por hora que dejaban la demo inutilizable tras varias corridas.
-     */
     private function configureDemoRateLimiters(): void
     {
         $names = [
@@ -169,6 +157,20 @@ class AppServiceProvider extends ServiceProvider
 
     private function phoneRateLimitKey(Request $request): string
     {
+        $identifier = (string) ($request->input('identifier') ?? '');
+
+        if ($identifier !== '') {
+            if (str_contains($identifier, '@')) {
+                return hash('sha256', strtolower($identifier));
+            }
+
+            try {
+                return hash('sha256', PhoneNumber::fromE164($identifier)->value);
+            } catch (InvalidArgumentException) {
+                return hash('sha256', $identifier);
+            }
+        }
+
         try {
             $phoneNumber = PhoneNumber::from(
                 (string) $request->input('phone_number'),
