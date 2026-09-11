@@ -4,46 +4,37 @@ namespace App\Services\Sms;
 
 use App\Contracts\SmsSender;
 use Illuminate\Support\Facades\Http;
-use LogicException;
+use RuntimeException;
 
 final readonly class TwilioSmsSender implements SmsSender
 {
-    public function __construct()
-    {
-        if (! $this->isConfigured()) {
-            throw new LogicException('Las credenciales de Twilio no están configuradas.');
-        }
-    }
-
     public function send(string $phoneNumber, string $message): void
     {
+        $accountSid = trim((string) config('sms.twilio.account_sid'));
+        $authToken = trim((string) config('sms.twilio.auth_token'));
+        $messagingServiceSid = trim((string) config('sms.twilio.messaging_service_sid'));
+
+        if ($accountSid === '' || $authToken === '' || $messagingServiceSid === '') {
+            throw new RuntimeException(
+                'Twilio no está configurado completamente. Verifica TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN y TWILIO_MESSAGING_SERVICE_SID.',
+            );
+        }
+
         Http::asForm()
-            ->withBasicAuth(
-                (string) config('sms.twilio.account_sid'),
-                (string) config('sms.twilio.auth_token'),
-            )
+            ->withBasicAuth($accountSid, $authToken)
             ->connectTimeout(5)
             ->timeout(10)
             ->retry(2, 200, throw: false)
-            ->post($this->messagesUrl(), [
-                'MessagingServiceSid' => config('sms.twilio.messaging_service_sid'),
+            ->post($this->messagesUrl($accountSid), [
+                'MessagingServiceSid' => $messagingServiceSid,
                 'To' => $phoneNumber,
                 'Body' => $message,
             ])
             ->throw();
     }
 
-    private function isConfigured(): bool
+    private function messagesUrl(string $accountSid): string
     {
-        return collect([
-            config('sms.twilio.account_sid'),
-            config('sms.twilio.auth_token'),
-            config('sms.twilio.messaging_service_sid'),
-        ])->every(fn (mixed $value): bool => is_string($value) && $value !== '');
-    }
-
-    private function messagesUrl(): string
-    {
-        return 'https://api.twilio.com/2010-04-01/Accounts/'.config('sms.twilio.account_sid').'/Messages.json';
+        return 'https://api.twilio.com/2010-04-01/Accounts/'.$accountSid.'/Messages.json';
     }
 }
