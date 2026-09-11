@@ -4,6 +4,7 @@ namespace App\Actions\Auth;
 
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\OtpPurpose;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
@@ -25,6 +26,7 @@ final class StartLogin
     {
         $context = AuthenticationContext::from($data['actor_context'] ?? AuthenticationContext::Staff->value);
         $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
+        $deliveryChannel = $this->deliveryChannel($data);
         $user = $this->findUser($data);
         $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
         $isReceptionist = $user?->hasActiveReceptionistAccess() ?? false;
@@ -44,7 +46,7 @@ final class StartLogin
             || ! in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
             || ! $this->hasExactRequestedRole($requestedRole, $context, $client)
             || ! $this->requestedRoleMatchesContext($requestedRole, $context)
-            || $user->phone_verified_at === null
+            || ! $this->isDeliveryIdentityVerified($user, $deliveryChannel)
             || $user->status !== UserStatus::Active
             || ! $this->userHasRequestedRole(
                 $requestedRole,
@@ -85,6 +87,7 @@ final class StartLogin
             $resolvedContext,
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,
+            deliveryChannel: $deliveryChannel,
         );
     }
 
@@ -161,5 +164,19 @@ final class StartLogin
         $phoneNumber = PhoneNumber::from($data['phone_number'], $data['country_code']);
 
         return User::query()->where('phone_number', $phoneNumber->value)->first();
+    }
+
+    private function deliveryChannel(array $data): OtpDeliveryChannel
+    {
+        return isset($data['identifier']) && str_contains((string) $data['identifier'], '@')
+            ? OtpDeliveryChannel::Email
+            : OtpDeliveryChannel::Phone;
+    }
+
+    private function isDeliveryIdentityVerified(User $user, OtpDeliveryChannel $deliveryChannel): bool
+    {
+        return $deliveryChannel === OtpDeliveryChannel::Email
+            ? $user->email_verified_at !== null
+            : $user->phone_verified_at !== null;
     }
 }
