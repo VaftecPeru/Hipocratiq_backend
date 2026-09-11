@@ -56,22 +56,29 @@ class EmailOtpLoginTest extends TestCase
         $this->assertAuthenticatedAs($user);
     }
 
-    public function test_unverified_email_cannot_start_email_login(): void
+    public function test_registered_email_is_verified_after_successful_email_otp(): void
     {
-        User::factory()->superAdmin()->create([
+        $user = User::factory()->superAdmin()->create([
             'email' => 'admin@example.com',
             'email_verified_at' => null,
+            'phone_verified_at' => null,
             'password' => 'SecurePass123',
         ]);
 
-        $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+        $login = $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
             'identifier' => 'admin@example.com',
             'password' => 'SecurePass123',
             'requested_role' => 'super_admin',
-        ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
+        ])->assertAccepted();
 
-        Notification::assertNothingSent();
-        $this->assertDatabaseCount('otp_challenges', 0);
+        Notification::assertSentTo($user, OtpCodeNotification::class);
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
+            'challenge_id' => $login->json('data.challenge_id'),
+            'code' => '123456',
+        ])->assertOk();
+
+        $this->assertNotNull($user->fresh()->email_verified_at);
     }
 
     private function withSpaOrigin(): static
