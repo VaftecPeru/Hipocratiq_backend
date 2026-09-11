@@ -3,7 +3,10 @@
 namespace App\Support\Clinical;
 
 use App\Enums\AppointmentStatus;
+use App\Enums\ClinicMembershipStatus;
 use App\Enums\ConsultationStatus;
+use App\Enums\RoleKey;
+use App\Enums\UserStatus;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\DoctorProfile;
@@ -34,6 +37,33 @@ final class DoctorScheduling
         return ($this->preferences($profile)['auto_confirm_appointments'] ?? false) === true
             ? AppointmentStatus::Confirmed
             : AppointmentStatus::Pending;
+    }
+
+    public function resolveClinicDoctor(Clinic $clinic, int $doctorUserId, bool $lockForUpdate = false): DoctorProfile
+    {
+        $profile = DoctorProfile::query()
+            ->where('user_id', $doctorUserId)
+            ->where('clinic_id', $clinic->id)
+            ->whereHas('user', function (Builder $query) use ($clinic): void {
+                $query
+                    ->where('status', UserStatus::Active->value)
+                    ->whereHas('clinicMemberships', function (Builder $membershipQuery) use ($clinic): void {
+                        $membershipQuery
+                            ->where('clinic_id', $clinic->id)
+                            ->where('status', ClinicMembershipStatus::Active->value)
+                            ->whereHas('role', fn (Builder $roleQuery): Builder => $roleQuery->where('key', RoleKey::Doctor->value));
+                    });
+            })
+            ->when($lockForUpdate, fn (Builder $query): Builder => $query->lockForUpdate())
+            ->first();
+
+        if ($profile === null) {
+            throw ValidationException::withMessages([
+                'doctor_user_id' => ['El médico no es un miembro activo de esta clínica.'],
+            ]);
+        }
+
+        return $profile;
     }
 
     /**

@@ -21,13 +21,14 @@ final class AdminDashboardCache
         'clinic_team' => ['receptionist_created'],
         'clinics' => ['clinic_created', 'clinic_updated'],
         'memberships' => ['plan_created', 'plan_updated', 'subscription_created', 'subscription_upgraded', 'subscription_canceled'],
+        'specialties' => ['specialty_created', 'specialty_updated'],
         'support' => ['ticket_created', 'ticket_updated'],
         'users' => ['user_created', 'user_updated'],
     ];
 
     public static function key(): string
     {
-        return 'admin-dashboard:read-model:v3';
+        return 'admin-dashboard:read-model:v4';
     }
 
     public static function invalidateFor(string $module, string $action): void

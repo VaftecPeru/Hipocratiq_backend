@@ -18,6 +18,8 @@ use App\Models\ClinicSubscription;
 use App\Models\PatientProfile;
 use App\Models\Plan;
 use App\Models\SubscriptionPayment;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -146,6 +148,7 @@ class AdminClinicController extends Controller
             BillingCycle::Annual => (int) round(($plan?->annual_price_cents ?? 0) / 12),
             default => $plan?->monthly_price_cents ?? 0,
         };
+        $billingCurrency = (string) ($plan?->currency ?? config('memberships.currency', 'USD'));
 
         return [
             'id' => $clinic->id,
@@ -157,6 +160,7 @@ class AdminClinicController extends Controller
             'patients' => $clinic->patient_profiles_count,
             'status' => $clinic->status->value,
             'monthly_billing' => round($monthlyBillingCents / 100, 2),
+            'monthly_billing_currency' => $billingCurrency,
             'last_payment' => $subscription?->latestSuccessfulPayment?->paid_at?->toDateString(),
         ];
     }
@@ -178,22 +182,31 @@ class AdminClinicController extends Controller
         $payments = SubscriptionPayment::query()
             ->where('status', 'succeeded')
             ->whereNotNull('paid_at');
-        $monthlyRevenueCents = (clone $payments)
-            ->whereBetween('paid_at', [now()->startOfMonth(), now()->endOfMonth()])
-            ->sum('amount_cents');
-        $annualRevenueCents = (clone $payments)
-            ->whereBetween('paid_at', [now()->startOfYear(), now()->endOfYear()])
-            ->sum('amount_cents');
+        $now = CarbonImmutable::now();
+        $primaryCurrency = $this->primaryCurrency();
+        $monthlyRevenueByCurrency = $this->revenueTotalsByCurrency(
+            $payments,
+            $now->startOfMonth(),
+            $now->startOfMonth()->addMonth(),
+        );
+        $annualRevenueByCurrency = $this->revenueTotalsByCurrency(
+            $payments,
+            $now->startOfYear(),
+            $now->startOfYear()->addYear(),
+        );
 
         return [
+            'revenue_currency' => $primaryCurrency,
             'totals' => [
                 'clinics' => $totalClinics,
                 'active_clinics' => (int) ($clinicStatusCounts[ClinicStatus::Active->value] ?? 0),
                 'suspended_clinics' => (int) ($clinicStatusCounts[ClinicStatus::Suspended->value] ?? 0),
                 'users' => ClinicMembership::query()->count(),
                 'patients' => PatientProfile::query()->whereNotNull('clinic_id')->count(),
-                'monthly_revenue' => round($monthlyRevenueCents / 100, 2),
-                'annual_revenue' => round($annualRevenueCents / 100, 2),
+                'monthly_revenue' => round($monthlyRevenueByCurrency[$primaryCurrency] / 100, 2),
+                'annual_revenue' => round($annualRevenueByCurrency[$primaryCurrency] / 100, 2),
+                'monthly_revenue_cents_by_currency' => $monthlyRevenueByCurrency,
+                'annual_revenue_cents_by_currency' => $annualRevenueByCurrency,
             ],
             'plan_distribution' => $this->planDistribution(),
             'recent_activity' => Clinic::query()
@@ -210,6 +223,42 @@ class AdminClinicController extends Controller
                 ->values()
                 ->all(),
         ];
+    }
+
+    /** @return array<string, int> */
+    private function revenueTotalsByCurrency(Builder $payments, CarbonImmutable $start, CarbonImmutable $end): array
+    {
+        $totals = array_fill_keys($this->supportedCurrencies(), 0);
+        $rows = (clone $payments)
+            ->where('paid_at', '>=', $start)
+            ->where('paid_at', '<', $end)
+            ->select('currency')
+            ->selectRaw('SUM(amount_cents) as amount_cents')
+            ->groupBy('currency')
+            ->get();
+
+        foreach ($rows as $row) {
+            if (array_key_exists($row->currency, $totals)) {
+                $totals[$row->currency] = (int) $row->amount_cents;
+            }
+        }
+
+        return $totals;
+    }
+
+    /** @return list<string> */
+    private function supportedCurrencies(): array
+    {
+        return config('memberships.supported_currencies', ['USD']);
+    }
+
+    private function primaryCurrency(): string
+    {
+        $configuredCurrency = (string) config('memberships.currency', 'USD');
+
+        return in_array($configuredCurrency, $this->supportedCurrencies(), true)
+            ? $configuredCurrency
+            : ($this->supportedCurrencies()[0] ?? 'USD');
     }
 
     /**

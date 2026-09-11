@@ -26,16 +26,22 @@ class EnsureClinicAccess
             return $this->accessRequiredResponse();
         }
 
+        $now = now();
+        $activeSubscription = function ($query) use ($now) {
+            return $query
+                ->where('status', SubscriptionStatus::Active->value)
+                ->where('starts_at', '<=', $now)
+                ->where(function ($query) use ($now): void {
+                    $query->whereNull('ends_at')->orWhere('ends_at', '>', $now);
+                });
+        };
+
         $membership = $request->user()->clinicMemberships()
             ->where('status', ClinicMembershipStatus::Active)
             ->whereHas('role', fn ($query) => $query->where('key', $roleKey->value))
             ->whereHas('clinic', fn ($query) => $query->where('status', ClinicStatus::Active))
-            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', SubscriptionStatus::Active->value)->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-            }))
-            ->with(['clinic.subscriptions' => fn ($query) => $query->where('status', SubscriptionStatus::Active->value)->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-            })->with('plan')->latest('starts_at')])
+            ->whereHas('clinic.subscriptions', $activeSubscription)
+            ->with(['clinic.subscriptions' => fn ($query) => $activeSubscription($query)->with('plan')->latest('starts_at')])
             ->orderBy('clinic_id')
             ->orderBy('id')
             ->first();

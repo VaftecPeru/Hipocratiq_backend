@@ -10,10 +10,18 @@ use App\Http\Requests\Api\V1\AdminEmergencyPublishRequest;
 use App\Models\AdminAuditEvent;
 use App\Models\Clinic;
 use App\Models\PlatformSetting;
+use App\Services\Notifications\ClinicalNotificationService;
+use App\Support\Clinical\EmergencyPolicyResolver;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class AdminEmergencyController extends Controller
 {
+    public function __construct(
+        private readonly EmergencyPolicyResolver $emergencyPolicies,
+        private readonly ClinicalNotificationService $clinicalNotifications,
+    ) {}
+
     public function show(): JsonResponse
     {
         return response()->json(['success' => true, 'data' => $this->serialize($this->settings())]);
@@ -23,14 +31,42 @@ class AdminEmergencyController extends Controller
         AdminEmergencyPolicyUpdateRequest $request,
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
-        $settings = $this->settings();
-        $before = $this->serialize($settings);
-        $data = $request->validated();
-        $responsibles = $data['responsibles'];
-        unset($data['responsibles']);
-        $settings->update(['emergency_policy' => $data, 'emergency_responsibles' => $responsibles]);
-        $settings->refresh();
-        $audit->handle($request->user(), $request, 'emergency', 'emergency_policy_updated', PlatformSetting::class, $settings->id, 'Política global de emergencia', metadata: ['before' => $before['policy'], 'after' => $data], critical: true);
+        $settings = DB::transaction(function () use ($request, $audit): PlatformSetting {
+            $settings = $this->lockedSettings();
+            $before = $this->serialize($settings);
+            $data = $request->validated();
+            $responsibles = array_values($data['responsibles']);
+            unset($data['responsibles']);
+            $policy = array_replace($this->emergencyPolicies->platformPolicy($settings), $data);
+
+            $settings->forceFill([
+                'emergency_policy' => $policy,
+                'emergency_responsibles' => $responsibles,
+            ])->save();
+            $settings->refresh();
+            $audit->handle(
+                $request->user(),
+                $request,
+                'emergency',
+                'emergency_policy_updated',
+                PlatformSetting::class,
+                $settings->id,
+                'Política global de emergencia',
+                metadata: [
+                    'before' => [
+                        'policy' => $before['policy'],
+                        'responsibles' => $before['responsibles'],
+                    ],
+                    'after' => [
+                        'policy' => $policy,
+                        'responsibles' => $responsibles,
+                    ],
+                ],
+                critical: true,
+            );
+
+            return $settings;
+        });
 
         return response()->json(['success' => true, 'data' => $this->serialize($settings)]);
     }
@@ -39,45 +75,125 @@ class AdminEmergencyController extends Controller
         AdminEmergencyPublishRequest $request,
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
-        $settings = $this->settings();
-        $data = $request->validated();
-        $settings->update(['emergency_published_at' => now()]);
-        $affected = Clinic::query()
-            ->where('status', ClinicStatus::Active->value)
-            ->when($data['scope'] !== 'all', fn ($query) => $query->where('country_code', $data['scope']))
-            ->count();
-        $audit->handle($request->user(), $request, 'emergency', 'emergency_policy_published', PlatformSetting::class, $settings->id, 'Política global de emergencia', countryCode: $data['scope'] === 'all' ? null : $data['scope'], metadata: ['scope' => $data['scope'], 'force' => (bool) ($data['force'] ?? false), 'note' => $data['note'] ?? null, 'affected_clinics' => $affected], critical: true);
+        [$settings, $affected] = DB::transaction(function () use ($request, $audit): array {
+            $settings = $this->lockedSettings();
+            $data = $request->validated();
+            $idempotencyKey = $data['idempotency_key'] ?? null;
 
-        return response()->json(['success' => true, 'data' => ['published_at' => $settings->emergency_published_at?->toIso8601String(), 'affected_clinics' => $affected]]);
+            if ($idempotencyKey !== null
+                && is_array($settings->emergency_publication)
+                && ($settings->emergency_publication['idempotency_key'] ?? null) === $idempotencyKey) {
+                return [
+                    $settings,
+                    (int) ($settings->emergency_publication['affected_clinics'] ?? Clinic::query()->count()),
+                ];
+            }
+
+            $publishedAt = now();
+            $policy = $this->emergencyPolicies->platformPolicy($settings);
+            $responsibles = $this->emergencyPolicies->platformResponsibles($settings);
+            $actor = $request->user();
+            $affected = Clinic::query()->count();
+            $publication = [
+                'scope' => 'all',
+                'force' => true,
+                'note' => $data['note'] ?? null,
+                'published_at' => $publishedAt->toIso8601String(),
+                'published_by' => [
+                    'id' => $actor?->getKey(),
+                    'name' => $actor?->name,
+                    'email' => $actor?->email,
+                ],
+                'policy' => $policy,
+                'responsibles' => $responsibles,
+                'idempotency_key' => $idempotencyKey,
+                'affected_clinics' => $affected,
+            ];
+
+            $settings->forceFill([
+                'emergency_published_at' => $publishedAt,
+                'emergency_publication' => $publication,
+            ])->save();
+            $settings->refresh();
+            $auditEvent = $audit->handle(
+                $request->user(),
+                $request,
+                'emergency',
+                'emergency_policy_published',
+                PlatformSetting::class,
+                $settings->id,
+                'Política global de emergencia',
+                metadata: [
+                    'scope' => 'all',
+                    'force' => true,
+                    'requested_force' => (bool) ($data['force'] ?? false),
+                    'note' => $data['note'] ?? null,
+                    'affected_clinics' => $affected,
+                    'override' => 'mandatory_global',
+                    'policy' => $policy,
+                    'responsibles' => $responsibles,
+                    'published_by' => $publication['published_by'],
+                    'published_at' => $publishedAt->toIso8601String(),
+                    'idempotency_key' => $idempotencyKey,
+                ],
+                critical: true,
+            );
+
+            $notificationStats = $this->clinicalNotifications->createForEmergency(
+                Clinic::query()->where('status', ClinicStatus::Active->value)->get(),
+                $policy,
+                'emergency_published',
+                'emergency_publication',
+                (string) $auditEvent->getKey(),
+                $data['note'] ?? null,
+            );
+            $auditEvent->update([
+                'metadata' => [
+                    ...((array) $auditEvent->metadata),
+                    'notifications' => $notificationStats,
+                ],
+            ]);
+
+            return [$settings, $affected];
+        });
+
+        return response()->json(['success' => true, 'data' => [
+            'published_at' => $settings->emergency_published_at?->toIso8601String(),
+            'affected_clinics' => $affected,
+            'publication' => $this->emergencyPolicies->publication($settings),
+        ]]);
     }
 
     private function settings(): PlatformSetting
     {
-        return PlatformSetting::query()->firstOrCreate(['id' => 1], ['default_country_code' => 'MX', 'enabled_country_codes' => ['MX']]);
+        return PlatformSetting::query()->find(1) ?? new PlatformSetting([
+            'default_country_code' => 'MX',
+            'enabled_country_codes' => ['MX'],
+        ]);
+    }
+
+    private function lockedSettings(): PlatformSetting
+    {
+        $settings = PlatformSetting::query()->firstOrCreate(
+            ['id' => 1],
+            ['default_country_code' => 'MX', 'enabled_country_codes' => ['MX']],
+        );
+
+        return PlatformSetting::query()->lockForUpdate()->findOrFail($settings->id);
     }
 
     /** @return array<string, mixed> */
     private function serialize(PlatformSetting $settings): array
     {
-        $policy = $settings->emergency_policy ?? [
-            'enabled' => true,
-            'visibility' => 'reception_doctors_admins',
-            'color' => '#EF2F3F',
-            'inheritance' => 'workflow_and_responsibles',
-            'default_channel' => 'priority_push',
-            'escalation_minutes' => 3,
-        ];
-        $responsibles = $settings->emergency_responsibles ?? [
-            ['role' => 'Administrador de clínica', 'channel' => 'Resumen de evento y auditoría'],
-            ['role' => 'Jefe de guardia', 'channel' => 'Push prioritario'],
-            ['role' => 'Recepción', 'channel' => 'Alerta interna inmediata'],
-        ];
+        $policy = $this->emergencyPolicies->platformPolicy($settings);
+        $responsibles = $this->emergencyPolicies->platformResponsibles($settings);
         $activeClinics = Clinic::query()->where('status', ClinicStatus::Active->value)->count();
 
         return [
             'policy' => $policy,
             'responsibles' => $responsibles,
             'published_at' => $settings->emergency_published_at?->toIso8601String(),
+            'publication' => $this->emergencyPolicies->publication($settings),
             'stats' => [
                 'active_clinics' => $activeClinics,
                 'enabled_clinics' => ($policy['enabled'] ?? false) ? $activeClinics : 0,

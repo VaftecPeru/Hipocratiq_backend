@@ -61,26 +61,37 @@ class AdminDashboardController extends Controller
         $now = CarbonImmutable::now();
         $monthStart = $now->startOfMonth();
         $previousMonthStart = $monthStart->subMonth();
+        $nextMonthStart = $monthStart->addMonth();
         $activeStatuses = [
             SupportTicketStatus::Open->value,
             SupportTicketStatus::InProgress->value,
             SupportTicketStatus::WaitingOnCustomer->value,
         ];
+        $primaryCurrency = $this->primaryCurrency();
+        $monthlyRevenueByCurrency = $this->revenueTotalsByCurrency($monthStart, $nextMonthStart);
+        $previousMonthRevenueByCurrency = $this->revenueTotalsByCurrency($previousMonthStart, $monthStart);
+        $revenueByCurrency = collect($this->supportedCurrencies())
+            ->mapWithKeys(fn (string $currency): array => [$currency => $this->revenueSeries($now, $currency)])
+            ->all();
 
         return $this->normalizeDashboardLists([
             'generated_at' => $now->toIso8601String(),
+            'revenue_currency' => $primaryCurrency,
             'kpis' => [
                 'active_clinics' => Clinic::query()->where('status', ClinicStatus::Active->value)->count(),
                 'clinics_added_this_month' => Clinic::query()->where('created_at', '>=', $monthStart)->count(),
                 'active_users' => User::query()->where('status', UserStatus::Active->value)->count(),
                 'users_added_this_month' => User::query()->where('created_at', '>=', $monthStart)->count(),
                 'active_patients' => PatientProfile::query()->whereHas('user', fn ($query) => $query->where('status', UserStatus::Active->value))->count(),
-                'monthly_revenue_cents' => $this->payments()->where('paid_at', '>=', $monthStart)->sum('amount_cents'),
-                'previous_month_revenue_cents' => $this->payments()->whereBetween('paid_at', [$previousMonthStart, $monthStart])->sum('amount_cents'),
+                'monthly_revenue_cents' => $monthlyRevenueByCurrency[$primaryCurrency],
+                'previous_month_revenue_cents' => $previousMonthRevenueByCurrency[$primaryCurrency],
+                'monthly_revenue_cents_by_currency' => $monthlyRevenueByCurrency,
+                'previous_month_revenue_cents_by_currency' => $previousMonthRevenueByCurrency,
                 'open_support_tickets' => SupportTicket::query()->whereIn('status', $activeStatuses)->count(),
                 'overdue_support_tickets' => SupportTicket::query()->whereIn('status', $activeStatuses)->where('due_at', '<', $now)->count(),
             ],
-            'revenue' => $this->revenueSeries($now),
+            'revenue' => $revenueByCurrency[$primaryCurrency] ?? [],
+            'revenue_by_currency' => $revenueByCurrency,
             'countries' => $this->countryDistribution(),
             'recent_clinics' => Clinic::query()
                 ->where('status', ClinicStatus::Active->value)
@@ -214,10 +225,11 @@ class AdminDashboardController extends Controller
     }
 
     /** @return list<array{month: string, amount_cents: int}> */
-    private function revenueSeries(CarbonImmutable $now): array
+    private function revenueSeries(CarbonImmutable $now, string $currency): array
     {
         $start = $now->startOfMonth()->subMonths(11);
         $totals = $this->payments()
+            ->where('currency', $currency)
             ->where('paid_at', '>=', $start)
             ->get(['amount_cents', 'paid_at'])
             ->groupBy(fn (SubscriptionPayment $payment): string => $payment->paid_at->format('Y-m'))
@@ -231,6 +243,42 @@ class AdminDashboardController extends Controller
                 'amount_cents' => $totals->get($month->format('Y-m'), 0),
             ];
         })->all();
+    }
+
+    /** @return array<string, int> */
+    private function revenueTotalsByCurrency(CarbonImmutable $start, CarbonImmutable $end): array
+    {
+        $totals = array_fill_keys($this->supportedCurrencies(), 0);
+        $rows = $this->payments()
+            ->where('paid_at', '>=', $start)
+            ->where('paid_at', '<', $end)
+            ->select('currency')
+            ->selectRaw('SUM(amount_cents) as amount_cents')
+            ->groupBy('currency')
+            ->get();
+
+        foreach ($rows as $row) {
+            if (array_key_exists($row->currency, $totals)) {
+                $totals[$row->currency] = (int) $row->amount_cents;
+            }
+        }
+
+        return $totals;
+    }
+
+    /** @return list<string> */
+    private function supportedCurrencies(): array
+    {
+        return config('memberships.supported_currencies', ['USD']);
+    }
+
+    private function primaryCurrency(): string
+    {
+        $configuredCurrency = (string) config('memberships.currency', 'USD');
+
+        return in_array($configuredCurrency, $this->supportedCurrencies(), true)
+            ? $configuredCurrency
+            : ($this->supportedCurrencies()[0] ?? 'USD');
     }
 
     /** @return list<array{country_code: string, clinics: int, users: int}> */

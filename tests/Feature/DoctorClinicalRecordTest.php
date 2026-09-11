@@ -191,6 +191,18 @@ class DoctorClinicalRecordTest extends TestCase
         ])->assertCreated()->assertJsonPath('data.objective', 'Objetivo explícito de la consulta.');
     }
 
+    public function test_objective_respects_the_backend_length_limit_when_provided(): void
+    {
+        $patient = $this->connectedPatient('+525510000317');
+
+        $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", [
+            'chief_complaint' => 'Consulta con objetivo demasiado extenso.',
+            'objective' => str_repeat('x', 2001),
+        ])->assertUnprocessable()->assertJsonValidationErrors('objective');
+
+        $this->assertDatabaseCount('consultations', 0);
+    }
+
     public function test_rejects_cross_clinic_patient_access(): void
     {
         $otherPatient = $this->patientInClinic($this->otherClinic, '+525510000317');
