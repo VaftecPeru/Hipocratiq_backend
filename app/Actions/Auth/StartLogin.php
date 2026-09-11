@@ -46,7 +46,7 @@ final class StartLogin
             || ! in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
             || ! $this->hasExactRequestedRole($requestedRole, $context, $client)
             || ! $this->requestedRoleMatchesContext($requestedRole, $context)
-            || ! $this->isDeliveryIdentityVerified($user, $deliveryChannel)
+            || ! $this->isDeliveryIdentityUsable($user, $deliveryChannel)
             || $user->status !== UserStatus::Active
             || ! $this->userHasRequestedRole(
                 $requestedRole,
@@ -173,10 +173,12 @@ final class StartLogin
             : OtpDeliveryChannel::Phone;
     }
 
-    private function isDeliveryIdentityVerified(User $user, OtpDeliveryChannel $deliveryChannel): bool
+    private function isDeliveryIdentityUsable(User $user, OtpDeliveryChannel $deliveryChannel): bool
     {
-        return $deliveryChannel === OtpDeliveryChannel::Email
-            ? $user->email_verified_at !== null
-            : $user->phone_verified_at !== null;
+        if ($deliveryChannel === OtpDeliveryChannel::Email) {
+            return is_string($user->email) && $user->email !== '';
+        }
+
+        return $user->phone_verified_at !== null;
     }
 }
