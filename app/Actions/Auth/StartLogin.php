@@ -26,7 +26,7 @@ final class StartLogin
     {
         $context = AuthenticationContext::from($data['actor_context'] ?? AuthenticationContext::Staff->value);
         $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
-        $deliveryChannel = $this->deliveryChannel($data);
+        $deliveryChannel = $this->deliveryChannel($data, $client);
         $user = $this->findUser($data);
         $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
         $isReceptionist = $user?->hasActiveReceptionistAccess() ?? false;
@@ -183,8 +183,12 @@ final class StartLogin
         return User::query()->where('phone_number', $phoneNumber->value)->first();
     }
 
-    private function deliveryChannel(array $data): OtpDeliveryChannel
+    private function deliveryChannel(array $data, AuthenticationClient $client): OtpDeliveryChannel
     {
+        if ($client === AuthenticationClient::Web) {
+            return OtpDeliveryChannel::Email;
+        }
+
         return isset($data['identifier']) && str_contains((string) $data['identifier'], '@')
             ? OtpDeliveryChannel::Email
             : OtpDeliveryChannel::Phone;
