@@ -9,6 +9,7 @@ use App\Enums\RoleKey;
 use App\Enums\UserStatus;
 use App\Models\Appointment;
 use App\Models\Clinic;
+use App\Models\ClinicScheduleBlock;
 use App\Models\DoctorProfile;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -98,6 +99,10 @@ final class DoctorScheduling
             ->orderBy('scheduled_at')
             ->get();
         $now = CarbonImmutable::now($schedule['start']->getTimezone());
+        $blocks = $clinic === null ? collect() : $this->scheduleBlocksFor($profile->user_id, $clinic)
+            ->where('starts_at', '<', $schedule['end'])
+            ->where('ends_at', '>', $schedule['start'])
+            ->get();
         $slots = [];
         $slotStart = $schedule['start'];
 
@@ -105,13 +110,14 @@ final class DoctorScheduling
             $slotEnd = $slotStart->copy()->addMinutes($duration);
             $blockingAppointment = $this->blockingAppointment($appointments, $slotStart, $slotEnd, $buffer);
             $isPast = $slotStart->lessThan($now);
+            $isBlocked = $blocks->contains(fn (ClinicScheduleBlock $block): bool => $slotStart->lessThan($block->ends_at) && $slotEnd->greaterThan($block->starts_at));
 
             $slots[] = [
                 'time' => $slotStart->format('H:i'),
                 'start' => $slotStart->toIso8601String(),
                 'end' => $slotEnd->toIso8601String(),
-                'available' => ! $isPast && $blockingAppointment === null,
-                'reason' => $isPast ? 'past' : ($blockingAppointment === null ? null : 'conflict'),
+                'available' => ! $isPast && ! $isBlocked && $blockingAppointment === null,
+                'reason' => $isPast ? 'past' : ($isBlocked ? 'blocked' : ($blockingAppointment === null ? null : 'conflict')),
                 'appointment_id' => $blockingAppointment?->id,
             ];
             $slotStart = $slotStart->addMinutes($duration + $buffer);
@@ -152,6 +158,15 @@ final class DoctorScheduling
         $duration = (int) $preferences['appointment_duration_minutes'];
         $buffer = (int) $preferences['buffer_minutes'];
         $end = $start->addMinutes($duration);
+
+        if ($clinic !== null && $this->scheduleBlocksFor($profile->user_id, $clinic)
+            ->where('starts_at', '<', $end)
+            ->where('ends_at', '>', $start)
+            ->exists()) {
+            throw ValidationException::withMessages([
+                'scheduled_at' => ['El horario seleccionado está bloqueado en la agenda.'],
+            ]);
+        }
 
         if ($end->greaterThan($schedule['end'])) {
             throw ValidationException::withMessages([
@@ -270,6 +285,16 @@ final class DoctorScheduling
         $otherStart = CarbonImmutable::parse($otherStart->toIso8601String());
 
         return $start->lessThan($otherBufferedEnd) && $otherStart->lessThan($bufferedEnd);
+    }
+
+    /** @return Builder<ClinicScheduleBlock> */
+    private function scheduleBlocksFor(int $doctorUserId, Clinic $clinic): Builder
+    {
+        return ClinicScheduleBlock::query()
+            ->where('clinic_id', $clinic->id)
+            ->where(function (Builder $query) use ($doctorUserId): void {
+                $query->whereNull('doctor_user_id')->orWhere('doctor_user_id', $doctorUserId);
+            });
     }
 
     /** @return Builder<Appointment> */

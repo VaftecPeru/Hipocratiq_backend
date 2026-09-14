@@ -16,7 +16,7 @@ final class CreateDoctorAppointment
     public function __construct(private DoctorScheduling $scheduling) {}
 
     /**
-     * @param array{scheduled_at: string, appointment_type: string, notes?: string|null} $data
+     * @param  array{scheduled_at: string, appointment_type: string, notes?: string|null}  $data
      */
     public function handle(User $doctor, ?Clinic $clinic, PatientProfile $patient, array $data): Appointment
     {

@@ -4,6 +4,7 @@ namespace App\Actions\Auth;
 
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
+use App\Enums\OtpDeliveryChannel;
 use App\Enums\OtpPurpose;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
@@ -25,6 +26,7 @@ final class StartLogin
     {
         $context = AuthenticationContext::from($data['actor_context'] ?? AuthenticationContext::Staff->value);
         $client = AuthenticationClient::from($data['client_type'] ?? AuthenticationClient::Web->value);
+        $deliveryChannel = $this->deliveryChannel($data, $client);
         $user = $this->findUser($data);
         $isClinicAdmin = $user?->hasActiveClinicAdminMembership() ?? false;
         $isReceptionist = $user?->hasActiveReceptionistAccess() ?? false;
@@ -38,24 +40,41 @@ final class StartLogin
             $isReceptionist,
             $isDoctor,
         );
+        $isPatient = $user?->patientProfile()->exists() ?? false;
+
+        if (
+            $user !== null
+            && $user->status === UserStatus::Active
+            && in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
+            && $this->hasExactRequestedRole($requestedRole, $context, $client)
+            && $this->requestedRoleMatchesContext($requestedRole, $context)
+            && ! $this->userHasRequestedRole(
+                $requestedRole,
+                $isSuperAdmin,
+                $isClinicAdmin,
+                $isReceptionist,
+                $isDoctor,
+                $isPatient,
+            )
+        ) {
+            $this->recordEvent->handle($user, 'login_failed', 'failure');
+
+            $field = isset($data['identifier']) ? 'identifier' : 'phone_number';
+
+            throw ValidationException::withMessages([
+                $field => ['El usuario no corresponde al rol seleccionado. Verifica el tipo de acceso e inténtalo nuevamente.'],
+            ]);
+        }
 
         if (
             $user === null
             || ! in_array($context, [AuthenticationContext::Patient, AuthenticationContext::Staff], true)
             || ! $this->hasExactRequestedRole($requestedRole, $context, $client)
             || ! $this->requestedRoleMatchesContext($requestedRole, $context)
-            || $user->phone_verified_at === null
+            || ! $this->isDeliveryIdentityUsable($user, $deliveryChannel)
             || $user->status !== UserStatus::Active
-            || ! $this->userHasRequestedRole(
-                $requestedRole,
-                $isSuperAdmin,
-                $isClinicAdmin,
-                $isReceptionist,
-                $isDoctor,
-                $user?->patientProfile()->exists() ?? false,
-            )
             || ($context === AuthenticationContext::Patient && (
-                ! $user->patientProfile()->exists()
+                ! $isPatient
                 || $user->hasRole(RoleKey::SuperAdmin)
                 || $isClinicAdmin
                 || $isReceptionist
@@ -85,6 +104,7 @@ final class StartLogin
             $resolvedContext,
             $data['device_name'] ?? null,
             $data['device_id'] ?? null,
+            deliveryChannel: $deliveryChannel,
         );
     }
 
@@ -161,5 +181,25 @@ final class StartLogin
         $phoneNumber = PhoneNumber::from($data['phone_number'], $data['country_code']);
 
         return User::query()->where('phone_number', $phoneNumber->value)->first();
+    }
+
+    private function deliveryChannel(array $data, AuthenticationClient $client): OtpDeliveryChannel
+    {
+        if ($client === AuthenticationClient::Web) {
+            return OtpDeliveryChannel::Email;
+        }
+
+        return isset($data['identifier']) && str_contains((string) $data['identifier'], '@')
+            ? OtpDeliveryChannel::Email
+            : OtpDeliveryChannel::Phone;
+    }
+
+    private function isDeliveryIdentityUsable(User $user, OtpDeliveryChannel $deliveryChannel): bool
+    {
+        if ($deliveryChannel === OtpDeliveryChannel::Email) {
+            return is_string($user->email) && $user->email !== '';
+        }
+
+        return $user->phone_verified_at !== null;
     }
 }

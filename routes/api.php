@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\V1\ClinicEpidemiologyController;
 use App\Http\Controllers\Api\V1\ClinicMessagesController;
 use App\Http\Controllers\Api\V1\ClinicReceptionistInvitationController;
 use App\Http\Controllers\Api\V1\ClinicReceptionistSettingsController;
+use App\Http\Controllers\Api\V1\ClinicScheduleBlockController;
 use App\Http\Controllers\Api\V1\DoctorAppointmentController;
 use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
@@ -326,14 +327,26 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.appointments.index');
         Route::post('/clinic/appointments', [ClinicDashboardController::class, 'storeAppointment'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.appointments.store');
         Route::patch('/clinic/appointments/{appointment}', [ClinicDashboardController::class, 'updateAppointment'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.appointments.update');
         Route::patch('/clinic/appointments/{appointment}/status', [ClinicDashboardController::class, 'updateAppointmentStatus'])
-            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
             ->name('clinic.appointments.status.update');
+        Route::delete('/clinic/appointments/{appointment}', [ClinicDashboardController::class, 'destroyAppointment'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.appointments.destroy');
+        Route::get('/clinic/schedule-blocks', [ClinicScheduleBlockController::class, 'scheduleBlocks'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
+            ->name('clinic.schedule-blocks.index');
+        Route::post('/clinic/schedule-blocks', [ClinicScheduleBlockController::class, 'storeScheduleBlock'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.schedule-blocks.store');
+        Route::delete('/clinic/schedule-blocks/{scheduleBlock}', [ClinicScheduleBlockController::class, 'destroyScheduleBlock'])
+            ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access', 'can:clinic.appointments.manage'])
+            ->name('clinic.schedule-blocks.destroy');
         Route::get('/clinic/settings', [ClinicDashboardController::class, 'settings'])
             ->middleware(['actor.context:clinic_admin,receptionist', 'clinic.access'])
             ->name('clinic.settings.show');

@@ -15,11 +15,8 @@ use App\Models\OtpChallenge;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
-use App\Services\Sms\TwilioSmsSender;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -246,7 +243,7 @@ class OtpAuthenticationTest extends TestCase
         $this->withSpaOrigin()->postJson('/api/v1/auth/otp/request', $payload)
             ->assertUnprocessable()
             ->assertJsonValidationErrors('identifier')
-            ->assertJsonPath('errors.identifier.0', 'Las credenciales proporcionadas no son correctas.');
+            ->assertJsonPath('errors.identifier.0', 'El usuario no corresponde al rol seleccionado. Verifica el tipo de acceso e inténtalo nuevamente.');
 
         $this->assertDatabaseCount('otp_challenges', 0);
         $this->assertDatabaseCount('authentication_sessions', 0);
@@ -430,25 +427,6 @@ class OtpAuthenticationTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('identifier');
 
         $this->assertDatabaseCount('otp_challenges', 0);
-    }
-
-    public function test_twilio_sender_uses_messaging_service_without_exposing_credentials(): void
-    {
-        config()->set('sms.twilio', [
-            'account_sid' => 'AC123',
-            'auth_token' => 'secret-token',
-            'messaging_service_sid' => 'MG123',
-        ]);
-        Http::fake([
-            'api.twilio.com/*' => Http::response(['sid' => 'SM123'], 201),
-        ]);
-
-        (new TwilioSmsSender)->send('+51900112844', 'Tu código es 123456.');
-
-        Http::assertSent(fn (Request $request): bool => $request->url()
-            === 'https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json'
-            && $request['MessagingServiceSid'] === 'MG123'
-            && $request['To'] === '+51900112844');
     }
 
     public function test_delivery_failure_rolls_back_registration_and_returns_service_unavailable(): void

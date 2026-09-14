@@ -832,6 +832,25 @@ class ClinicDashboardController extends Controller
         return response()->json(['success' => true]);
     }
 
+    public function destroyAppointment(
+        Request $request,
+        int $appointment,
+    ): JsonResponse {
+        $clinic = $this->clinic($request);
+
+        $appointmentModel = $clinic
+            ->appointments()
+            ->whereKey($appointment)
+            ->firstOrFail();
+
+        $appointmentModel->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cita eliminada correctamente.',
+        ]);
+    }
+
     private function clinic(Request $request): Clinic
     {
         return $request->attributes->get('clinic');
@@ -1098,6 +1117,7 @@ class ClinicDashboardController extends Controller
             'appointment_type' => $appointment->appointment_type,
             'status' => $appointment->status->value,
             'status_label' => $appointment->status->label(),
+            'notes' => $appointment->notes,
             'doctor' => $appointment->doctor === null ? null : [
                 'id' => $appointment->doctor->id,
                 'name' => $appointment->doctor->name,
@@ -1178,6 +1198,7 @@ class ClinicDashboardController extends Controller
             'appointment_type' => $appointment->appointment_type,
             'status' => $appointment->status->value,
             'status_label' => $appointment->status->label(),
+            'notes' => $appointment->notes,
             'patient' => [
                 'id' => $appointment->patient_profile_id,
                 'patient_code' => 'PAC-'.str_pad((string) $appointment->patient_profile_id, 6, '0', STR_PAD_LEFT),
