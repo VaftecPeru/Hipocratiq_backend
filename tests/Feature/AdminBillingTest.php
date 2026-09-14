@@ -111,6 +111,20 @@ class AdminBillingTest extends TestCase
             ->assertJsonPath('summary.by_currency.PEN.previous_month_revenue_cents', 3000);
     }
 
+    public function test_future_manual_subscriptions_are_excluded_from_billing_filter_options(): void
+    {
+        $this->authenticateAdmin();
+        ClinicSubscription::factory()->create([
+            'provider' => 'admin_manual',
+            'starts_at' => now()->addDay(),
+        ]);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/admin/billing')
+            ->assertOk()
+            ->assertJsonCount(0, 'filter_options.manual_subscriptions');
+    }
+
     public function test_super_admin_can_record_a_manual_payment_for_a_manual_subscription(): void
     {
         $this->authenticateAdmin();

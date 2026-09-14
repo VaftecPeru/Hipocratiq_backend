@@ -6,7 +6,6 @@ use App\Enums\AuthenticationContext;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\ClinicStatus;
 use App\Enums\RoleKey;
-use App\Enums\SubscriptionStatus;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,15 +25,7 @@ class EnsureClinicAccess
             return $this->accessRequiredResponse();
         }
 
-        $now = now();
-        $activeSubscription = function ($query) use ($now) {
-            return $query
-                ->where('status', SubscriptionStatus::Active->value)
-                ->where('starts_at', '<=', $now)
-                ->where(function ($query) use ($now): void {
-                    $query->whereNull('ends_at')->orWhere('ends_at', '>', $now);
-                });
-        };
+        $activeSubscription = fn ($query) => $query->currentlyActive();
 
         $membership = $request->user()->clinicMemberships()
             ->where('status', ClinicMembershipStatus::Active)

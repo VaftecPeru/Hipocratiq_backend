@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\DoctorProfileUpdateRequest;
 use App\Models\DoctorProfile;
 use App\Models\Specialty;
+use App\Support\Clinical\DoctorClinicScope;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,6 +62,8 @@ class DoctorProfileController extends Controller
 
     private function profile(Request $request, bool $lockForUpdate = false): DoctorProfile
     {
+        DoctorClinicScope::activeProfile($request->user());
+
         $query = $request->user()->doctorProfile()->with(['user', 'clinic', 'specialtyCatalog', 'subspecialtyCatalog']);
         if ($lockForUpdate) {
             $query->lockForUpdate();

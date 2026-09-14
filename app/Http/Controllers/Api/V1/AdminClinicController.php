@@ -7,7 +7,6 @@ use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Enums\BillingCycle;
 use App\Enums\ClinicStatus;
 use App\Enums\PlanKey;
-use App\Enums\SubscriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\AdminClinicIndexRequest;
 use App\Http\Requests\Api\V1\AdminClinicStoreRequest;
@@ -272,12 +271,7 @@ class AdminClinicController extends Controller
         $counts = ClinicSubscription::query()
             ->join('plans', 'plans.id', '=', 'clinic_subscriptions.plan_id')
             ->whereIn('clinic_subscriptions.id', $latestSubscriptionIds)
-            ->where('clinic_subscriptions.status', SubscriptionStatus::Active->value)
-            ->where(function ($query): void {
-                $query
-                    ->whereNull('clinic_subscriptions.ends_at')
-                    ->orWhere('clinic_subscriptions.ends_at', '>', now());
-            })
+            ->currentlyActive()
             ->selectRaw('plans.key, COUNT(*) as aggregate')
             ->groupBy('plans.key')
             ->pluck('aggregate', 'plans.key');

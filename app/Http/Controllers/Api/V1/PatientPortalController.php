@@ -7,10 +7,12 @@ use App\Enums\ConsultationStatus;
 use App\Enums\LaboratoryOrderStatus;
 use App\Enums\PrescriptionStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\PatientIntakeDraftStoreRequest;
 use App\Http\Requests\Api\V1\PatientProfileUpdateRequest;
 use App\Http\Requests\Api\V1\PatientTriageStoreRequest;
 use App\Http\Resources\Api\V1\PatientAppointmentResource;
 use App\Http\Resources\Api\V1\PatientConsultationResource;
+use App\Http\Resources\Api\V1\PatientIntakeDraftResource;
 use App\Http\Resources\Api\V1\PatientLaboratoryResultResource;
 use App\Http\Resources\Api\V1\PatientPrescriptionResource;
 use App\Http\Resources\Api\V1\PatientProfileResource;
@@ -20,6 +22,7 @@ use App\Models\Consultation;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
 use App\Models\PatientIntake;
+use App\Models\PatientIntakeDraft;
 use App\Models\PatientProfile;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +31,23 @@ use Illuminate\Support\Facades\DB;
 
 class PatientPortalController extends Controller
 {
+    private const PATIENT_SECTION_FIELDS = [
+        'patient_identification' => [
+            'name', 'age', 'document_type', 'document_number', 'birth_date', 'gender', 'occupation',
+            'address', 'guardian_name', 'relationship', 'phone_number', 'email', 'emergency_contact', 'insurance',
+        ],
+        'family_history' => ['description'],
+        'non_pathological_history' => ['description'],
+        'pathological_history' => ['description'],
+        'gyneco_obstetric_history' => ['description'],
+        'present_illness' => ['reason', 'illness_narrative'],
+        'systems_review' => ['description'],
+        'vital_signs' => [
+            'blood_pressure_systolic', 'blood_pressure_diastolic', 'temperature_c', 'heart_rate',
+            'respiratory_rate', 'oxygen_saturation', 'weight_kg', 'height_cm', 'notes',
+        ],
+    ];
+
     public function profile(Request $request): PatientProfileResource
     {
         return new PatientProfileResource($this->patient($request));
@@ -132,6 +152,39 @@ class PatientPortalController extends Controller
         ]);
     }
 
+    public function intakeDraft(Request $request): PatientIntakeDraftResource
+    {
+        $patient = $this->patient($request);
+        $draft = $this->intakeDraftQuery($patient)->latest('id')->first();
+
+        return new PatientIntakeDraftResource($this->draftForResponse($patient, $draft));
+    }
+
+    public function saveIntakeDraft(PatientIntakeDraftStoreRequest $request): PatientIntakeDraftResource
+    {
+        $patient = $this->patient($request);
+        $data = $request->validated();
+
+        $draft = DB::transaction(function () use ($data, $patient): PatientIntakeDraft {
+            $draft = $this->intakeDraftQuery($patient)->lockForUpdate()->latest('id')->first();
+
+            if ($draft === null) {
+                $draft = new PatientIntakeDraft([
+                    'patient_profile_id' => $patient->id,
+                    'clinic_id' => $patient->clinic_id,
+                ]);
+            }
+
+            $draft->sections = $this->normalizeDraftSections($patient, $data['sections']);
+            $draft->declaration_accepted_at ??= now();
+            $draft->save();
+
+            return $draft->fresh('clinic') ?? $draft;
+        });
+
+        return new PatientIntakeDraftResource($this->draftForResponse($patient, $draft));
+    }
+
     public function storeTriage(PatientTriageStoreRequest $request): JsonResponse
     {
         $patient = $this->patient($request);
@@ -206,6 +259,80 @@ class PatientPortalController extends Controller
         }
 
         return $patient;
+    }
+
+    private function intakeDraftQuery(PatientProfile $patient): Builder
+    {
+        return PatientIntakeDraft::query()
+            ->where('patient_profile_id', $patient->id)
+            ->when(
+                $patient->clinic_id === null,
+                fn (Builder $query): Builder => $query->whereNull('clinic_id'),
+                fn (Builder $query): Builder => $query->where('clinic_id', $patient->clinic_id),
+            );
+    }
+
+    private function draftForResponse(PatientProfile $patient, ?PatientIntakeDraft $draft): PatientIntakeDraft
+    {
+        $draft ??= new PatientIntakeDraft([
+            'patient_profile_id' => $patient->id,
+            'clinic_id' => $patient->clinic_id,
+        ]);
+        $draft->sections = $this->normalizeDraftSections($patient, $draft->sections ?? []);
+        $draft->setRelation('clinic', $patient->clinic);
+
+        return $draft;
+    }
+
+    /** @param array<string, mixed> $sections */
+    private function normalizeDraftSections(PatientProfile $patient, array $sections): array
+    {
+        $defaults = [
+            'patient_identification' => [
+                'name' => $patient->user?->name,
+                'age' => $patient->date_of_birth?->age,
+                'document_type' => $patient->document_type,
+                'document_number' => $patient->document_number,
+                'birth_date' => $patient->date_of_birth?->format('Y-m-d'),
+                'gender' => $patient->sex,
+                'occupation' => null,
+                'address' => $patient->address,
+                'guardian_name' => null,
+                'relationship' => null,
+                'phone_number' => $patient->user?->phone_number,
+                'email' => $patient->user?->email,
+                'emergency_contact' => $patient->emergency_contact,
+                'insurance' => $patient->insurance,
+            ],
+            'family_history' => ['description' => null],
+            'non_pathological_history' => ['description' => null],
+            'pathological_history' => ['description' => null],
+            'gyneco_obstetric_history' => ['description' => null],
+            'present_illness' => ['reason' => null, 'illness_narrative' => null],
+            'systems_review' => ['description' => null],
+            'vital_signs' => [
+                'blood_pressure_systolic' => null,
+                'blood_pressure_diastolic' => null,
+                'temperature_c' => null,
+                'heart_rate' => null,
+                'respiratory_rate' => null,
+                'oxygen_saturation' => null,
+                'weight_kg' => null,
+                'height_cm' => null,
+                'notes' => null,
+            ],
+        ];
+
+        $safeSections = [];
+        foreach (self::PATIENT_SECTION_FIELDS as $section => $fields) {
+            $sectionValues = is_array($sections[$section] ?? null) ? $sections[$section] : [];
+            $safeSections[$section] = array_replace(
+                $defaults[$section],
+                array_intersect_key($sectionValues, array_flip($fields)),
+            );
+        }
+
+        return $safeSections;
     }
 
     /**

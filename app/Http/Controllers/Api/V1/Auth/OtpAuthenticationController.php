@@ -92,6 +92,7 @@ class OtpAuthenticationController extends Controller
                 (string) $challenge->device_name,
                 (string) $challenge->device_id_hash,
             );
+            $request->attributes->set('actor_context', $challenge->actor_context->value);
 
             return response()->json([
                 'success' => true,

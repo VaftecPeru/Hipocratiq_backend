@@ -127,6 +127,52 @@ class DoctorRegistrationTest extends TestCase
         $this->assertSame([], $this->app->make(ArraySmsSender::class)->messages());
     }
 
+    public function test_doctor_registration_excludes_future_clinic_subscriptions(): void
+    {
+        $clinic = Clinic::factory()->create();
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'plan_id' => $this->plan->id,
+            'starts_at' => now()->addDay(),
+        ]);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/register/doctor/clinics')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/draft', $this->payload([
+            'practice_type' => 'clinic',
+            'clinic_id' => $clinic->id,
+        ]))->assertUnprocessable()->assertJsonValidationErrors('clinic_id');
+    }
+
+    public function test_doctor_registration_completion_rechecks_clinic_subscription_start_time(): void
+    {
+        $clinic = Clinic::factory()->create();
+        $subscription = ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'plan_id' => $this->plan->id,
+        ]);
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/draft', $this->payload([
+            'practice_type' => 'clinic',
+            'clinic_id' => $clinic->id,
+        ]))->assertCreated();
+        $cookie = $draft->getCookie('doctor_registration');
+        $subscription->update(['starts_at' => now()->addDay()]);
+
+        $this->withCookie($cookie->getName(), $cookie->getValue())->withSpaOrigin()
+            ->postJson('/api/v1/auth/register/doctor/verify-otp', [
+                'challenge_id' => $draft->json('data.challenge_id'),
+                'code' => '123456',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('clinic_id');
+
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('doctor_profiles', 0);
+    }
+
     public function test_independent_doctor_must_select_plan_before_otp(): void
     {
         $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/doctor/draft', $this->payload());

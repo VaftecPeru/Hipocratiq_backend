@@ -137,6 +137,27 @@ class AdminMembershipIndexTest extends TestCase
             ->assertJsonPath('data.currency_rates.PEN', 4.05);
     }
 
+    public function test_future_subscriptions_are_not_counted_as_currently_active(): void
+    {
+        $this->seedPlans();
+        $clinic = Clinic::factory()->create(['country_code' => 'PE']);
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'plan_id' => $this->plan(PlanKey::Basic)->id,
+            'starts_at' => now()->addDay(),
+            'ends_at' => now()->addMonth(),
+        ]);
+        $this->authenticateAdmin();
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/admin/memberships')
+            ->assertOk()
+            ->assertJsonPath('data.kpis.active_subscriptions.count', 0)
+            ->assertJsonPath('data.kpis.mrr.usd_cents', 0)
+            ->assertJsonPath('data.plans.0.subscribers', 0)
+            ->assertJsonCount(0, 'data.upcoming_renewals');
+    }
+
     public function test_upcoming_renewals_only_include_renewals_in_window(): void
     {
         $this->seedPlans();

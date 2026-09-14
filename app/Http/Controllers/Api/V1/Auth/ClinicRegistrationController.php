@@ -97,6 +97,7 @@ class ClinicRegistrationController extends Controller
                 (string) $draft['data']['device_name'],
                 (string) $draft['data']['device_id_hash'],
             );
+            $request->attributes->set('actor_context', AuthenticationContext::ClinicAdmin->value);
 
             return response()->json([
                 'success' => true,

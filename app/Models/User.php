@@ -116,12 +116,7 @@ class User extends Authenticatable
             ->where('status', 'active')
             ->whereHas('role', fn ($query) => $query->where('key', RoleKey::ClinicAdmin->value))
             ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
-            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                $query->where('starts_at', '<=', now())
-                    ->where(function ($query): void {
-                        $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                    });
-            }))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->currentlyActive())
             ->exists();
     }
 
@@ -131,12 +126,7 @@ class User extends Authenticatable
             ->where('status', 'active')
             ->whereHas('role', fn ($query) => $query->where('key', RoleKey::Receptionist->value))
             ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
-            ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                $query->where('starts_at', '<=', now())
-                    ->where(function ($query): void {
-                        $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                    });
-            }))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->currentlyActive())
             ->exists();
     }
 
@@ -153,23 +143,12 @@ class User extends Authenticatable
                 ->where('clinic_id', $profile->clinic_id)
                 ->where('status', 'active')
                 ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
-                ->whereHas('clinic.subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                    $query->where('starts_at', '<=', now())
-                        ->where(function ($query): void {
-                            $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                        });
-                }))
+                ->whereHas('clinic.subscriptions', fn ($query) => $query->currentlyActive())
                 ->exists();
         }
 
         return $profile->subscriptions()
-            ->where('status', 'active')
-            ->where(function ($query): void {
-                $query->where('starts_at', '<=', now())
-                    ->where(function ($query): void {
-                        $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                    });
-            })
+            ->currentlyActive()
             ->exists();
     }
 

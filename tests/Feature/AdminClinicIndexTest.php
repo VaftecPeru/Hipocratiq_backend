@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Clinic;
 use App\Models\ClinicSubscription;
 use App\Models\PatientProfile;
+use App\Models\Plan;
 use App\Models\SubscriptionPayment;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
@@ -94,6 +95,25 @@ class AdminClinicIndexTest extends TestCase
             ->assertJsonPath('summary.totals.monthly_revenue', 10)
             ->assertJsonPath('summary.totals.monthly_revenue_cents_by_currency.USD', 1000)
             ->assertJsonPath('summary.totals.monthly_revenue_cents_by_currency.MXN', 2000);
+    }
+
+    public function test_clinic_plan_distribution_excludes_future_subscriptions(): void
+    {
+        $plan = Plan::factory()->create(['key' => 'basic']);
+        $clinic = Clinic::factory()->create();
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'plan_id' => $plan->id,
+            'starts_at' => now()->addDay(),
+        ]);
+        $this->authenticateAdmin();
+
+        $response = $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/admin/clinics')
+            ->assertOk();
+        $distribution = collect($response->json('summary.plan_distribution'))->firstWhere('plan', 'basic');
+
+        $this->assertSame(0, $distribution['count']);
     }
 
     private function authenticateAdmin(): void

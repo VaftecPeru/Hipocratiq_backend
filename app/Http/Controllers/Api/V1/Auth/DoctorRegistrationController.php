@@ -33,9 +33,7 @@ class DoctorRegistrationController extends Controller
             'success' => true,
             'data' => Clinic::query()
                 ->where('status', 'active')
-                ->whereHas('subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                }))
+                ->whereHas('subscriptions', fn ($query) => $query->currentlyActive())
                 ->orderBy('name')
                 ->get(['id', 'name', 'country_code', 'address']),
         ]);
@@ -76,9 +74,7 @@ class DoctorRegistrationController extends Controller
 
         if ($data['practice_type'] === DoctorPracticeType::Clinic->value && ! Clinic::query()
             ->whereKey($data['clinic_id'])
-            ->whereHas('subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-            }))
+            ->whereHas('subscriptions', fn ($query) => $query->currentlyActive())
             ->exists()) {
             throw ValidationException::withMessages(['clinic_id' => ['La clínica seleccionada no tiene un plan activo.']]);
         }
@@ -143,6 +139,7 @@ class DoctorRegistrationController extends Controller
                 (string) $draft['data']['device_name'],
                 (string) $draft['data']['device_id_hash'],
             );
+            $request->attributes->set('actor_context', AuthenticationContext::Doctor->value);
 
             return response()->json([
                 'success' => true,

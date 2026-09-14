@@ -12,7 +12,11 @@ class AdminPlatformSettingsController extends Controller
 {
     private const DEFAULT_COUNTRY_CODE = 'MX';
 
+    private const DEFAULT_LOCALE = 'es-MX';
+
     private const SUPPORTED_COUNTRY_CODES = ['MX', 'PE', 'US'];
+
+    private const SUPPORTED_LOCALES = ['es-MX', 'es-PE', 'en-US'];
 
     public function show(): JsonResponse
     {
@@ -33,6 +37,7 @@ class AdminPlatformSettingsController extends Controller
             'success' => true,
             'data' => [
                 'default_country_code' => $defaultCountryCode,
+                'localization' => $this->serializePublicLocalization($settings),
             ],
         ]);
     }
@@ -123,9 +128,8 @@ class AdminPlatformSettingsController extends Controller
                 'asset_uploads_available' => false,
             ],
             'localization' => [
-                'default_locale' => $settings->default_locale ?: 'es-MX',
-                'enabled_locales' => $settings->enabled_locales ?: ['es-MX'],
-                'supported_locales' => ['es-MX', 'es-PE', 'en-US'],
+                ...$this->serializePublicLocalization($settings),
+                'supported_locales' => self::SUPPORTED_LOCALES,
                 'catalog_status' => 'source_only',
             ],
             'ai' => array_replace($this->defaultAiConfiguration(), $settings->ai_configuration ?? []),
@@ -149,6 +153,25 @@ class AdminPlatformSettingsController extends Controller
             'sensitivity' => 'medium',
             'automatic_alerts' => false,
             'enabled_models' => [],
+        ];
+    }
+
+    /**
+     * @return array{default_locale: string, enabled_locales: list<string>}
+     */
+    private function serializePublicLocalization(PlatformSetting $settings): array
+    {
+        $defaultLocale = in_array($settings->default_locale, self::SUPPORTED_LOCALES, true)
+            ? $settings->default_locale
+            : self::DEFAULT_LOCALE;
+        $enabledLocales = array_values(array_unique(array_filter(
+            [$defaultLocale, ...($settings->enabled_locales ?? [])],
+            fn (mixed $locale): bool => is_string($locale) && in_array($locale, self::SUPPORTED_LOCALES, true),
+        )));
+
+        return [
+            'default_locale' => $defaultLocale,
+            'enabled_locales' => $enabledLocales,
         ];
     }
 }

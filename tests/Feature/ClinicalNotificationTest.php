@@ -102,6 +102,41 @@ class ClinicalNotificationTest extends TestCase
         ]);
     }
 
+    public function test_emergency_fanout_excludes_a_future_clinic_subscription(): void
+    {
+        $clinic = Clinic::factory()->create();
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'starts_at' => now()->addDay(),
+        ]);
+        $admin = $this->createMember($clinic, RoleKey::ClinicAdmin, '+525510000005');
+
+        $stats = app(ClinicalNotificationService::class)->createForEmergency(
+            [$clinic],
+            ['enabled' => true, 'visibility' => 'admins_only', 'label' => 'Future emergency'],
+            'emergency_activated',
+            'test',
+            'future-subscription-service-test',
+        );
+
+        $this->assertSame(0, $stats['candidate_count']);
+        $this->assertSame(0, $stats['created_count']);
+        $this->assertDatabaseMissing('clinical_notifications', ['user_id' => $admin->id]);
+    }
+
+    public function test_clinical_notification_api_rejects_a_future_clinic_subscription(): void
+    {
+        $clinic = $this->createClinic();
+        $admin = $this->createMember($clinic, RoleKey::ClinicAdmin, '+525510000006');
+        $this->authenticate($admin, '55 1000 0006', RoleKey::ClinicAdmin);
+        $clinic->subscriptions()->firstOrFail()->update(['starts_at' => now()->addDay()]);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/clinical/notifications')
+            ->assertForbidden()
+            ->assertJsonPath('code', 'CLINICAL_NOTIFICATION_ACCESS_REQUIRED');
+    }
+
     public function test_clinical_notification_api_is_scoped_to_the_authenticated_clinic(): void
     {
         $clinic = $this->createClinic();

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\BillingCycle;
 use App\Enums\SubscriptionStatus;
+use App\Models\Concerns\HasCurrentlyActiveSubscriptionScope;
 use Database\Factories\ClinicSubscriptionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class ClinicSubscription extends Model
 {
     /** @use HasFactory<ClinicSubscriptionFactory> */
-    use HasFactory;
+    use HasCurrentlyActiveSubscriptionScope, HasFactory;
 
     public function clinic(): BelongsTo
     {
