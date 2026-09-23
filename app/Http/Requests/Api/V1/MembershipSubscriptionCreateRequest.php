@@ -4,7 +4,6 @@ namespace App\Http\Requests\Api\V1;
 
 use App\Enums\BillingCycle;
 use App\Enums\ClinicStatus;
-use App\Enums\SubscriptionStatus;
 use App\Models\ClinicSubscription;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -43,10 +42,7 @@ class MembershipSubscriptionCreateRequest extends FormRequest
 
             $hasActiveSubscription = ClinicSubscription::query()
                 ->where('clinic_id', $clinicId)
-                ->where('status', SubscriptionStatus::Active->value)
-                ->where(function ($query): void {
-                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                })
+                ->currentlyActive()
                 ->exists();
 
             if ($hasActiveSubscription) {

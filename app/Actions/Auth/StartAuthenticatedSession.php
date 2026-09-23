@@ -30,6 +30,7 @@ final class StartAuthenticatedSession
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
         $request->session()->put('actor_context', $context->value);
+        $request->attributes->set('actor_context', $context->value);
         $user->update(['last_login_at' => now()]);
 
         $session = $user->authenticationSessions()->create([

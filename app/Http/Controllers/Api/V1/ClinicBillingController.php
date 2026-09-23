@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\ClinicInvoicePaymentStatus;
 use App\Enums\ClinicInvoiceStatus;
-use App\Enums\SubscriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\ClinicBillingReportRequest;
 use App\Http\Requests\Api\V1\ClinicInvoiceIndexRequest;
@@ -377,15 +376,9 @@ class ClinicBillingController extends Controller
 
     private function currentSubscription(Clinic $clinic): ?ClinicSubscription
     {
-        $now = now();
-
         return $clinic->subscriptions()
             ->with('plan')
-            ->where('status', SubscriptionStatus::Active->value)
-            ->where('starts_at', '<=', $now)
-            ->where(function (Builder $query) use ($now): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', $now);
-            })
+            ->currentlyActive()
             ->latest('starts_at')
             ->first();
     }

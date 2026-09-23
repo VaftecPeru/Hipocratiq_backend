@@ -12,6 +12,7 @@ use App\Models\ClinicalHistoryRecord;
 use App\Models\Consultation;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
+use App\Models\PatientIntakeDraft;
 use App\Models\PatientProfile;
 use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
@@ -209,6 +210,95 @@ class PatientPortalTest extends TestCase
             ->assertJsonPath('data.recorded_by.id', $this->patientUser->id);
     }
 
+    public function test_patient_can_save_and_reload_only_their_current_clinic_intake_draft(): void
+    {
+        $otherUser = User::factory()->create(['name' => 'Otro paciente']);
+        $otherPatient = $otherUser->patientProfile()->create(['clinic_id' => $this->clinic->id]);
+        $otherClinic = Clinic::factory()->create();
+
+        PatientIntakeDraft::query()->create([
+            'patient_profile_id' => $otherPatient->id,
+            'clinic_id' => $this->clinic->id,
+            'sections' => ['patient_identification' => ['name' => 'Datos de otra persona']],
+        ]);
+        PatientIntakeDraft::query()->create([
+            'patient_profile_id' => $this->patient->id,
+            'clinic_id' => $otherClinic->id,
+            'sections' => ['patient_identification' => ['name' => 'Datos de otra clínica']],
+        ]);
+
+        $payload = $this->validIntakePayload();
+        $response = $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/intake-draft', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'draft')
+            ->assertJsonPath('data.sections.patient_identification.name', 'Paciente de prueba')
+            ->assertJsonPath('meta.patient_owned', true)
+            ->assertJsonMissingPath('data.sections.physical_examination');
+
+        $draftId = $response->json('data.id');
+        $acceptedAt = $response->json('data.declaration_accepted_at');
+
+        self::assertIsInt($draftId);
+        self::assertNotNull($acceptedAt);
+        $this->assertDatabaseHas('patient_intake_drafts', [
+            'id' => $draftId,
+            'patient_profile_id' => $this->patient->id,
+            'clinic_id' => $this->clinic->id,
+        ]);
+
+        $this->withSpaOrigin()->getJson('/api/v1/auth/patient/intake-draft')
+            ->assertOk()
+            ->assertJsonPath('data.id', $draftId)
+            ->assertJsonPath('data.declaration_accepted_at', $acceptedAt)
+            ->assertJsonPath('data.sections.patient_identification.name', 'Paciente de prueba')
+            ->assertJsonMissing(['name' => 'Datos de otra persona'])
+            ->assertJsonMissing(['name' => 'Datos de otra clínica']);
+
+        $storedDraft = PatientIntakeDraft::query()->findOrFail($draftId);
+        self::assertArrayNotHasKey('physical_examination', $storedDraft->sections);
+    }
+
+    public function test_patient_intake_rejects_clinician_sections_and_invalid_vital_signs(): void
+    {
+        $payload = $this->validIntakePayload();
+        $payload['declaration_accepted'] = false;
+
+        $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/intake-draft', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['declaration_accepted']);
+
+        $payload = $this->validIntakePayload();
+        $payload['sections']['physical_examination'] = ['findings' => 'No debe aceptarse'];
+
+        $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/intake-draft', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['sections']);
+
+        $payload = $this->validIntakePayload();
+        $payload['sections']['vital_signs']['blood_pressure_systolic'] = 100;
+        $payload['sections']['vital_signs']['blood_pressure_diastolic'] = 110;
+
+        $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/intake-draft', $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['sections.vital_signs.blood_pressure_diastolic']);
+
+        $this->assertDatabaseCount('patient_intake_drafts', 0);
+    }
+
+    public function test_patient_intake_preserves_the_first_declaration_timestamp(): void
+    {
+        $payload = $this->validIntakePayload();
+        $firstResponse = $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/intake-draft', $payload)
+            ->assertOk();
+        $acceptedAt = $firstResponse->json('data.declaration_accepted_at');
+
+        $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/intake-draft', $payload)
+            ->assertOk()
+            ->assertJsonPath('data.declaration_accepted_at', $acceptedAt);
+
+        $this->assertDatabaseCount('patient_intake_drafts', 1);
+    }
+
     public function test_patient_rejects_invalid_profile_and_triage_payloads(): void
     {
         $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/profile', [
@@ -238,6 +328,12 @@ class PatientPortalTest extends TestCase
         $this->withCookie((string) config('session.cookie'), '')->withSpaOrigin()
             ->getJson('/api/v1/auth/patient/profile')
             ->assertUnauthorized();
+        $this->withCookie((string) config('session.cookie'), '')->withSpaOrigin()
+            ->getJson('/api/v1/auth/patient/intake-draft')
+            ->assertUnauthorized();
+        $this->withCookie((string) config('session.cookie'), '')->withSpaOrigin()
+            ->patchJson('/api/v1/auth/patient/intake-draft', [])
+            ->assertUnauthorized();
     }
 
     private function authenticatePatient(User $user): void
@@ -256,6 +352,40 @@ class PatientPortalTest extends TestCase
         ])->assertOk();
         $cookie = $verification->getCookie(config('session.cookie'));
         $this->withCookie($cookie->getName(), $cookie->getValue());
+    }
+
+    /** @return array<string, mixed> */
+    private function validIntakePayload(): array
+    {
+        return [
+            'declaration_accepted' => true,
+            'sections' => [
+                'patient_identification' => [
+                    'name' => 'Paciente de prueba',
+                    'gender' => 'Otro',
+                ],
+                'family_history' => ['description' => 'Sin antecedentes familiares informados.'],
+                'non_pathological_history' => ['description' => 'Sin antecedentes no patológicos informados.'],
+                'pathological_history' => ['description' => 'Sin antecedentes patológicos informados.'],
+                'gyneco_obstetric_history' => ['description' => null],
+                'present_illness' => [
+                    'reason' => 'Consulta preventiva',
+                    'illness_narrative' => 'Sin síntomas actuales informados.',
+                ],
+                'systems_review' => ['description' => 'Sin hallazgos autorreportados.'],
+                'vital_signs' => [
+                    'blood_pressure_systolic' => 120,
+                    'blood_pressure_diastolic' => 80,
+                    'temperature_c' => 36.5,
+                    'heart_rate' => 72,
+                    'respiratory_rate' => 16,
+                    'oxygen_saturation' => 98,
+                    'weight_kg' => 70.5,
+                    'height_cm' => 175,
+                    'notes' => 'Mediciones autorreportadas.',
+                ],
+            ],
+        ];
     }
 
     private function withSpaOrigin(): static

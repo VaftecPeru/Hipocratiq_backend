@@ -4,6 +4,9 @@ namespace Tests\Feature;
 
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
+use App\Models\Clinic;
+use App\Models\ClinicMembership;
+use App\Models\ClinicSubscription;
 use App\Models\DoctorProfile;
 use App\Models\Plan;
 use App\Models\Role;
@@ -102,6 +105,37 @@ class DoctorProfileTest extends TestCase
         $this->getJson('/api/v1/auth/doctor/profile')->assertUnauthorized();
     }
 
+    public function test_clinic_doctor_profile_read_and_update_require_an_active_membership(): void
+    {
+        $context = $this->authenticatedClinicDoctor();
+        $context['membership']->update(['status' => 'suspended']);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/doctor/profile')
+            ->assertForbidden();
+        $this->withSpaOrigin()
+            ->patchJson('/api/v1/auth/doctor/profile', ['name' => 'Blocked update'])
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $context['doctor']->id,
+            'name' => $context['doctor']->name,
+        ]);
+    }
+
+    public function test_clinic_doctor_profile_access_ends_when_the_subscription_expires(): void
+    {
+        $context = $this->authenticatedClinicDoctor();
+        $context['subscription']->update(['ends_at' => now()->subSecond()]);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/doctor/profile')
+            ->assertForbidden();
+        $this->withSpaOrigin()
+            ->patchJson('/api/v1/auth/doctor/profile', ['name' => 'Expired update'])
+            ->assertForbidden();
+    }
+
     private function authenticatedDoctor(): User
     {
         $specialty = Specialty::query()->where('code', 'medicina_interna')->sole();
@@ -117,6 +151,49 @@ class DoctorProfileTest extends TestCase
         $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue());
 
         return User::query()->where('email', 'medico@example.test')->with('doctorProfile')->sole();
+    }
+
+    /** @return array{doctor: User, membership: ClinicMembership, subscription: ClinicSubscription} */
+    private function authenticatedClinicDoctor(): array
+    {
+        $clinic = Clinic::factory()->create();
+        $subscription = ClinicSubscription::factory()->create([
+            'clinic_id' => $clinic->id,
+            'plan_id' => Plan::query()->sole()->id,
+        ]);
+        $doctor = User::factory()->create([
+            'email' => 'clinic-doctor@example.test',
+            'phone_number' => '+525511112222',
+            'password' => 'SecurePass123',
+        ]);
+        $role = Role::query()->where('key', RoleKey::Doctor->value)->sole();
+        $doctor->roles()->attach($role);
+        DoctorProfile::factory()->create([
+            'user_id' => $doctor->id,
+            'clinic_id' => $clinic->id,
+            'practice_type' => 'clinic',
+        ]);
+        $membership = ClinicMembership::factory()->create([
+            'clinic_id' => $clinic->id,
+            'user_id' => $doctor->id,
+            'role_id' => $role->id,
+            'status' => 'active',
+        ]);
+
+        $login = $this->withSpaOrigin()->postJson('/api/v1/auth/login', [
+            'country_code' => 'MX',
+            'phone_number' => '55 1111 2222',
+            'password' => 'SecurePass123',
+            'requested_role' => 'doctor',
+        ])->assertAccepted();
+        $verification = $this->withSpaOrigin()->postJson('/api/v1/auth/login/verify-otp', [
+            'challenge_id' => $login->json('data.challenge_id'),
+            'code' => '123456',
+        ])->assertOk();
+        $sessionCookie = $verification->getCookie(config('session.cookie'));
+        $this->withCookie($sessionCookie->getName(), $sessionCookie->getValue());
+
+        return compact('doctor', 'membership', 'subscription');
     }
 
     private function payload(array $overrides = []): array

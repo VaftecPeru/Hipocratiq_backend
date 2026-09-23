@@ -62,6 +62,7 @@ class ReceptionistActivationController extends Controller
             (string) $challenge->device_name,
             (string) $challenge->device_id_hash,
         );
+        $request->attributes->set('actor_context', AuthenticationContext::Receptionist->value);
 
         return response()->json([
             'success' => true,

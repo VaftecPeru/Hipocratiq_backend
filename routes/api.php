@@ -166,6 +166,8 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
             Route::get('/results', [PatientPortalController::class, 'results'])->name('results.index');
             Route::get('/triage', [PatientPortalController::class, 'triage'])->name('triage.show');
             Route::post('/triage', [PatientPortalController::class, 'storeTriage'])->name('triage.store');
+            Route::get('/intake-draft', [PatientPortalController::class, 'intakeDraft'])->name('intake-draft.show');
+            Route::patch('/intake-draft', [PatientPortalController::class, 'saveIntakeDraft'])->name('intake-draft.update');
             Route::get('/membership', [PatientPortalController::class, 'membership'])->name('membership.show');
             Route::get('/epidemiology', [PatientPortalController::class, 'epidemiology'])->name('epidemiology.show');
         });

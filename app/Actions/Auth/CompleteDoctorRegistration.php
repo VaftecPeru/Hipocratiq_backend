@@ -162,9 +162,7 @@ final class CompleteDoctorRegistration
         $query = Clinic::query()
             ->whereKey($clinicId)
             ->where('status', 'active')
-            ->whereHas('subscriptions', fn ($query) => $query->where('status', 'active')->where(function ($query): void {
-                $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-            }));
+            ->whereHas('subscriptions', fn ($query) => $query->currentlyActive());
 
         if ($lockForUpdate) {
             $query->lockForUpdate();

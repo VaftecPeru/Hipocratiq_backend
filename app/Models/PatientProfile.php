@@ -52,6 +52,11 @@ class PatientProfile extends Model
         return $this->hasMany(PatientIntake::class);
     }
 
+    public function intakeDrafts(): HasMany
+    {
+        return $this->hasMany(PatientIntakeDraft::class);
+    }
+
     public function latestIntake(): HasOne
     {
         return $this->hasOne(PatientIntake::class)->latestOfMany();

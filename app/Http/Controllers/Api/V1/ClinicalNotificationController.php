@@ -7,7 +7,6 @@ use App\Enums\ClinicMembershipStatus;
 use App\Enums\ClinicStatus;
 use App\Enums\DoctorPracticeType;
 use App\Enums\RoleKey;
-use App\Enums\SubscriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\ClinicalNotificationReadRequest;
 use App\Models\Clinic;
@@ -112,13 +111,7 @@ class ClinicalNotificationController extends Controller
                 ->where('status', ClinicMembershipStatus::Active->value)
                 ->whereHas('role', fn (Builder $query): Builder => $query->where('key', $roleKey->value))
                 ->whereHas('clinic', fn (Builder $query): Builder => $query->where('status', ClinicStatus::Active->value))
-                ->whereHas('clinic.subscriptions', function (Builder $query): void {
-                    $query
-                        ->where('status', SubscriptionStatus::Active->value)
-                        ->where(function (Builder $dateQuery): void {
-                            $dateQuery->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                        });
-                })
+                ->whereHas('clinic.subscriptions', fn (Builder $query): Builder => $query->currentlyActive())
                 ->with('clinic')
                 ->orderBy('clinic_id')
                 ->first()?->clinic;
@@ -139,13 +132,7 @@ class ClinicalNotificationController extends Controller
             ->where('status', ClinicMembershipStatus::Active->value)
             ->whereHas('role', fn (Builder $query): Builder => $query->where('key', RoleKey::Doctor->value))
             ->whereHas('clinic', fn (Builder $query): Builder => $query->where('status', ClinicStatus::Active->value))
-            ->whereHas('clinic.subscriptions', function (Builder $query): void {
-                $query
-                    ->where('status', SubscriptionStatus::Active->value)
-                    ->where(function (Builder $dateQuery): void {
-                        $dateQuery->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                    });
-            })
+            ->whereHas('clinic.subscriptions', fn (Builder $query): Builder => $query->currentlyActive())
             ->with('clinic')
             ->first()?->clinic;
     }

@@ -5,7 +5,6 @@ namespace App\Services\Notifications;
 use App\Enums\ClinicMembershipStatus;
 use App\Enums\ClinicStatus;
 use App\Enums\RoleKey;
-use App\Enums\SubscriptionStatus;
 use App\Enums\UserStatus;
 use App\Models\Clinic;
 use App\Models\ClinicalNotification;
@@ -54,13 +53,7 @@ final class ClinicalNotificationService
             ->whereHas('clinic', function ($query): void {
                 $query
                     ->where('status', ClinicStatus::Active->value)
-                    ->whereHas('subscriptions', function ($subscriptionQuery): void {
-                        $subscriptionQuery
-                            ->where('status', SubscriptionStatus::Active->value)
-                            ->where(function ($dateQuery): void {
-                                $dateQuery->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                            });
-                    });
+                    ->whereHas('subscriptions', fn ($subscriptionQuery) => $subscriptionQuery->currentlyActive());
             })
             ->with(['clinic:id,name,country_code', 'role:id,key', 'user:id,name'])
             ->get();

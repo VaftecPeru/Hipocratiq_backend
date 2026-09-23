@@ -74,7 +74,7 @@ class AdminBillingController extends Controller
                 'manual_subscriptions' => ClinicSubscription::query()
                     ->with(['clinic:id,name,country_code', 'plan:id,name'])
                     ->where('provider', 'admin_manual')
-                    ->where('status', 'active')
+                    ->currentlyActive()
                     ->latest('id')
                     ->get()
                     ->map(fn (ClinicSubscription $subscription): array => [

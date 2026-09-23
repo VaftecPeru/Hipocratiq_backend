@@ -174,10 +174,7 @@ class AdminMembershipController extends Controller
         $subscription = DB::transaction(function () use ($data, $startsAt): ClinicSubscription {
             $hasActiveSubscription = ClinicSubscription::query()
                 ->where('clinic_id', $data['clinic_id'])
-                ->where('status', SubscriptionStatus::Active->value)
-                ->where(function (Builder $query): void {
-                    $query->whereNull('ends_at')->orWhere('ends_at', '>', now());
-                })
+                ->currentlyActive()
                 ->lockForUpdate()
                 ->exists();
 
@@ -289,13 +286,7 @@ class AdminMembershipController extends Controller
      */
     private function activeSubscriptionQuery(): Builder
     {
-        return ClinicSubscription::query()
-            ->where('status', SubscriptionStatus::Active->value)
-            ->where(function (Builder $query): void {
-                $query
-                    ->whereNull('ends_at')
-                    ->orWhere('ends_at', '>', now());
-            });
+        return ClinicSubscription::query()->currentlyActive();
     }
 
     private function conversionRate(): ?float

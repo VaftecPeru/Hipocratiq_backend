@@ -28,6 +28,10 @@ class AdminPlatformSettingsTest extends TestCase
                 'success' => true,
                 'data' => [
                     'default_country_code' => 'MX',
+                    'localization' => [
+                        'default_locale' => 'es-MX',
+                        'enabled_locales' => ['es-MX'],
+                    ],
                 ],
             ]);
     }
@@ -114,6 +118,12 @@ class AdminPlatformSettingsTest extends TestCase
             'action' => 'platform_settings_updated',
             'is_critical' => true,
         ]);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/platform-settings')
+            ->assertOk()
+            ->assertJsonPath('data.localization.default_locale', 'es-PE')
+            ->assertJsonPath('data.localization.enabled_locales', ['es-PE', 'es-MX']);
     }
 
     private function authenticateAdmin(): User
