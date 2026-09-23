@@ -249,6 +249,51 @@ class ClinicBillingTest extends TestCase
             ->assertJsonPath('data.by_currency.PEN.paid_minor', 0);
     }
 
+    public function test_billing_report_export_is_excel_compatible_and_scoped_to_the_current_clinic(): void
+    {
+        [$clinic, $receptionistRole] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $otherClinic = Clinic::factory()->create();
+        $receptionist = User::factory()->create([
+            'phone_number' => '+525510000045',
+            'password' => 'SecurePass123',
+        ]);
+        $this->attachMembership($clinic, $receptionist, $receptionistRole);
+
+        $patient = User::factory()->create(['name' => 'Paciente Exportable']);
+        $patientProfile = PatientProfile::factory()->create([
+            'user_id' => $patient->id,
+            'clinic_id' => $clinic->id,
+        ]);
+        $otherPatient = User::factory()->create(['name' => 'Paciente Ajeno']);
+        $otherPatientProfile = PatientProfile::factory()->create([
+            'user_id' => $otherPatient->id,
+            'clinic_id' => $otherClinic->id,
+        ]);
+
+        $invoice = $this->createInvoice($clinic, $patientProfile, 'EXPORT-001', 12500, 'USD');
+        $this->createInvoice($otherClinic, $otherPatientProfile, 'NO-EXPORT-001', 9900, 'USD');
+        ClinicInvoicePayment::factory()->create([
+            'clinic_invoice_id' => $invoice->id,
+            'amount_minor' => 2500,
+            'currency' => 'USD',
+            'status' => 'confirmed',
+            'paid_at' => now(),
+        ]);
+
+        $this->authenticate($receptionist, '55 1000 0045', RoleKey::Receptionist);
+
+        $response = $this->withSpaOrigin()
+            ->get('/api/v1/auth/clinic/billing/report/export?from='.now()->startOfMonth()->toDateString().'&to='.now()->endOfMonth()->toDateString().'&currency=USD')
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8');
+
+        $content = $response->streamedContent();
+
+        $this->assertStringContainsString('EXPORT-001', $content);
+        $this->assertStringContainsString('Paciente Exportable', $content);
+        $this->assertStringNotContainsString('NO-EXPORT-001', $content);
+    }
+
     /** @return array{0: Clinic, 1: Role, 2: ClinicSubscription} */
     private function createClinicRole(RoleKey $roleKey, string $roleName): array
     {
