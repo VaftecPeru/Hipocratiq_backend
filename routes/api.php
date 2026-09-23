@@ -379,6 +379,7 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
                 Route::get('/invoices/{invoice}', [ClinicBillingController::class, 'show'])->name('invoices.show');
                 Route::post('/invoices/{invoice}/payments', [ClinicBillingController::class, 'storePayment'])->name('payments.store');
                 Route::get('/report', [ClinicBillingController::class, 'report'])->name('report');
+                Route::get('/report/export', [ClinicBillingController::class, 'exportReport'])->name('report.export');
             });
             Route::middleware(['actor.context:clinic_admin', 'clinic.access'])->group(function (): void {
                 Route::post('/invoices', [ClinicBillingController::class, 'store'])->name('invoices.store');

@@ -19,6 +19,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ClinicBillingController extends Controller
 {
@@ -268,6 +269,81 @@ class ClinicBillingController extends Controller
                 ],
                 'by_currency' => $byCurrency,
             ],
+        ]);
+    }
+
+    public function exportReport(ClinicBillingReportRequest $request): StreamedResponse
+    {
+        $clinic = $this->clinic($request);
+        $data = $request->validated();
+        $from = CarbonImmutable::parse($data['from'])->startOfDay();
+        $to = CarbonImmutable::parse($data['to'])->endOfDay();
+        $currency = $data['currency'] ?? null;
+
+        $invoices = $clinic->invoices()
+            ->with([
+                'patientProfile.user:id,name,email,phone_number',
+                'payments' => fn ($query) => $query
+                    ->where('status', ClinicInvoicePaymentStatus::Confirmed->value)
+                    ->orderBy('paid_at'),
+            ])
+            ->whereBetween('issue_date', [$from->toDateString(), $to->toDateString()])
+            ->when($currency, fn (Builder $query, string $value): Builder => $query->where('currency', $value))
+            ->latest('issue_date')
+            ->latest('id')
+            ->get();
+
+        $filename = sprintf(
+            'hipocratiq-facturacion-%s-%s.csv',
+            $from->format('Ymd'),
+            $to->format('Ymd'),
+        );
+
+        return response()->streamDownload(function () use ($invoices): void {
+            $stream = fopen('php://output', 'wb');
+
+            if ($stream === false) {
+                return;
+            }
+
+            fwrite($stream, "\xEF\xBB\xBF");
+            fputcsv($stream, [
+                'Factura',
+                'Paciente',
+                'Correo',
+                'Teléfono',
+                'Fecha de emisión',
+                'Vencimiento',
+                'Moneda',
+                'Total',
+                'Pagado',
+                'Pendiente',
+                'Estado',
+            ]);
+
+            foreach ($invoices as $invoice) {
+                $paidMinor = (int) $invoice->payments->sum('amount_minor');
+                $totalMinor = (int) $invoice->total_minor;
+
+                fputcsv($stream, [
+                    $invoice->invoice_number,
+                    $invoice->patientProfile?->user?->name ?? '',
+                    $invoice->patientProfile?->user?->email ?? '',
+                    $invoice->patientProfile?->user?->phone_number ?? '',
+                    $invoice->issue_date?->toDateString() ?? '',
+                    $invoice->due_date?->toDateString() ?? '',
+                    $invoice->currency,
+                    number_format($totalMinor / 100, 2, '.', ''),
+                    number_format($paidMinor / 100, 2, '.', ''),
+                    number_format(max(0, $totalMinor - $paidMinor) / 100, 2, '.', ''),
+                    $invoice->status->value,
+                ]);
+            }
+
+            fclose($stream);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Cache-Control' => 'no-store, private',
         ]);
     }
 
