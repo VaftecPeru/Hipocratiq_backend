@@ -283,7 +283,7 @@ class ClinicBillingController extends Controller
         $invoices = $clinic->invoices()
             ->with([
                 'patientProfile.user:id,name,email,phone_number',
-                'payments' => fn (Builder $query): Builder => $query
+                'payments' => fn ($query) => $query
                     ->where('status', ClinicInvoicePaymentStatus::Confirmed->value)
                     ->orderBy('paid_at'),
             ])
