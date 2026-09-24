@@ -46,7 +46,7 @@ class Phase4ClinicalUatTest extends TestCase
             ->postJson('/api/v1/auth/clinic/appointments', [
                 'patient_profile_id' => $patient->id,
                 'doctor_user_id' => $doctor->id,
-                'scheduled_at' => now()->addDays(2)->setTime(10, 0)->toIso8601String(),
+                'scheduled_at' => now()->addWeek()->startOfWeek()->setTime(10, 0)->toIso8601String(),
                 'appointment_type' => 'Consulta general UAT',
             ])
             ->assertCreated()
