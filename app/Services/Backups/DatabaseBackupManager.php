@@ -2,6 +2,7 @@
 
 namespace App\Services\Backups;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -184,7 +185,7 @@ final class DatabaseBackupManager
         $threshold = now()->utc()->subDays($retentionDays);
 
         foreach ($this->history() as $manifest) {
-            $createdAt = isset($manifest['created_at']) ? now()->parse((string) $manifest['created_at']) : null;
+            $createdAt = isset($manifest['created_at']) ? CarbonImmutable::parse((string) $manifest['created_at']) : null;
 
             if ($createdAt === null || $createdAt->greaterThanOrEqualTo($threshold)) {
                 continue;
