@@ -29,7 +29,7 @@ class AdminInfrastructureTest extends TestCase
             ->assertJsonPath('data.integrations.0.key', 'email')
             ->assertJsonPath('data.integrations.2.key', 'billing')
             ->assertJsonPath('data.integrations.5.status', 'not_configured')
-            ->assertJsonCount(8, 'data.integrations');
+            ->assertJsonCount(11, 'data.integrations');
     }
 
     private function authenticateAdmin(): void
