@@ -113,9 +113,14 @@ final class CompleteDoctorRegistration
                 $profile = $user->doctorProfile()->create([
                     'clinic_id' => $lockedClinic?->id,
                     'medical_license' => $data['medical_license'],
+                    'medical_license_country_code' => $data['country_code'],
+                    'medical_license_issuer' => $data['country_code'] === 'MX' ? 'SEP-DGP' : null,
+                    'medical_license_verification_status' => 'unverified',
                     'specialty' => $data['specialty'],
                     'specialty_id' => $data['specialty_id'] ?? null,
                     'subspecialty_id' => $data['subspecialty_id'] ?? null,
+                    'specialty_license' => $data['specialty_license'] ?? null,
+                    'specialty_license_verification_status' => filled($data['specialty_license'] ?? null) ? 'unverified' : 'not_applicable',
                     'practice_type' => $practiceType,
                 ]);
 
