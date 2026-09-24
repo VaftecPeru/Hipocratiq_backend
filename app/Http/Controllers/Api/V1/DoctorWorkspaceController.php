@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Contracts\EpidemiologyAnalyzer;
+use App\Contracts\VideoMeetingProvider;
 use App\Enums\LaboratoryOrderStatus;
 use App\Enums\PrescriptionStatus;
 use App\Enums\TeleconsultationStatus;
@@ -30,9 +32,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class DoctorWorkspaceController extends Controller
 {
+    public function __construct(
+        private VideoMeetingProvider $videoProvider,
+        private EpidemiologyAnalyzer $epidemiologyAnalyzer,
+    ) {}
+
     public function prescriptions(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -253,10 +261,7 @@ class DoctorWorkspaceController extends Controller
                 'waiting' => $sessions->where('status', TeleconsultationStatus::Waiting)->count(),
                 'in_progress' => $sessions->where('status', TeleconsultationStatus::InProgress)->count(),
                 'completed' => $sessions->where('status', TeleconsultationStatus::Completed)->count(),
-                'connection' => [
-                    'status' => 'not_configured',
-                    'message' => 'No hay un proveedor de video configurado para esta práctica.',
-                ],
+                'connection' => $this->videoProvider->status(),
             ],
         ]);
     }
@@ -463,25 +468,56 @@ class DoctorWorkspaceController extends Controller
             })
             ->count();
 
+        $analysis = [
+            'trend' => 'not_configured',
+            'alerts' => [],
+            'recommendations' => [],
+            'summary' => null,
+        ];
+        $analysisAvailable = false;
+        $message = 'No hay un motor epidemiológico configurado. Se muestran únicamente fuentes clínicas disponibles.';
+
+        if ($this->epidemiologyAnalyzer->configured()) {
+            try {
+                $analysis = $this->epidemiologyAnalyzer->analyze([
+                    'period_days' => 90,
+                    'metrics' => [
+                        'monitored_patients' => $monitoredPatients,
+                        'consultations' => $consultations->count(),
+                        'laboratory_orders' => $laboratoryOrders->count(),
+                        'teleconsultations' => $teleconsultations->count(),
+                        'prescriptions' => $prescriptions->count(),
+                    ],
+                ]);
+                $analysisAvailable = true;
+                $message = is_string($analysis['summary'] ?? null)
+                    ? $analysis['summary']
+                    : 'Análisis epidemiológico agregado disponible para revisión humana.';
+            } catch (Throwable) {
+                $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+            }
+        }
+
         return response()->json([
             'success' => true,
             'data' => [
                 'generated_at' => now()->toIso8601String(),
                 'period_days' => 90,
-                'analysis_available' => false,
-                'message' => 'No hay un motor epidemiológico configurado. Se muestran únicamente fuentes clínicas disponibles.',
+                'analysis_available' => $analysisAvailable,
+                'provider' => $this->epidemiologyAnalyzer->provider(),
+                'message' => $message,
                 'metrics' => [
                     'monitored_patients' => $monitoredPatients,
-                    'active_alerts' => 0,
+                    'active_alerts' => count($analysis['alerts'] ?? []),
                     'high_risk_cases' => 0,
-                    'trend' => 'not_configured',
+                    'trend' => $analysis['trend'] ?? 'not_configured',
                     'consultations' => $consultations->count(),
                     'laboratory_orders' => $laboratoryOrders->count(),
                     'teleconsultations' => $teleconsultations->count(),
                     'prescriptions' => $prescriptions->count(),
                 ],
                 'cohorts' => [],
-                'alerts' => [],
+                'alerts' => $analysis['alerts'] ?? [],
                 'sources' => [
                     'clinical_history' => ['status' => $consultations->count() > 0 ? 'available' : 'no_data', 'label' => 'Historia clínica interna'],
                     'laboratory' => ['status' => $laboratoryOrders->count() > 0 ? 'available' : 'no_data', 'label' => 'Resultados de laboratorio internos'],
@@ -709,11 +745,7 @@ class DoctorWorkspaceController extends Controller
             'started_at' => $session->started_at?->toIso8601String(),
             'ended_at' => $session->ended_at?->toIso8601String(),
             'notes' => $session->notes,
-            'connection' => [
-                'status' => 'not_configured',
-                'message' => 'No hay un proveedor de video configurado para esta práctica.',
-                'joinable' => false,
-            ],
+            'connection' => $this->videoProvider->connection($session),
         ];
     }
 
