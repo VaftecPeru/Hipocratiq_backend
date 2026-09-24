@@ -9,12 +9,22 @@ use App\Models\User;
 use App\Services\Auth\OtpCodeGenerator;
 use Database\Seeders\DemoUsersSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\Support\FixedOtpCodeGenerator;
 use Tests\TestCase;
 
 class DemoUsersSeederTest extends TestCase
 {
     use RefreshDatabase;
+
+    private string $demoPassword;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->demoPassword = Str::random(32);
+        config(['uat.password' => $this->demoPassword]);
+    }
 
     /**
      * The demo seeder must reseed cleanly even when the demo clinic already
@@ -63,7 +73,7 @@ class DemoUsersSeederTest extends TestCase
             'actor_context' => 'staff',
             'requested_role' => 'receptionist',
             'identifier' => 'recepcion@hipocratiq.test',
-            'password' => 'Hipocratiq2026!',
+            'password' => $this->demoPassword,
         ])->assertAccepted();
 
         $this->withSpaOrigin()->postJson('/api/v1/auth/otp/verify', [
