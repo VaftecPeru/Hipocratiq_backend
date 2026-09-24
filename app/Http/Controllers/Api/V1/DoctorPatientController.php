@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Clinic\CreateClinicPatient;
 use App\Actions\Clinic\UpdateClinicPatient;
 use App\Actions\Doctor\CreateIndependentDoctorPatient;
 use App\Http\Controllers\Controller;
@@ -17,6 +18,7 @@ use App\Models\User;
 use App\Support\Clinical\DoctorClinicScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class DoctorPatientController extends Controller
 {
@@ -49,11 +51,35 @@ class DoctorPatientController extends Controller
 
     public function store(
         DoctorPatientStoreRequest $request,
-        CreateIndependentDoctorPatient $createPatient,
+        CreateIndependentDoctorPatient $createIndependentPatient,
+        CreateClinicPatient $createClinicPatient,
     ): JsonResponse {
         $doctor = $request->user();
-        DoctorClinicScope::assertIndependent($doctor);
-        $patient = $createPatient->handle($request->validated(), $doctor)->load(['user', 'clinic']);
+        $clinic = DoctorClinicScope::clinicOrNull($doctor);
+        $data = $request->validated();
+
+        $patient = DB::transaction(function () use ($doctor, $clinic, $data, $createIndependentPatient, $createClinicPatient): PatientProfile {
+            if ($clinic === null) {
+                return $createIndependentPatient->handle($data, $doctor);
+            }
+
+            $patient = $createClinicPatient->handle($data, $clinic, $doctor);
+            DB::table('doctor_patient_links')->updateOrInsert(
+                [
+                    'clinic_id' => $clinic->id,
+                    'doctor_user_id' => $doctor->id,
+                    'patient_profile_id' => $patient->id,
+                ],
+                [
+                    'linked_by_user_id' => $doctor->id,
+                    'source' => 'doctor_registration',
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ],
+            );
+
+            return $patient;
+        })->load(['user', 'clinic']);
 
         return (new DoctorPatientResource($patient))->response()->setStatusCode(201);
     }
@@ -120,7 +146,12 @@ class DoctorPatientController extends Controller
             ->where('requested_doctor_user_id', $doctor->id)
             ->pluck('patient_profile_id');
 
-        return $appointmentIds->merge($intakeIds)->unique()->all();
+        $linkedIds = DB::table('doctor_patient_links')
+            ->where('clinic_id', $clinic->id)
+            ->where('doctor_user_id', $doctor->id)
+            ->pluck('patient_profile_id');
+
+        return $appointmentIds->merge($intakeIds)->merge($linkedIds)->unique()->all();
     }
 
     private function assertPatientConnected(User $doctor, Clinic $clinic, PatientProfile $patient): void
@@ -138,6 +169,11 @@ class DoctorPatientController extends Controller
                 ->where('clinic_id', $clinic->id)
                 ->where('patient_profile_id', $patient->id)
                 ->where('requested_doctor_user_id', $doctor->id)
+                ->exists()
+            || DB::table('doctor_patient_links')
+                ->where('clinic_id', $clinic->id)
+                ->where('patient_profile_id', $patient->id)
+                ->where('doctor_user_id', $doctor->id)
                 ->exists();
 
         if (! $connected) {
