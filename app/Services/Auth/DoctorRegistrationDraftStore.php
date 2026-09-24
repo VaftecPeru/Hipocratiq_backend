@@ -2,7 +2,7 @@
 
 namespace App\Services\Auth;
 
-use App\Contracts\SmsSender;
+use App\Contracts\RegistrationOtpSender;
 use App\Enums\DoctorPracticeType;
 use Illuminate\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
@@ -19,7 +19,7 @@ final class DoctorRegistrationDraftStore
     public function __construct(
         private OtpCodeGenerator $codeGenerator,
         private OtpHasher $hasher,
-        private SmsSender $smsSender,
+        private RegistrationOtpSender $otpSender,
     ) {}
 
     public function create(array $data): string
@@ -107,7 +107,8 @@ final class DoctorRegistrationDraftStore
             return [
                 'challenge_id' => $challengeId,
                 'code' => $code,
-                'phone_number' => $draft['data']['doctor_phone_number'],
+                'email' => $draft['data']['doctor_email'],
+                'recipient_name' => $draft['data']['doctor_name'],
                 'expires_at' => $expiresAt->timestamp,
                 'previous_resend_count' => $resendCount,
                 'next_resend_count' => $nextResendCount,
@@ -115,9 +116,10 @@ final class DoctorRegistrationDraftStore
         });
 
         try {
-            $this->smsSender->send(
-                $reservation['phone_number'],
-                "Tu código Hipocratiq es {$reservation['code']}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
+            $this->otpSender->send(
+                $reservation['email'],
+                $reservation['recipient_name'],
+                $reservation['code'],
             );
         } catch (Throwable $exception) {
             $this->restorePreviousOtp(
@@ -128,7 +130,7 @@ final class DoctorRegistrationDraftStore
 
             throw new ServiceUnavailableHttpException(
                 null,
-                'No se pudo enviar el código OTP.',
+                'No se pudo enviar el código OTP al correo del médico.',
                 $exception,
             );
         }
