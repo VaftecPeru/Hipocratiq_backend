@@ -48,9 +48,25 @@ class DoctorProfileController extends Controller
                 $profile->user->fill($userData)->save();
             }
 
-            $profileData = array_intersect_key($data, array_flip(['medical_license', 'specialty', 'specialty_id', 'subspecialty_id']));
+            $profileData = array_intersect_key($data, array_flip(['medical_license', 'specialty', 'specialty_id', 'subspecialty_id', 'specialty_license']));
+            $medicalLicenseChanged = array_key_exists('medical_license', $profileData)
+                && $profileData['medical_license'] !== $profile->medical_license;
+            $specialtyLicenseChanged = array_key_exists('specialty_license', $profileData)
+                && $profileData['specialty_license'] !== $profile->specialty_license;
             if (array_key_exists('specialty_id', $profileData) && $profileData['specialty_id'] !== null) {
                 $profileData['specialty'] = Specialty::query()->findOrFail($profileData['specialty_id'])->name;
+            }
+            if ($medicalLicenseChanged) {
+                $profileData['medical_license_country_code'] = $profile->user->country_code;
+                $profileData['medical_license_issuer'] = $profile->user->country_code === 'MX' ? 'SEP-DGP' : null;
+                $profileData['medical_license_verification_status'] = 'unverified';
+                $profileData['medical_license_verified_at'] = null;
+                $profileData['medical_license_verification_reference'] = null;
+            }
+            if ($specialtyLicenseChanged) {
+                $profileData['specialty_license_verification_status'] = filled($profileData['specialty_license'] ?? null) ? 'unverified' : 'not_applicable';
+                $profileData['specialty_license_verified_at'] = null;
+                $profileData['specialty_license_verification_reference'] = null;
             }
             $profile->fill($profileData)->save();
 
@@ -82,9 +98,18 @@ class DoctorProfileController extends Controller
             'phone_number' => $profile->user->phone_number,
             'country_code' => $profile->user->country_code,
             'medical_license' => $profile->medical_license,
+            'medical_license_country_code' => $profile->medical_license_country_code,
+            'medical_license_issuer' => $profile->medical_license_issuer,
+            'medical_license_verification_status' => $profile->medical_license_verification_status,
+            'medical_license_verified_at' => $profile->medical_license_verified_at?->toIso8601String(),
+            'medical_license_verification_reference' => $profile->medical_license_verification_reference,
             'specialty' => $profile->specialty,
             'specialty_id' => $profile->specialty_id,
             'subspecialty_id' => $profile->subspecialty_id,
+            'specialty_license' => $profile->specialty_license,
+            'specialty_license_verification_status' => $profile->specialty_license_verification_status,
+            'specialty_license_verified_at' => $profile->specialty_license_verified_at?->toIso8601String(),
+            'specialty_license_verification_reference' => $profile->specialty_license_verification_reference,
             'specialty_catalog' => $profile->specialtyCatalog?->only(['id', 'code', 'name']),
             'subspecialty_catalog' => $profile->subspecialtyCatalog?->only(['id', 'code', 'name']),
             'practice_type' => $profile->practice_type->value,
