@@ -3,35 +3,47 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Contracts\BillingGateway;
+use App\Contracts\EpidemiologyAnalyzer;
+use App\Contracts\VideoMeetingProvider;
+use App\Contracts\WhatsAppSender;
+use App\Services\Backups\DatabaseBackupManager;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 
 class AdminInfrastructureController extends Controller
 {
+    public function __construct(
+        private DatabaseBackupManager $backupManager,
+        private EpidemiologyAnalyzer $epidemiologyAnalyzer,
+        private VideoMeetingProvider $videoProvider,
+        private WhatsAppSender $whatsAppSender,
+    ) {}
+
     public function show(): JsonResponse
     {
-        $backupEnabled = (bool) config('admin_operations.backups.enabled');
+        $backupEnabled = $this->backupManager->configured();
         $backupProvider = config('admin_operations.backups.provider');
         $backupDisk = config('admin_operations.backups.disk');
+        $backupHistory = $this->backupManager->history();
 
         return response()->json([
             'success' => true,
             'data' => [
                 'backups' => [
-                    'status' => $backupEnabled && $backupProvider && $backupDisk ? 'configured' : 'not_configured',
+                    'status' => $backupEnabled ? 'configured' : 'not_configured',
                     'provider' => $backupProvider,
                     'storage_disk' => $backupDisk,
                     'retention_days' => (int) config('admin_operations.backups.retention_days', 30),
                     'schedule' => config('admin_operations.backups.schedule'),
-                    'history' => [],
+                    'history' => $backupHistory,
                     'capabilities' => [
-                        'create' => false,
-                        'download' => false,
-                        'restore' => false,
-                        'verify' => false,
+                        'create' => $backupEnabled,
+                        'download' => $backupEnabled,
+                        'restore' => $backupEnabled,
+                        'verify' => $backupEnabled,
                     ],
                     'message' => $backupEnabled
-                        ? 'El proveedor está declarado, pero aún falta conectar manifiestos y operaciones de restauración.'
+                        ? 'Respaldos PostgreSQL con manifiesto SHA-256 y restauración explícita disponibles.'
                         : 'No hay un servicio de respaldos configurado en el backend.',
                 ],
                 'integrations' => $this->integrations(),
@@ -49,14 +61,18 @@ class AdminInfrastructureController extends Controller
         $smsDriver = (string) config('sms.driver', 'array');
         $billingAdapter = class_basename(app(BillingGateway::class));
         $filesystemDisk = (string) config('filesystems.default', 'local');
+        $aiReady = $this->epidemiologyAnalyzer->configured();
+        $videoReady = $this->videoProvider->configured();
+        $whatsAppReady = $this->whatsAppSender->configured();
         $cacheStore = (string) config('cache.default', 'database');
         $mailReady = ! in_array($mailDriver, ['log', 'array'], true);
         $smsReady = $smsDriver === 'twilio'
             && filled(config('sms.twilio.account_sid'))
             && filled(config('sms.twilio.auth_token'))
             && filled(config('sms.twilio.messaging_service_sid'));
-        $billingReady = ! str_contains(strtolower($billingAdapter), 'simulated')
-            && ! str_contains(strtolower($billingAdapter), 'unavailable');
+        $billingReady = str_contains(strtolower($billingAdapter), 'httpbillinggateway')
+            && filled(config('billing.http.endpoint'))
+            && filled(config('billing.http.token'));
         $storageReady = $filesystemDisk === 's3'
             && filled(config('filesystems.disks.s3.key'))
             && filled(config('filesystems.disks.s3.secret'))
@@ -102,6 +118,30 @@ class AdminInfrastructureController extends Controller
                 $cacheStore === 'redis',
                 $cacheStore === 'redis' ? 'configured' : 'local',
                 'Cache, sesiones, límites y bloqueos distribuidos.',
+            ),
+            $this->integration(
+                'ai_epidemiology',
+                'IA epidemiológica',
+                $this->epidemiologyAnalyzer->provider(),
+                $aiReady,
+                $aiReady ? 'configured' : 'not_configured',
+                'Análisis agregado sin datos personales individuales.',
+            ),
+            $this->integration(
+                'telemedicine',
+                'Telemedicina',
+                (string) config('integrations.telemedicine.provider'),
+                $videoReady,
+                $videoReady ? 'configured' : 'not_configured',
+                'Salas de videollamada para teleconsultas.',
+            ),
+            $this->integration(
+                'whatsapp',
+                'WhatsApp',
+                (string) config('integrations.whatsapp.driver'),
+                $whatsAppReady,
+                $whatsAppReady ? 'configured' : 'not_configured',
+                'Recordatorios de citas con consentimiento.',
             ),
             $this->integration('his_ehr', 'HIS / EHR', null, false, 'not_configured', 'Intercambio de historias clínicas.'),
             $this->integration('laboratory', 'Laboratorio / HL7', null, false, 'not_configured', 'Resultados y órdenes de laboratorio.'),
