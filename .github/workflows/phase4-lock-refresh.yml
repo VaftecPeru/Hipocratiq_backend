@@ -27,7 +27,7 @@ jobs:
           coverage: none
 
       - name: Refresh vulnerable package lock
-        run: composer update league/commonmark --with-dependencies --minimal-changes --no-interaction --no-progress
+        run: composer update league/commonmark --with-dependencies --minimal-changes --no-interaction --no-progress --no-scripts
 
       - name: Commit lockfile
         run: |
