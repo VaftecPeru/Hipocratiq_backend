@@ -40,7 +40,7 @@ class StartDoctorRegistrationRequest extends FormRequest
             'country_code' => ['required', 'string', 'in:PE,MX,US'],
             'doctor_phone_number' => ['required', 'string', 'max:30', $this->phoneRule()],
             'medical_license' => ['required', 'string', 'max:80', 'unique:doctor_profiles,medical_license', $this->professionalLicenseRule()],
-            'specialty_license' => ['nullable', 'string', 'max:80', $this->professionalLicenseRule(nullable: true)],
+            'specialty_license' => ['nullable', 'string', 'max:80', 'unique:doctor_profiles,specialty_license', $this->professionalLicenseRule(nullable: true)],
             'specialty' => ['nullable', 'string', 'max:120'],
             'specialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)->whereNull('parent_id')],
             'subspecialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)],
