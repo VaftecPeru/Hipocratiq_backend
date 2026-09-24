@@ -24,7 +24,7 @@ class DoctorProfileUpdateRequest extends FormRequest
             'country_code' => ['sometimes', 'string', Rule::in(['MX', 'PE', 'US'])],
             'phone_number' => ['sometimes', 'string', 'max:30', $this->phoneRule()],
             'medical_license' => ['sometimes', 'string', 'max:80', Rule::unique('doctor_profiles', 'medical_license')->ignore($profileId), $this->professionalLicenseRule()],
-            'specialty_license' => ['sometimes', 'nullable', 'string', 'max:80', $this->professionalLicenseRule(nullable: true)],
+            'specialty_license' => ['sometimes', 'nullable', 'string', 'max:80', Rule::unique('doctor_profiles', 'specialty_license')->ignore($profileId), $this->professionalLicenseRule(nullable: true)],
             'specialty' => ['sometimes', 'string', 'min:2', 'max:120'],
             'specialty_id' => ['sometimes', 'nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)->whereNull('parent_id')],
             'subspecialty_id' => ['sometimes', 'nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)],
