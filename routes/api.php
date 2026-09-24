@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\AdminAuditController;
 use App\Http\Controllers\Api\V1\AdminBillingController;
 use App\Http\Controllers\Api\V1\AdminClinicController;
 use App\Http\Controllers\Api\V1\AdminDashboardController;
+use App\Http\Controllers\Api\V1\AdminDoctorCredentialController;
 use App\Http\Controllers\Api\V1\AdminEmergencyController;
 use App\Http\Controllers\Api\V1\AdminInfrastructureController;
 use App\Http\Controllers\Api\V1\AdminMembershipController;
@@ -409,6 +410,12 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/admin/users', [AdminUserController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.users.index');
+        Route::get('/admin/doctors/{doctorProfile}/credentials', [AdminDoctorCredentialController::class, 'show'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.doctors.credentials.show');
+        Route::post('/admin/doctors/{doctorProfile}/credentials/verify', [AdminDoctorCredentialController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.doctors.credentials.verify');
         Route::post('/admin/users', [AdminUserController::class, 'store'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.users.store');
