@@ -196,6 +196,18 @@ class DoctorConsultationController extends Controller
             }
 
             if ($nextStatus === ConsultationStatus::Signed) {
+                if ($lockedConsultation->clinicalHistoryRecord !== null) {
+                    $profile = $doctor->doctorProfile;
+                    $this->syncSections($lockedConsultation->clinicalHistoryRecord, [
+                        'clinician_identification' => [
+                            'clinician_name' => $doctor->name,
+                            'title' => 'Cédula profesional: '.$profile?->medical_license
+                                .($profile?->specialty_license ? ' · Cédula especialidad: '.$profile->specialty_license : ''),
+                            'unit' => $clinic?->name ?? 'Práctica independiente',
+                        ],
+                    ]);
+                }
+
                 $lockedConsultation->refresh()->loadMissing('clinicalHistoryRecord.entries.section');
                 $lockedConsultation->forceFill([
                     'signature_digest' => hash('sha256', json_encode([
