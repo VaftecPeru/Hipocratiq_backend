@@ -235,7 +235,7 @@ class AdminUserController extends Controller
                     ->select(['id', 'user_id', 'clinic_id', 'status'])
                     ->where('status', 'active')
                     ->with('clinic:id,name,address'),
-                'doctorProfile:id,user_id,clinic_id',
+                'doctorProfile:id,user_id,clinic_id,medical_license,medical_license_country_code,medical_license_issuer,medical_license_verification_status,medical_license_verified_at,medical_license_verification_reference,specialty_license,specialty_license_verification_status,specialty_license_verified_at,specialty_license_verification_reference',
                 'doctorProfile.clinic:id,name,address',
                 'patientProfile:id,user_id,clinic_id',
                 'patientProfile.clinic:id,name,address',
@@ -316,6 +316,19 @@ class AdminUserController extends Controller
                 $user->patientProfile !== null ? AdminAssignableRole::Patient->value : null,
             ])->filter()->values()->all(),
             'clinic' => $clinic?->only(['id', 'name', 'address']),
+            'professional_credential' => $user->doctorProfile === null ? null : [
+                'doctor_profile_id' => $user->doctorProfile->id,
+                'medical_license' => $user->doctorProfile->medical_license,
+                'country_code' => $user->doctorProfile->medical_license_country_code,
+                'issuer' => $user->doctorProfile->medical_license_issuer,
+                'verification_status' => $user->doctorProfile->medical_license_verification_status,
+                'verified_at' => $user->doctorProfile->medical_license_verified_at?->toIso8601String(),
+                'verification_reference' => $user->doctorProfile->medical_license_verification_reference,
+                'specialty_license' => $user->doctorProfile->specialty_license,
+                'specialty_verification_status' => $user->doctorProfile->specialty_license_verification_status,
+                'specialty_verified_at' => $user->doctorProfile->specialty_license_verified_at?->toIso8601String(),
+                'specialty_verification_reference' => $user->doctorProfile->specialty_license_verification_reference,
+            ],
             'last_login_at' => $user->last_login_at?->toIso8601String(),
             'status' => $user->status->value,
             'created_at' => $user->created_at?->toIso8601String(),
