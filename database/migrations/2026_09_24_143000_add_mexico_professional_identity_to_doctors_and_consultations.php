@@ -9,8 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('doctor_profiles', function (Blueprint $table): void {
-            $table->char('medical_license_country_code', 2)->default('MX')->after('medical_license');
-            $table->string('medical_license_issuer', 120)->default('SEP-DGP')->after('medical_license_country_code');
+            $table->char('medical_license_country_code', 2)->nullable()->after('medical_license');
+            $table->string('medical_license_issuer', 120)->nullable()->after('medical_license_country_code');
             $table->string('medical_license_verification_status', 30)->default('unverified')->after('medical_license_issuer');
             $table->timestamp('medical_license_verified_at')->nullable()->after('medical_license_verification_status');
             $table->string('medical_license_verification_reference', 255)->nullable()->after('medical_license_verified_at');
