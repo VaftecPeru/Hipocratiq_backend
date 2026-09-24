@@ -14,7 +14,7 @@ return new class extends Migration
             $table->string('medical_license_verification_status', 30)->default('unverified')->after('medical_license_issuer');
             $table->timestamp('medical_license_verified_at')->nullable()->after('medical_license_verification_status');
             $table->string('medical_license_verification_reference', 255)->nullable()->after('medical_license_verified_at');
-            $table->string('specialty_license', 80)->nullable()->after('subspecialty_id');
+            $table->string('specialty_license', 80)->nullable()->unique()->after('subspecialty_id');
             $table->string('specialty_license_verification_status', 30)->default('not_applicable')->after('specialty_license');
             $table->timestamp('specialty_license_verified_at')->nullable()->after('specialty_license_verification_status');
             $table->string('specialty_license_verification_reference', 255)->nullable()->after('specialty_license_verified_at');
