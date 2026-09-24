@@ -103,6 +103,7 @@ class DoctorConsultationController extends Controller
     public function show(Request $request, Consultation $consultation): ConsultationResource
     {
         $doctor = $request->user();
+        $doctor->loadMissing('doctorProfile');
         $clinic = DoctorClinicScope::clinicOrNull($doctor);
         $this->assertConsultationAccessible($doctor, $clinic, $consultation);
 
@@ -156,9 +157,33 @@ class DoctorConsultationController extends Controller
             }
 
             if ($nextStatus === ConsultationStatus::Signed) {
+                $profile = $doctor->doctorProfile;
+                $medicalLicense = trim((string) $profile?->medical_license);
+                $licenseCountry = $profile?->medical_license_country_code ?? $doctor->country_code;
+                $licenseIssuer = $profile?->medical_license_issuer;
+
+                if ($medicalLicense === '') {
+                    throw ValidationException::withMessages([
+                        'status' => ['No puedes firmar una consulta sin cédula o licencia profesional registrada.'],
+                    ]);
+                }
+
+                if ($licenseCountry === 'MX' && preg_match('/^\\d+$/', $medicalLicense) !== 1) {
+                    throw ValidationException::withMessages([
+                        'status' => ['La cédula profesional mexicana debe registrarse con su número oficial SEP/DGP antes de firmar.'],
+                    ]);
+                }
+
+                $signedAt = now();
                 $updates['signed_by_user_id'] = $doctor->id;
-                $updates['signed_at'] = now();
-                $updates['completed_at'] ??= $lockedConsultation->completed_at ?? now();
+                $updates['signed_doctor_name'] = $doctor->name;
+                $updates['signed_doctor_medical_license'] = $medicalLicense;
+                $updates['signed_doctor_license_country_code'] = $licenseCountry;
+                $updates['signed_doctor_license_issuer'] = $licenseIssuer;
+                $updates['signed_doctor_specialty_license'] = $profile?->specialty_license;
+                $updates['signed_doctor_specialty'] = $profile?->specialty;
+                $updates['signed_at'] = $signedAt;
+                $updates['completed_at'] ??= $lockedConsultation->completed_at ?? $signedAt;
             }
 
             $lockedConsultation->fill($updates)->save();
@@ -168,6 +193,29 @@ class DoctorConsultationController extends Controller
                 if (array_key_exists('sections', $data)) {
                     $this->syncSections($lockedConsultation->clinicalHistoryRecord, $data['sections'], true);
                 }
+            }
+
+            if ($nextStatus === ConsultationStatus::Signed) {
+                $lockedConsultation->refresh()->loadMissing('clinicalHistoryRecord.entries.section');
+                $lockedConsultation->forceFill([
+                    'signature_digest' => hash('sha256', json_encode([
+                        'consultation_id' => $lockedConsultation->id,
+                        'patient_profile_id' => $lockedConsultation->patient_profile_id,
+                        'appointment_id' => $lockedConsultation->appointment_id,
+                        'chief_complaint' => $lockedConsultation->chief_complaint,
+                        'objective' => $lockedConsultation->objective,
+                        'sections' => $lockedConsultation->clinicalHistoryRecord?->entries
+                            ->sortBy(fn ($entry) => (string) $entry->section?->key)
+                            ->mapWithKeys(fn ($entry): array => [(string) $entry->section?->key => $entry->values])
+                            ->all(),
+                        'signed_doctor_name' => $lockedConsultation->signed_doctor_name,
+                        'signed_doctor_medical_license' => $lockedConsultation->signed_doctor_medical_license,
+                        'signed_doctor_license_country_code' => $lockedConsultation->signed_doctor_license_country_code,
+                        'signed_doctor_license_issuer' => $lockedConsultation->signed_doctor_license_issuer,
+                        'signed_doctor_specialty_license' => $lockedConsultation->signed_doctor_specialty_license,
+                        'signed_at' => $lockedConsultation->signed_at?->toIso8601String(),
+                    ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)),
+                ])->save();
             }
 
             return $lockedConsultation->fresh([
