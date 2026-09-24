@@ -20,21 +20,22 @@ use App\Models\SupportTicket;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use RuntimeException;
 
 /**
  * Creates demo users for every role with deterministic credentials.
  *
- * Local:      php artisan db:seed --class=DemoUsersSeeder
- * Production: php artisan db:seed --class=DemoUsersSeeder --force
- *
- * All users share the password: Hipocratiq2026!
+ * Legacy local-only demo data.
+ * Production/UAT must use HipocratiqUatAccessSeeder instead.
  */
 class DemoUsersSeeder extends Seeder
 {
-    private const PASSWORD = 'Hipocratiq2026!';
-
     public function run(): void
     {
+        if (app()->environment('production')) {
+            throw new RuntimeException('Legacy DemoUsersSeeder is disabled in production. Use HipocratiqUatAccessSeeder.');
+        }
+
         // Ensure base roles and plans exist
         $this->call(DatabaseSeeder::class);
 
@@ -44,7 +45,11 @@ class DemoUsersSeeder extends Seeder
         // sessions (all FKs are cascadeOnDelete on user_id).
         $this->purgeExistingRoleUsers();
 
-        $password = Hash::make(self::PASSWORD);
+        $plainPassword = config('uat.password');
+        if (! is_string($plainPassword) || mb_strlen($plainPassword) < 12) {
+            throw new RuntimeException('Configure HIPOCRATIQ_UAT_ACCESS_PASSWORD before running legacy demo data.');
+        }
+        $password = Hash::make($plainPassword);
         $plan = Plan::query()->where('key', 'professional')->firstOrFail();
         $clinicAdminRole = Role::query()->where('key', RoleKey::ClinicAdmin->value)->firstOrFail();
         $receptionistRole = Role::query()->where('key', RoleKey::Receptionist->value)->firstOrFail();
@@ -267,7 +272,7 @@ class DemoUsersSeeder extends Seeder
         $superAdminRole = Role::query()->where('key', RoleKey::SuperAdmin->value)->firstOrFail();
         $superAdmin->roles()->syncWithoutDetaching([$superAdminRole->id]);
 
-        $this->command->info('Demo users created successfully. Password: '.self::PASSWORD);
+        $this->command?->info('Legacy local demo users created successfully.');
         $this->command->table(
             ['Rol', 'Email', 'Teléfono', 'Nombre'],
             [
