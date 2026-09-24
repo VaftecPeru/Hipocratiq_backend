@@ -12,4 +12,10 @@ return [
     |
     */
     'driver' => env('BILLING_DRIVER', 'unavailable'),
+
+    'http' => [
+        'endpoint' => env('BILLING_HTTP_ENDPOINT'),
+        'token' => env('BILLING_HTTP_TOKEN'),
+        'timeout_seconds' => (int) env('BILLING_HTTP_TIMEOUT_SECONDS', 20),
+    ],
 ];

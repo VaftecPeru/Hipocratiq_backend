@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Contracts\EpidemiologyAnalyzer;
 use App\Http\Controllers\Controller;
 use App\Models\Clinic;
 use App\Models\DoctorPrescription;
@@ -11,9 +12,12 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Throwable;
 
 class ClinicEpidemiologyController extends Controller
 {
+    public function __construct(private EpidemiologyAnalyzer $analyzer) {}
+
     public function show(Request $request): JsonResponse
     {
         $clinic = $this->clinic($request);
@@ -51,6 +55,43 @@ class ClinicEpidemiologyController extends Controller
             $prescriptions->pluck('patient_profile_id'),
         ])->flatten()->filter()->unique()->count();
         $trend = $this->trend($now, $appointments, $consultations, $laboratoryOrders);
+        $analysis = [
+            'trend' => 'not_configured',
+            'forecasts' => [],
+            'alerts' => [],
+            'recommendations' => [],
+            'summary' => null,
+        ];
+        $analysisAvailable = false;
+        $analysisMessage = 'No hay un motor epidemiológico configurado. Se muestran únicamente eventos clínicos internos.';
+
+        if ($this->analyzer->configured()) {
+            try {
+                $analysis = $this->analyzer->analyze([
+                    'period' => [
+                        'from' => $from->toDateString(),
+                        'to' => $now->toDateString(),
+                        'days' => 90,
+                    ],
+                    'metrics' => [
+                        'monitored_patients' => $monitoredPatients,
+                        'high_risk_cases' => $highRiskCases,
+                        'appointments' => $appointments->count(),
+                        'consultations' => $consultations->count(),
+                        'laboratory_orders' => $laboratoryOrders->count(),
+                        'teleconsultations' => $teleconsultations->count(),
+                        'prescriptions' => $prescriptions->count(),
+                    ],
+                    'monthly_trend' => $trend,
+                ]);
+                $analysisAvailable = true;
+                $analysisMessage = is_string($analysis['summary'] ?? null)
+                    ? $analysis['summary']
+                    : 'Análisis epidemiológico agregado disponible para revisión humana.';
+            } catch (Throwable) {
+                $analysisMessage = 'El motor epidemiológico está configurado, pero no respondió. Se muestran datos internos sin predicción.';
+            }
+        }
 
         return response()->json([
             'success' => true,
@@ -61,13 +102,14 @@ class ClinicEpidemiologyController extends Controller
                     'to' => $now->toDateString(),
                     'days' => 90,
                 ],
-                'analysis_available' => false,
-                'message' => 'No hay un motor epidemiológico configurado. Se muestran únicamente eventos clínicos internos.',
+                'analysis_available' => $analysisAvailable,
+                'provider' => $this->analyzer->provider(),
+                'message' => $analysisMessage,
                 'metrics' => [
                     'monitored_patients' => $monitoredPatients,
-                    'active_alerts' => 0,
+                    'active_alerts' => count($analysis['alerts'] ?? []),
                     'high_risk_cases' => $highRiskCases,
-                    'trend' => 'not_configured',
+                    'trend' => $analysis['trend'] ?? 'not_configured',
                     'appointments' => $appointments->count(),
                     'consultations' => $consultations->count(),
                     'laboratory_orders' => $laboratoryOrders->count(),
@@ -75,9 +117,9 @@ class ClinicEpidemiologyController extends Controller
                     'prescriptions' => $prescriptions->count(),
                 ],
                 'trend' => $trend,
-                'forecasts' => [],
-                'alerts' => [],
-                'recommendations' => [],
+                'forecasts' => $analysis['forecasts'] ?? [],
+                'alerts' => $analysis['alerts'] ?? [],
+                'recommendations' => $analysis['recommendations'] ?? [],
                 'map' => [
                     'status' => 'not_configured',
                     'message' => 'No hay datos geográficos ni una fuente territorial configurada para esta clínica.',

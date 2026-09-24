@@ -14,7 +14,10 @@ class DoctorProfileFactory extends Factory
         return [
             'user_id' => User::factory(),
             'clinic_id' => null,
-            'medical_license' => fake()->unique()->bothify('MED-########'),
+            'medical_license' => fake()->unique()->numerify('########'),
+            'medical_license_country_code' => 'MX',
+            'medical_license_issuer' => 'SEP-DGP',
+            'medical_license_verification_status' => 'unverified',
             'specialty' => fake()->randomElement(['Medicina general', 'Cardiología', 'Pediatría']),
             'practice_type' => 'independent',
         ];

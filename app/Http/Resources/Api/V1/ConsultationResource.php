@@ -35,6 +35,13 @@ class ConsultationResource extends JsonResource
             'signature' => [
                 'signed_by' => $this->signedBy?->only(['id', 'name']),
                 'signed_at' => $this->signed_at?->toIso8601String(),
+                'doctor_name' => $this->signed_doctor_name,
+                'medical_license' => $this->signed_doctor_medical_license,
+                'license_country_code' => $this->signed_doctor_license_country_code,
+                'license_issuer' => $this->signed_doctor_license_issuer,
+                'specialty_license' => $this->signed_doctor_specialty_license,
+                'specialty' => $this->signed_doctor_specialty,
+                'digest' => $this->signature_digest,
             ],
             'completed_at' => $this->completed_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),

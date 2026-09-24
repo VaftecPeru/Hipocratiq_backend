@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['user_id', 'clinic_id', 'medical_license', 'specialty', 'specialty_id', 'subspecialty_id', 'practice_type', 'preferences'])]
+#[Fillable(['user_id', 'clinic_id', 'medical_license', 'medical_license_country_code', 'medical_license_issuer', 'medical_license_verification_status', 'medical_license_verified_at', 'medical_license_verification_reference', 'specialty', 'specialty_id', 'subspecialty_id', 'specialty_license', 'specialty_license_verification_status', 'specialty_license_verified_at', 'specialty_license_verification_reference', 'practice_type', 'preferences'])]
 class DoctorProfile extends Model
 {
     /** @use HasFactory<DoctorProfileFactory> */
@@ -31,6 +31,11 @@ class DoctorProfile extends Model
         return $this->hasMany(DoctorSubscription::class);
     }
 
+    public function credentialVerifications(): HasMany
+    {
+        return $this->hasMany(DoctorCredentialVerification::class);
+    }
+
     public function specialtyCatalog(): BelongsTo
     {
         return $this->belongsTo(Specialty::class, 'specialty_id');
@@ -46,6 +51,8 @@ class DoctorProfile extends Model
         return [
             'practice_type' => DoctorPracticeType::class,
             'preferences' => 'array',
+            'medical_license_verified_at' => 'datetime',
+            'specialty_license_verified_at' => 'datetime',
         ];
     }
 }

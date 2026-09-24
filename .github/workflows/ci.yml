@@ -83,6 +83,14 @@ jobs:
           DB_PASSWORD: root
           DB_URL: ''
 
+      - name: Validate Docker Compose runtime
+        run: docker compose config --quiet
+
       - name: Build backend Docker image
         run: docker build --tag hipocratiq-backend:ci .
+
+      - name: Validate PostgreSQL backup tooling in image
+        run: |
+          docker run --rm hipocratiq-backend:ci pg_dump --version
+          docker run --rm hipocratiq-backend:ci pg_restore --version
 

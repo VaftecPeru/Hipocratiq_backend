@@ -65,7 +65,7 @@ class DoctorProfileTest extends TestCase
     {
         $doctor = $this->authenticatedDoctor();
         $otherDoctor = User::factory()->create(['name' => 'Otra Doctora']);
-        DoctorProfile::factory()->create(['user_id' => $otherDoctor->id, 'medical_license' => 'MED-OTHER']);
+        DoctorProfile::factory()->create(['user_id' => $otherDoctor->id, 'medical_license' => '98765432']);
         $internalMedicine = Specialty::query()->where('code', 'medicina_interna')->sole();
         $cardiology = Specialty::query()->where('code', 'cardiologia')->sole();
 
@@ -74,14 +74,14 @@ class DoctorProfileTest extends TestCase
             ->assertJsonPath('data.id', $doctor->doctorProfile->id);
         $this->withSpaOrigin()->patchJson('/api/v1/auth/doctor/profile', [
             'name' => 'Dra. Elena Actualizada',
-            'medical_license' => 'MED-654321',
+            'medical_license' => '654321',
             'specialty_id' => $internalMedicine->id,
             'subspecialty_id' => $cardiology->id,
         ])->assertOk()->assertJsonPath('data.specialty', 'Medicina Interna');
 
         $this->assertDatabaseHas('users', ['id' => $doctor->id, 'name' => 'Dra. Elena Actualizada']);
-        $this->assertDatabaseHas('doctor_profiles', ['user_id' => $doctor->id, 'medical_license' => 'MED-654321', 'specialty_id' => $internalMedicine->id]);
-        $this->assertDatabaseHas('doctor_profiles', ['user_id' => $otherDoctor->id, 'medical_license' => 'MED-OTHER']);
+        $this->assertDatabaseHas('doctor_profiles', ['user_id' => $doctor->id, 'medical_license' => '654321', 'specialty_id' => $internalMedicine->id]);
+        $this->assertDatabaseHas('doctor_profiles', ['user_id' => $otherDoctor->id, 'medical_license' => '98765432']);
     }
 
     public function test_specialty_only_update_preserves_the_doctor_email(): void
@@ -203,7 +203,7 @@ class DoctorProfileTest extends TestCase
             'doctor_email' => 'medico@example.test',
             'country_code' => 'MX',
             'doctor_phone_number' => '55 8765 4321',
-            'medical_license' => 'MED-123456',
+            'medical_license' => '123456',
             'specialty' => null,
             'specialty_id' => null,
             'subspecialty_id' => null,

@@ -39,7 +39,8 @@ class StartDoctorRegistrationRequest extends FormRequest
             'doctor_email' => ['required', 'email:rfc', 'max:255', 'unique:users,email'],
             'country_code' => ['required', 'string', 'in:PE,MX,US'],
             'doctor_phone_number' => ['required', 'string', 'max:30', $this->phoneRule()],
-            'medical_license' => ['required', 'string', 'max:80', 'unique:doctor_profiles,medical_license'],
+            'medical_license' => ['required', 'string', 'max:80', 'unique:doctor_profiles,medical_license', $this->professionalLicenseRule()],
+            'specialty_license' => ['nullable', 'string', 'max:80', 'unique:doctor_profiles,specialty_license', $this->professionalLicenseRule(nullable: true)],
             'specialty' => ['nullable', 'string', 'max:120'],
             'specialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)->whereNull('parent_id')],
             'subspecialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)],
@@ -82,7 +83,27 @@ class StartDoctorRegistrationRequest extends FormRequest
             'device_id' => $this->input('device_id', $this->header('X-Device-ID')),
             'doctor_email' => is_string($this->input('doctor_email')) ? strtolower(trim($this->input('doctor_email'))) : $this->input('doctor_email'),
             'medical_license' => is_string($this->input('medical_license')) ? strtoupper(trim($this->input('medical_license'))) : $this->input('medical_license'),
+            'specialty_license' => is_string($this->input('specialty_license')) && trim($this->input('specialty_license')) !== ''
+                ? strtoupper(trim($this->input('specialty_license')))
+                : null,
         ]);
+    }
+
+    private function professionalLicenseRule(bool $nullable = false): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail) use ($nullable): void {
+            if ($nullable && ($value === null || $value === '')) {
+                return;
+            }
+
+            if ($this->input('country_code') !== 'MX') {
+                return;
+            }
+
+            if (! is_string($value) || preg_match('/^\\d+$/', $value) !== 1) {
+                $fail('Para México, la cédula profesional debe registrarse con su número oficial emitido por la SEP/DGP.');
+            }
+        };
     }
 
     private function phoneRule(): \Closure

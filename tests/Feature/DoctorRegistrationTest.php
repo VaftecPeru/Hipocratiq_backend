@@ -322,7 +322,7 @@ class DoctorRegistrationTest extends TestCase
             'doctor_email' => 'medico@example.test',
             'country_code' => 'MX',
             'doctor_phone_number' => '55 8765 4321',
-            'medical_license' => 'MED-123456',
+            'medical_license' => '12345678',
             'specialty' => 'Cardiología',
             'practice_type' => 'independent',
             'clinic_id' => null,
