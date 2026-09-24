@@ -152,7 +152,9 @@ class Phase3IntegrationAdaptersTest extends TestCase
         $manifest = $manager->create();
         $verified = $manager->verify((string) $manifest['id']);
 
-        $this->assertSame(hash('sha256', 'binary-backup-content'), $manifest['sha256']);
+        $storedDump = (string) Storage::disk('backup-test')->get((string) $manifest['dump_path']);
+        $this->assertSame(hash('sha256', $storedDump), $manifest['sha256']);
+        $this->assertSame(strlen($storedDump), $manifest['size_bytes']);
         $this->assertNotNull($verified['verified_at']);
         Storage::disk('backup-test')->assertExists((string) $manifest['dump_path']);
         Storage::disk('backup-test')->assertExists((string) $manifest['manifest_path']);
