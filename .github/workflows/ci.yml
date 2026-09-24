@@ -62,6 +62,9 @@ jobs:
           echo "OTP_HASH_KEY=ci-test-hash-key" >> .env
           echo "OTP_FIXED_CODE=123456" >> .env
 
+      - name: Audit Composer dependencies
+        run: composer audit --locked --no-interaction
+
       - name: Check code style
         run: vendor/bin/pint --test
 
