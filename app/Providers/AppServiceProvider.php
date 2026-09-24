@@ -3,6 +3,9 @@
 namespace App\Providers;
 
 use App\Contracts\BillingGateway;
+use App\Contracts\EpidemiologyAnalyzer;
+use App\Contracts\VideoMeetingProvider;
+use App\Contracts\WhatsAppSender;
 use App\Contracts\SmsSender;
 use App\Enums\RoleKey;
 use App\Enums\UserStatus;
@@ -12,8 +15,15 @@ use App\Models\User;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\RandomOtpCodeGenerator;
+use App\Services\Billing\HttpBillingGateway;
 use App\Services\Billing\SimulatedBillingGateway;
 use App\Services\Billing\UnavailableBillingGateway;
+use App\Services\Epidemiology\OpenAiEpidemiologyAnalyzer;
+use App\Services\Epidemiology\UnavailableEpidemiologyAnalyzer;
+use App\Services\Telemedicine\JitsiVideoMeetingProvider;
+use App\Services\Telemedicine\UnavailableVideoMeetingProvider;
+use App\Services\WhatsApp\MetaWhatsAppSender;
+use App\Services\WhatsApp\UnavailableWhatsAppSender;
 use App\Services\Sms\ArraySmsSender;
 use App\Services\Sms\UnavailableSmsSender;
 use App\Support\Authorization\RolePermissionCatalog;
@@ -52,9 +62,34 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(
             BillingGateway::class,
             fn () => match (config('billing.driver')) {
+                'http' => $this->app->make(HttpBillingGateway::class),
                 'simulated' => $this->app->make(SimulatedBillingGateway::class),
                 'unavailable' => $this->app->make(UnavailableBillingGateway::class),
                 default => throw new LogicException('El proveedor de facturación configurado no está disponible.'),
+            },
+        );
+        $this->app->singleton(
+            EpidemiologyAnalyzer::class,
+            fn () => match (config('integrations.ai.provider')) {
+                'openai' => $this->app->make(OpenAiEpidemiologyAnalyzer::class),
+                'unavailable', null => $this->app->make(UnavailableEpidemiologyAnalyzer::class),
+                default => throw new LogicException('El proveedor epidemiológico configurado no está disponible.'),
+            },
+        );
+        $this->app->singleton(
+            VideoMeetingProvider::class,
+            fn () => match (config('integrations.telemedicine.provider')) {
+                'jitsi' => $this->app->make(JitsiVideoMeetingProvider::class),
+                'unavailable', null => $this->app->make(UnavailableVideoMeetingProvider::class),
+                default => throw new LogicException('El proveedor de telemedicina configurado no está disponible.'),
+            },
+        );
+        $this->app->singleton(
+            WhatsAppSender::class,
+            fn () => match (config('integrations.whatsapp.driver')) {
+                'meta' => $this->app->make(MetaWhatsAppSender::class),
+                'unavailable', null => $this->app->make(UnavailableWhatsAppSender::class),
+                default => throw new LogicException('El proveedor WhatsApp configurado no está disponible.'),
             },
         );
     }
