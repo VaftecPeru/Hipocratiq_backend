@@ -1,5 +1,9 @@
 FROM dunglas/frankenphp:1-php8.4
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN install-php-extensions \
     pcntl \
     pdo_pgsql \
