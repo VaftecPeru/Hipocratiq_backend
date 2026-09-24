@@ -13,6 +13,7 @@ class OtpCodeNotification extends Notification
     public function __construct(
         private readonly string $code,
         private readonly int $ttlMinutes,
+        private readonly ?string $recipientName = null,
     ) {}
 
     public function via(object $notifiable): array
@@ -22,9 +23,12 @@ class OtpCodeNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
+        $name = $this->recipientName
+            ?? (is_string($notifiable->name ?? null) ? $notifiable->name : 'usuario');
+
         return (new MailMessage)
             ->subject('Código de verificación Hipocratiq')
-            ->greeting('Hola, '.$notifiable->name)
+            ->greeting('Hola, '.$name)
             ->line('Tu código de verificación es:')
             ->line($this->code)
             ->line("Este código expira en {$this->ttlMinutes} minutos.")
