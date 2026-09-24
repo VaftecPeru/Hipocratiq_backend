@@ -16,7 +16,7 @@ class AdminDoctorCredentialController extends Controller
 {
     public function show(Request $request, DoctorProfile $doctorProfile): JsonResponse
     {
-        $doctorProfile->loadMissing(['user:id,name,email,country_code', 'specialty:id,name', 'subspecialty:id,name']);
+        $doctorProfile->loadMissing(['user:id,name,email,country_code', 'specialtyCatalog:id,name', 'subspecialtyCatalog:id,name']);
 
         return response()->json([
             'success' => true,
@@ -94,7 +94,7 @@ class AdminDoctorCredentialController extends Controller
             return [$profile->fresh(), $verification];
         });
 
-        $profile->loadMissing(['user:id,name,email,country_code', 'specialty:id,name', 'subspecialty:id,name']);
+        $profile->loadMissing(['user:id,name,email,country_code', 'specialtyCatalog:id,name', 'subspecialtyCatalog:id,name']);
 
         $audit->handle(
             $actor,
@@ -136,8 +136,8 @@ class AdminDoctorCredentialController extends Controller
             'specialty_license_verification_status' => $profile->specialty_license_verification_status,
             'specialty_license_verified_at' => $profile->specialty_license_verified_at?->toIso8601String(),
             'specialty_license_verification_reference' => $profile->specialty_license_verification_reference,
-            'specialty' => $profile->specialty?->name ?? $profile->specialty,
-            'subspecialty' => $profile->subspecialty?->name,
+            'specialty' => $profile->specialtyCatalog?->name ?? $profile->specialty,
+            'subspecialty' => $profile->subspecialtyCatalog?->name,
         ];
     }
 }
