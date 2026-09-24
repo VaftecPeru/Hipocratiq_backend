@@ -19,7 +19,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'chief_complaint',
     'objective',
     'signed_by_user_id',
+    'signed_doctor_name',
+    'signed_doctor_medical_license',
+    'signed_doctor_license_country_code',
+    'signed_doctor_license_issuer',
+    'signed_doctor_specialty_license',
+    'signed_doctor_specialty',
     'signed_at',
+    'signature_digest',
     'completed_at',
 ])]
 class Consultation extends Model
