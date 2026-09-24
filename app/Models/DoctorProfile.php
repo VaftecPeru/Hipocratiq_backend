@@ -31,6 +31,11 @@ class DoctorProfile extends Model
         return $this->hasMany(DoctorSubscription::class);
     }
 
+    public function credentialVerifications(): HasMany
+    {
+        return $this->hasMany(DoctorCredentialVerification::class);
+    }
+
     public function specialtyCatalog(): BelongsTo
     {
         return $this->belongsTo(Specialty::class, 'specialty_id');
