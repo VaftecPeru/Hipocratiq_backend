@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Actions\Auth\RegisterPatient;
+use App\Contracts\RegistrationOtpSender;
 use App\Contracts\SmsSender;
 use App\Enums\OtpDeliveryStatus;
 use App\Models\Clinic;
@@ -55,13 +56,14 @@ class RegistrationDraftOtpDeliveryTest extends TestCase
         $this->assertSame(OtpDeliveryStatus::Sent, $challenge->delivery_status);
     }
 
-    public function test_clinic_draft_releases_its_cache_lock_during_delivery_and_restores_previous_otp_on_failure(): void
+    public function test_clinic_draft_releases_its_cache_lock_during_email_delivery_and_restores_previous_otp_on_failure(): void
     {
-        $sender = $this->lockAwareSender();
-        $this->app->instance(SmsSender::class, $sender);
+        $sender = $this->lockAwareRegistrationSender();
+        $this->app->instance(RegistrationOtpSender::class, $sender);
         $store = $this->app->make(ClinicRegistrationDraftStore::class);
         $token = $store->create([
-            'admin_phone_number' => '+525512345678',
+            'admin_name' => 'Administradora UAT',
+            'admin_email' => 'admin-clinic@example.test',
         ]);
         $store->update($token, ['plan' => ['key' => 'basic']]);
         $sender->lockKey = 'clinic-registration:'.hash('sha256', $token).':lock';
@@ -72,7 +74,7 @@ class RegistrationDraftOtpDeliveryTest extends TestCase
 
         try {
             $store->issueOtp($token, true);
-            $this->fail('The failed SMS delivery was accepted.');
+            $this->fail('The failed email delivery was accepted.');
         } catch (ServiceUnavailableHttpException) {
             // Expected.
         }
@@ -85,14 +87,15 @@ class RegistrationDraftOtpDeliveryTest extends TestCase
         $this->assertSame(0, $draft['resend_count']);
     }
 
-    public function test_doctor_draft_releases_its_cache_lock_during_delivery(): void
+    public function test_doctor_draft_releases_its_cache_lock_during_email_delivery(): void
     {
-        $sender = $this->lockAwareSender();
-        $this->app->instance(SmsSender::class, $sender);
+        $sender = $this->lockAwareRegistrationSender();
+        $this->app->instance(RegistrationOtpSender::class, $sender);
         $store = $this->app->make(DoctorRegistrationDraftStore::class);
         $token = $store->create([
             'practice_type' => 'independent',
-            'doctor_phone_number' => '+525587654321',
+            'doctor_name' => 'Dr. UAT',
+            'doctor_email' => 'doctor@example.test',
         ]);
         $store->selectPlan($token, ['key' => 'basic']);
         $sender->lockKey = 'doctor-registration:'.hash('sha256', $token).':lock';
@@ -102,9 +105,9 @@ class RegistrationDraftOtpDeliveryTest extends TestCase
         $this->assertSame([true], $sender->lockAcquired);
     }
 
-    private function lockAwareSender(): object
+    private function lockAwareRegistrationSender(): object
     {
-        return new class implements SmsSender
+        return new class implements RegistrationOtpSender
         {
             public string $lockKey = '';
 
@@ -113,7 +116,7 @@ class RegistrationDraftOtpDeliveryTest extends TestCase
 
             public bool $shouldFail = false;
 
-            public function send(string $phoneNumber, string $message): void
+            public function send(string $email, string $recipientName, string $code): void
             {
                 $lock = Cache::lock($this->lockKey, 10);
                 $acquired = $lock->get();
