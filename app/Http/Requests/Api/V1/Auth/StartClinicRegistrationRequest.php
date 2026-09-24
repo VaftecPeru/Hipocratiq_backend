@@ -67,6 +67,7 @@ class StartClinicRegistrationRequest extends FormRequest
 
             if (in_array($length, [12, 13], true) === false) {
                 $fail('El RFC debe tener 12 o 13 caracteres.');
+
                 return;
             }
 
