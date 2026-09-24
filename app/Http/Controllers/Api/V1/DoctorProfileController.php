@@ -68,6 +68,16 @@ class DoctorProfileController extends Controller
                 $profileData['specialty_license_verified_at'] = null;
                 $profileData['specialty_license_verification_reference'] = null;
             }
+            if (array_key_exists('medical_license', $profileData) && $profileData['medical_license'] !== $profile->medical_license) {
+                $profileData['medical_license_verification_status'] = 'unverified';
+                $profileData['medical_license_verified_at'] = null;
+                $profileData['medical_license_verification_reference'] = null;
+            }
+            if (array_key_exists('specialty_license', $profileData) && $profileData['specialty_license'] !== $profile->specialty_license) {
+                $profileData['specialty_license_verification_status'] = filled($profileData['specialty_license']) ? 'unverified' : 'not_applicable';
+                $profileData['specialty_license_verified_at'] = null;
+                $profileData['specialty_license_verification_reference'] = null;
+            }
             $profile->fill($profileData)->save();
 
             return $profile->fresh(['user', 'clinic', 'specialtyCatalog', 'subspecialtyCatalog']);
