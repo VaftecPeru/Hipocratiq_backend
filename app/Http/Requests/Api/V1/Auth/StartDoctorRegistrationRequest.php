@@ -48,6 +48,7 @@ class StartDoctorRegistrationRequest extends FormRequest
             'clinic_id' => [Rule::requiredIf($isClinicDoctor), 'nullable', 'integer', Rule::exists('clinics', 'id')->where('status', 'active')],
             'password' => ['required', 'confirmed', 'max:72', Password::defaults()],
             'terms_accepted' => ['accepted'],
+            'google_registration_token' => ['nullable', 'string', 'size:64', 'regex:/^[A-Za-z0-9]+$/'],
         ];
     }
 
