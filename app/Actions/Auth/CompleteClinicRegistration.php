@@ -18,6 +18,7 @@ use App\Models\Role;
 use App\Models\SubscriptionPayment;
 use App\Models\User;
 use App\Services\Auth\ClinicRegistrationDraftStore;
+use App\Services\Auth\GoogleRegistrationIdentity;
 use App\Support\PhoneNumber;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -30,6 +31,7 @@ final class CompleteClinicRegistration
         private ClinicRegistrationDraftStore $draftStore,
         private RecordAuthenticationEvent $recordEvent,
         private BillingGateway $billingGateway,
+        private GoogleRegistrationIdentity $googleIdentity,
     ) {}
 
     /** @return array{user: User, clinic: Clinic} */
@@ -132,6 +134,10 @@ final class CompleteClinicRegistration
                 $user = User::query()->create([
                     'name' => $data['admin_name'],
                     'email' => $data['admin_email'],
+                    'google_sub' => $data['google_identity']['sub'] ?? null,
+                    'google_avatar_url' => $data['google_identity']['avatar'] ?? null,
+                    'google_linked_at' => isset($data['google_identity']) ? now() : null,
+                    'email_verified_at' => isset($data['google_identity']) ? now() : null,
                     'phone_number' => $adminPhone->value,
                     'country_code' => $adminPhone->countryCode,
                     'password' => $data['password_hash'],
@@ -180,7 +186,9 @@ final class CompleteClinicRegistration
         $this->recordEvent->handleSafely($result['user'], 'clinic_registration_completed', metadata: [
             'clinic_id' => $result['clinic']->id,
             'plan' => $planKey,
+            'google_linked' => isset($data['google_identity']),
         ]);
+        $this->googleIdentity->consume($data['google_registration_token'] ?? null);
         $this->draftStore->forget($token);
 
         return $result;
