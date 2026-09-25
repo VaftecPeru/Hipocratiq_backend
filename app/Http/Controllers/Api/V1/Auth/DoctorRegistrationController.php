@@ -16,6 +16,7 @@ use App\Http\Resources\UserResource;
 use App\Models\Clinic;
 use App\Models\Specialty;
 use App\Services\Auth\DoctorRegistrationDraftStore;
+use App\Services\Auth\GoogleRegistrationIdentity;
 use App\Services\Auth\RegistrationDraftAccess;
 use App\Support\Auth\MobileDeviceProof;
 use App\Support\PhoneNumber;
@@ -65,8 +66,17 @@ class DoctorRegistrationController extends Controller
     public function draft(
         StartDoctorRegistrationRequest $request,
         DoctorRegistrationDraftStore $store,
+        GoogleRegistrationIdentity $googleIdentity,
     ): JsonResponse {
         $data = $request->validated();
+        $identity = $googleIdentity->resolve(
+            $data['google_registration_token'] ?? null,
+            'doctor',
+            $data['doctor_email'],
+        );
+        if ($identity !== null) {
+            $data['google_identity'] = $identity;
+        }
         $client = AuthenticationClient::from($data['client_type']);
         if (isset($data['specialty_id'])) {
             $data['specialty'] = Specialty::query()->findOrFail($data['specialty_id'])->name;
