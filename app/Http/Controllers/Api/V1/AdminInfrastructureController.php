@@ -8,12 +8,14 @@ use App\Contracts\VideoMeetingProvider;
 use App\Contracts\WhatsAppSender;
 use App\Http\Controllers\Controller;
 use App\Services\Backups\DatabaseBackupManager;
+use App\Services\Mail\SmtpConfigurationInspector;
 use Illuminate\Http\JsonResponse;
 
 class AdminInfrastructureController extends Controller
 {
     public function __construct(
         private DatabaseBackupManager $backupManager,
+        private SmtpConfigurationInspector $smtpConfiguration,
         private EpidemiologyAnalyzer $epidemiologyAnalyzer,
         private VideoMeetingProvider $videoProvider,
         private WhatsAppSender $whatsAppSender,
@@ -58,6 +60,7 @@ class AdminInfrastructureController extends Controller
     private function integrations(): array
     {
         $mailDriver = (string) config('mail.default', 'log');
+        $mailStatus = $this->smtpConfiguration->status();
         $smsDriver = (string) config('sms.driver', 'array');
         $billingAdapter = class_basename(app(BillingGateway::class));
         $filesystemDisk = (string) config('filesystems.default', 'local');
@@ -65,7 +68,7 @@ class AdminInfrastructureController extends Controller
         $videoReady = $this->videoProvider->configured();
         $whatsAppReady = $this->whatsAppSender->configured();
         $cacheStore = (string) config('cache.default', 'database');
-        $mailReady = ! in_array($mailDriver, ['log', 'array'], true);
+        $mailReady = $this->smtpConfiguration->configured();
         $smsReady = $smsDriver === 'twilio'
             && filled(config('sms.twilio.account_sid'))
             && filled(config('sms.twilio.auth_token'))
@@ -84,8 +87,10 @@ class AdminInfrastructureController extends Controller
                 'Correo transaccional',
                 $mailDriver,
                 $mailReady,
-                $mailReady ? 'configured' : 'sandbox',
-                'Notificaciones de cuenta y recuperación.',
+                $mailReady ? 'configured' : 'not_configured',
+                $mailReady
+                    ? 'SMTP configurado para OTP y correo transaccional ('.$mailStatus['host'].':'.$mailStatus['port'].').'
+                    : 'Completa MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD y MAIL_FROM_ADDRESS.',
             ),
             $this->integration(
                 'sms',
