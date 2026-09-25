@@ -10,7 +10,9 @@ use Illuminate\Validation\ValidationException;
 final class GoogleOAuthStateStore
 {
     private const int AuthorizationTtlSeconds = 600;
+
     private const int HandoffTtlSeconds = 300;
+
     private const int RegistrationTtlSeconds = 1800;
 
     public function createAuthorization(array $payload): string
