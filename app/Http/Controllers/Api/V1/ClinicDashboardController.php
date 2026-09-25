@@ -603,6 +603,7 @@ class ClinicDashboardController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->clinicAppointment($clinic, $lockedAppointment);
+            $this->doctorScheduling->assertAppointmentEditable($lockedAppointment);
 
             if (array_key_exists('doctor_user_id', $validated) || array_key_exists('scheduled_at', $validated)) {
                 $doctorProfile = $this->doctorScheduling->resolveClinicDoctor(
@@ -651,6 +652,7 @@ class ClinicDashboardController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->clinicAppointment($clinic, $lockedAppointment);
+            $this->doctorScheduling->assertAppointmentEditable($lockedAppointment, $nextStatus);
             $previousStatus = $lockedAppointment->status->value;
             $this->doctorScheduling->assertAppointmentStatusTransition($lockedAppointment->status, $nextStatus);
             $lockedAppointment->update(['status' => $nextStatus]);
@@ -838,12 +840,11 @@ class ClinicDashboardController extends Controller
     ): JsonResponse {
         $clinic = $this->clinic($request);
 
-        $appointmentModel = $clinic
-            ->appointments()
-            ->whereKey($appointment)
-            ->firstOrFail();
-
-        $appointmentModel->delete();
+        DB::transaction(function () use ($clinic, $appointment): void {
+            $appointmentModel = $clinic->appointments()->whereKey($appointment)->lockForUpdate()->firstOrFail();
+            $this->doctorScheduling->assertAppointmentEditable($appointmentModel);
+            $appointmentModel->delete();
+        });
 
         return response()->json([
             'success' => true,

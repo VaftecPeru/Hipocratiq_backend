@@ -7,6 +7,7 @@ use App\Enums\ConsultationStatus;
 use App\Enums\DoctorPracticeType;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
+use App\Models\AdminAuditEvent;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicalHistoryRecord;
@@ -294,7 +295,7 @@ class DoctorClinicalRecordTest extends TestCase
         $this->assertDatabaseCount('clinical_history_entries', 0);
     }
 
-    public function test_update_consultation_edit_and_replace_sections(): void
+    public function test_update_consultation_preserves_unspecified_sections_and_fields(): void
     {
         $patient = $this->connectedPatient('+525510000324');
         $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", [
@@ -310,7 +311,88 @@ class DoctorClinicalRecordTest extends TestCase
         ])->assertOk()->assertJsonPath('data.status', 'completed')->assertJsonPath('data.clinical_history.sections.record_metadata.unit', 'Unidad X');
 
         $this->assertDatabaseHas('consultations', ['id' => $consultationId, 'status' => 'completed']);
-        $this->assertDatabaseCount('clinical_history_entries', 1);
+        $this->assertDatabaseCount('clinical_history_entries', 15);
+        $this->withSpaOrigin()->getJson("/api/v1/auth/doctor/consultations/{$consultationId}")
+            ->assertOk()->assertJsonPath('data.clinical_history.sections.record_metadata.description', 'Valor de record_metadata');
+    }
+
+    public function test_appointment_encounter_completion_signature_and_audit_are_consistent(): void
+    {
+        $patient = $this->connectedPatient('+525510000340');
+        $appointment = Appointment::query()->sole();
+        $appointment->update(['status' => 'waiting']);
+        $this->doctor->doctorProfile->update(['medical_license' => '1234567', 'medical_license_country_code' => 'MX']);
+        $payload = ['appointment_id' => $appointment->id, 'chief_complaint' => 'Consulta de seguimiento.', 'sections' => $this->sectionsPayload()];
+        $created = $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", $payload)->assertCreated();
+        $id = $created->json('data.id');
+        $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'status' => 'in_consultation']);
+        $this->assertDatabaseHas('clinical_history_records', ['appointment_id' => $appointment->id]);
+        $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/appointments/{$appointment->id}/cancel")->assertUnprocessable();
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/appointments/{$appointment->id}/status", ['status' => 'completed'])->assertUnprocessable();
+        $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", $payload)
+            ->assertUnprocessable()->assertJsonValidationErrors('appointment_id');
+        $this->assertDatabaseCount('clinical_history_records', 1);
+        $this->assertDatabaseCount('admin_audit_events', 1);
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['status' => 'completed', 'sections' => null])
+            ->assertOk()->assertJsonPath('data.status', 'completed');
+        $this->assertDatabaseCount('clinical_history_entries', 15);
+        $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'status' => 'completed']);
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['status' => 'signed'])
+            ->assertOk()->assertJsonPath('data.status', 'signed');
+        $digest = Consultation::query()->findOrFail($id)->signature_digest;
+        $this->assertNotEmpty($digest);
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['chief_complaint' => 'Cambio posterior a firma.'])
+            ->assertUnprocessable();
+        $this->assertSame($digest, Consultation::query()->findOrFail($id)->signature_digest);
+        $this->assertDatabaseCount('admin_audit_events', 3);
+        $event = AdminAuditEvent::query()->latest('id')->first();
+        $this->assertSame(['previous_status' => 'completed', 'status' => 'signed'], $event->metadata);
+    }
+
+    public function test_prepared_draft_allows_arrival_then_doctor_starts_attention(): void
+    {
+        $patient = $this->connectedPatient('+525510000343');
+        $appointment = Appointment::query()->sole();
+        $appointment->update(['status' => 'confirmed']);
+        $id = $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", [
+            'appointment_id' => $appointment->id, 'chief_complaint' => 'Consulta de seguimiento.', 'status' => 'draft',
+        ])->assertCreated()->json('data.id');
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/appointments/{$appointment->id}/status", ['status' => 'waiting'])->assertOk();
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['status' => 'in_progress'])->assertOk();
+        $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'status' => 'in_consultation']);
+    }
+
+    public function test_closed_appointments_reject_consultations_without_orphan_records(): void
+    {
+        $patient = $this->connectedPatient('+525510000341');
+        $appointment = Appointment::query()->sole();
+        foreach (['canceled', 'no_show', 'completed'] as $status) {
+            $appointment->update(['status' => $status]);
+            $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", [
+                'appointment_id' => $appointment->id, 'chief_complaint' => 'Consulta de seguimiento.',
+            ])->assertUnprocessable()->assertJsonValidationErrors('appointment_id');
+        }
+        $this->assertDatabaseCount('clinical_history_records', 0);
+        $this->assertDatabaseCount('consultations', 0);
+        $this->assertDatabaseCount('admin_audit_events', 0);
+    }
+
+    public function test_appointment_link_cannot_be_detached_and_canceled_consultation_is_immutable(): void
+    {
+        $patient = $this->connectedPatient('+525510000342');
+        $appointment = Appointment::query()->sole();
+        $appointment->update(['status' => 'waiting']);
+        $created = $this->withSpaOrigin()->postJson("/api/v1/auth/doctor/patients/{$patient->id}/consultations", [
+            'appointment_id' => $appointment->id, 'chief_complaint' => 'Consulta de seguimiento.', 'status' => 'draft',
+        ])->assertCreated();
+        $id = $created->json('data.id');
+        $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'status' => 'waiting']);
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['appointment_id' => null])
+            ->assertUnprocessable()->assertJsonValidationErrors('appointment_id');
+        $this->assertDatabaseHas('clinical_history_records', ['appointment_id' => $appointment->id]);
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['status' => 'canceled'])->assertOk();
+        $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'status' => 'canceled']);
+        $this->withSpaOrigin()->patchJson("/api/v1/auth/doctor/consultations/{$id}", ['chief_complaint' => 'Cambio tras cancelar.'])->assertUnprocessable();
     }
 
     public function test_unauthenticated_doctor_routes_are_rejected(): void
