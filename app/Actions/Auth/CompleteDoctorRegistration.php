@@ -19,6 +19,7 @@ use App\Models\Plan;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Auth\DoctorRegistrationDraftStore;
+use App\Services\Auth\GoogleRegistrationIdentity;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -29,6 +30,7 @@ final class CompleteDoctorRegistration
         private DoctorRegistrationDraftStore $draftStore,
         private RecordAuthenticationEvent $recordEvent,
         private BillingGateway $billingGateway,
+        private GoogleRegistrationIdentity $googleIdentity,
     ) {}
 
     public function handle(string $token, array $draft): User
@@ -100,6 +102,10 @@ final class CompleteDoctorRegistration
                 $user = User::query()->create([
                     'name' => $data['doctor_name'],
                     'email' => $data['doctor_email'],
+                    'google_sub' => $data['google_identity']['sub'] ?? null,
+                    'google_avatar_url' => $data['google_identity']['avatar'] ?? null,
+                    'google_linked_at' => isset($data['google_identity']) ? now() : null,
+                    'email_verified_at' => isset($data['google_identity']) ? now() : null,
                     'phone_number' => $data['doctor_phone_number'],
                     'country_code' => $data['country_code'],
                     'password' => $data['password_hash'],
@@ -156,7 +162,9 @@ final class CompleteDoctorRegistration
             'practice_type' => $practiceType->value,
             'clinic_id' => $data['clinic_id'] ?? null,
             'plan' => $draft['plan']['key'] ?? null,
+            'google_linked' => isset($data['google_identity']),
         ]);
+        $this->googleIdentity->consume($data['google_registration_token'] ?? null);
         $this->draftStore->forget($token);
 
         return $user;
