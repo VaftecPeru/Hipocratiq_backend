@@ -20,6 +20,9 @@ use Laravel\Sanctum\HasApiTokens;
 #[Fillable([
     'name',
     'email',
+    'google_sub',
+    'google_avatar_url',
+    'google_linked_at',
     'email_verified_at',
     'phone_number',
     'country_code',
@@ -168,6 +171,7 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
+            'google_linked_at' => 'datetime',
             'email_verified_at' => 'datetime',
             'phone_verified_at' => 'datetime',
             'last_login_at' => 'datetime',
