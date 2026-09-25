@@ -41,6 +41,7 @@ class StartClinicRegistrationRequest extends FormRequest
             'admin_phone_number' => ['required', 'string', 'max:30', $this->phoneRule('admin_phone_number')],
             'password' => ['required', 'confirmed', 'max:72', Password::defaults()],
             'terms_accepted' => ['accepted'],
+            'google_registration_token' => ['nullable', 'string', 'size:64', 'regex:/^[A-Za-z0-9]+$/'],
         ];
     }
 
