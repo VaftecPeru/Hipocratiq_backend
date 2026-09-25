@@ -2,6 +2,7 @@
 
 namespace App\Services\Auth;
 
+use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
 final class GoogleRegistrationIdentity
@@ -24,6 +25,12 @@ final class GoogleRegistrationIdentity
             || strtolower($identity['email']) !== strtolower($email)) {
             throw ValidationException::withMessages([
                 'google_registration_token' => ['El correo del formulario no coincide con la identidad verificada por Google.'],
+            ]);
+        }
+
+        if (User::query()->where('google_sub', $identity['sub'])->exists()) {
+            throw ValidationException::withMessages([
+                'google_registration_token' => ['Esta cuenta de Google ya está vinculada a un usuario de HIPOCRATIQ.'],
             ]);
         }
 
