@@ -106,10 +106,16 @@ class GoogleOAuthController extends Controller
             throw ValidationException::withMessages(['google' => ['Google no devolvió una identidad válida.']]);
         }
 
-        $user = User::query()
-            ->where('google_sub', $googleSub)
-            ->orWhere('email', strtolower($email))
-            ->first();
+        $userByGoogle = User::query()->where('google_sub', $googleSub)->first();
+        $userByEmail = User::query()->where('email', strtolower($email))->first();
+
+        if ($userByGoogle !== null && $userByEmail !== null && $userByGoogle->id !== $userByEmail->id) {
+            throw ValidationException::withMessages([
+                'google' => ['La identidad de Google entra en conflicto con otra cuenta registrada. Contacta a soporte.'],
+            ]);
+        }
+
+        $user = $userByGoogle ?? $userByEmail;
 
         if ($user === null) {
             $registrationType = $this->registrationType($requestedRole);
