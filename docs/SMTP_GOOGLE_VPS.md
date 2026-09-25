@@ -36,6 +36,10 @@ No usar la contraseña normal de Google en `MAIL_PASSWORD`.
 
 Si se desea usar `soporte@hipocratiq.com` como remitente con una cuenta distinta, esa dirección debe existir como cuenta o alias autorizado en Google. De lo contrario Google puede reescribir o rechazar el remitente.
 
+## ¿Necesito crear un proyecto OAuth en Google Cloud?
+
+No para esta implementación. HIPOCRATIQ utilizará SMTP autenticado con una App Password. La pantalla de consentimiento OAuth de Google Cloud sólo sería necesaria si posteriormente migramos a Gmail API/OAuth 2.0.
+
 ## Pasos en Google
 
 1. Activar verificación en dos pasos en la cuenta Google.
