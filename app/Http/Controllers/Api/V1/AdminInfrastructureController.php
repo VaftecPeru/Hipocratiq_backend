@@ -8,6 +8,7 @@ use App\Contracts\VideoMeetingProvider;
 use App\Contracts\WhatsAppSender;
 use App\Http\Controllers\Controller;
 use App\Services\Backups\DatabaseBackupManager;
+use App\Services\Mail\MailInfrastructureService;
 use Illuminate\Http\JsonResponse;
 
 class AdminInfrastructureController extends Controller
@@ -17,6 +18,7 @@ class AdminInfrastructureController extends Controller
         private EpidemiologyAnalyzer $epidemiologyAnalyzer,
         private VideoMeetingProvider $videoProvider,
         private WhatsAppSender $whatsAppSender,
+        private MailInfrastructureService $mailInfrastructure,
     ) {}
 
     public function show(): JsonResponse
@@ -57,7 +59,8 @@ class AdminInfrastructureController extends Controller
      */
     private function integrations(): array
     {
-        $mailDriver = (string) config('mail.default', 'log');
+        $mailStatus = $this->mailInfrastructure->status();
+        $mailDriver = (string) ($mailStatus['driver'] ?? 'log');
         $smsDriver = (string) config('sms.driver', 'array');
         $billingAdapter = class_basename(app(BillingGateway::class));
         $filesystemDisk = (string) config('filesystems.default', 'local');
@@ -65,7 +68,7 @@ class AdminInfrastructureController extends Controller
         $videoReady = $this->videoProvider->configured();
         $whatsAppReady = $this->whatsAppSender->configured();
         $cacheStore = (string) config('cache.default', 'database');
-        $mailReady = ! in_array($mailDriver, ['log', 'array'], true);
+        $mailReady = (bool) ($mailStatus['configured'] ?? false);
         $smsReady = $smsDriver === 'twilio'
             && filled(config('sms.twilio.account_sid'))
             && filled(config('sms.twilio.auth_token'))
@@ -82,10 +85,10 @@ class AdminInfrastructureController extends Controller
             $this->integration(
                 'email',
                 'Correo transaccional',
-                $mailDriver,
+                $mailDriver.':'.(string) ($mailStatus['auth_mode'] ?? 'unknown'),
                 $mailReady,
-                $mailReady ? 'configured' : 'sandbox',
-                'Notificaciones de cuenta y recuperación.',
+                $mailReady ? 'configured' : 'not_configured',
+                'OTP y correo transaccional. Host '.((string) ($mailStatus['host'] ?? 'no configurado')).':'.((string) ($mailStatus['port'] ?? '0')).'.',
             ),
             $this->integration(
                 'sms',
