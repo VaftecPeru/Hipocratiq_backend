@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Admin\RecordAdminAuditEvent;
+use App\Actions\Clinical\RecordClinicalAuditEvent;
 use App\Enums\AppointmentStatus;
 use App\Enums\ConsultationStatus;
 use App\Http\Controllers\Controller;
@@ -131,7 +132,8 @@ class DoctorConsultationController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->assertConsultationAccessible($doctor, $clinic, $lockedConsultation);
-            $lockedConsultation->loadMissing(['patientProfile', 'clinicalHistoryRecord']);
+            $lockedConsultation->loadMissing(['patientProfile', 'clinicalHistoryRecord.entries.section']);
+            $beforeAudit = $this->auditSnapshot($lockedConsultation);
 
             if (in_array($lockedConsultation->status, [ConsultationStatus::Signed, ConsultationStatus::Canceled], true)) {
                 throw ValidationException::withMessages([
@@ -243,7 +245,7 @@ class DoctorConsultationController extends Controller
                 ])->save();
             }
 
-            $this->recordAudit($request, $clinic, $lockedConsultation, $previousStatus);
+            $this->recordAudit($request, $clinic, $lockedConsultation, $previousStatus, $beforeAudit);
 
             return $lockedConsultation->fresh([
                 'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
@@ -379,18 +381,69 @@ class DoctorConsultationController extends Controller
         $appointment->fill(['status' => $next])->save();
     }
 
-    private function recordAudit(Request $request, ?Clinic $clinic, Consultation $consultation, ?ConsultationStatus $previous): void
-    {
+    /**
+     * @param array<string, mixed>|null $before
+     */
+    private function recordAudit(
+        Request $request,
+        ?Clinic $clinic,
+        Consultation $consultation,
+        ?ConsultationStatus $previous,
+        ?array $before = null,
+    ): void {
+        $consultation->loadMissing('clinicalHistoryRecord.entries.section');
+
+        $action = match (true) {
+            $previous === null => 'consultation.created',
+            $consultation->status === ConsultationStatus::Signed => 'consultation.signed',
+            $consultation->status === ConsultationStatus::Canceled => 'consultation.canceled',
+            default => 'consultation.updated',
+        };
+
         app(RecordAdminAuditEvent::class)->handle(
             actor: $request->user(),
             request: $request,
             module: 'clinical',
-            action: $previous === null ? 'consultation.created' : 'consultation.updated',
+            action: $action,
             resourceType: 'consultation',
             resourceId: $consultation->id,
             clinic: $clinic,
             metadata: ['previous_status' => $previous?->value, 'status' => $consultation->status->value],
         );
+
+        app(RecordClinicalAuditEvent::class)->handle(
+            actor: $request->user(),
+            request: $request,
+            consultation: $consultation,
+            action: $action,
+            before: $before,
+            after: $this->auditSnapshot($consultation),
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function auditSnapshot(Consultation $consultation): array
+    {
+        $consultation->loadMissing('clinicalHistoryRecord.entries.section');
+
+        return [
+            'consultation_id' => $consultation->id,
+            'patient_profile_id' => $consultation->patient_profile_id,
+            'appointment_id' => $consultation->appointment_id,
+            'status' => $consultation->status->value,
+            'chief_complaint' => $consultation->chief_complaint,
+            'objective' => $consultation->objective,
+            'sections' => $consultation->clinicalHistoryRecord?->entries
+                ->sortBy(fn ($entry) => (string) $entry->section?->key)
+                ->mapWithKeys(fn ($entry): array => [(string) $entry->section?->key => $entry->values])
+                ->all() ?? [],
+            'signed_by_user_id' => $consultation->signed_by_user_id,
+            'signed_at' => $consultation->signed_at?->toIso8601String(),
+            'signature_digest' => $consultation->signature_digest,
+            'completed_at' => $consultation->completed_at?->toIso8601String(),
+        ];
     }
 
     private function assertConsultationAccessible(User $doctor, ?Clinic $clinic, Consultation $consultation): void
