@@ -282,7 +282,13 @@ class DoctorConsultationController extends Controller
     {
         $consultation->codings()->delete();
 
+        $unique = [];
         foreach ($codings as $coding) {
+            $key = implode('|', [$coding['category'], $coding['system'], $coding['code']]);
+            $unique[$key] = $coding;
+        }
+
+        foreach ($unique as $coding) {
             $consultation->codings()->create([
                 'patient_profile_id' => $consultation->patient_profile_id,
                 'recorded_by_user_id' => $doctor->id,
