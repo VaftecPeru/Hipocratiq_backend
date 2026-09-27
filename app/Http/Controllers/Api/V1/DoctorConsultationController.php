@@ -71,13 +71,14 @@ class DoctorConsultationController extends Controller
                 'objective' => $objective,
                 'completed_at' => $status === ConsultationStatus::Completed ? now() : null,
             ]);
+            $this->syncCodings($created, $data['codings'] ?? [], $doctor);
             $this->recordAudit($request, $clinic, $created, null);
 
             return $created;
         });
 
         return (new ConsultationResource($consultation->fresh([
-            'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
+            'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'codings', 'signedBy',
         ])))->response()->setStatusCode(201);
     }
 
@@ -210,6 +211,10 @@ class DoctorConsultationController extends Controller
                 }
             }
 
+            if (array_key_exists('codings', $data)) {
+                $this->syncCodings($lockedConsultation, $data['codings'] ?? [], $doctor);
+            }
+
             if ($nextStatus === ConsultationStatus::Signed) {
                 if ($lockedConsultation->clinicalHistoryRecord !== null) {
                     $profile = $doctor->doctorProfile;
@@ -223,7 +228,7 @@ class DoctorConsultationController extends Controller
                     ]);
                 }
 
-                $lockedConsultation->refresh()->loadMissing('clinicalHistoryRecord.entries.section');
+                $lockedConsultation->refresh()->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
                 $lockedConsultation->forceFill([
                     'signature_digest' => hash('sha256', json_encode([
                         'consultation_id' => $lockedConsultation->id,
@@ -234,6 +239,21 @@ class DoctorConsultationController extends Controller
                         'sections' => $lockedConsultation->clinicalHistoryRecord?->entries
                             ->sortBy(fn ($entry) => (string) $entry->section?->key)
                             ->mapWithKeys(fn ($entry): array => [(string) $entry->section?->key => $entry->values])
+                            ->all(),
+                        'codings' => $lockedConsultation->codings
+                            ->sortBy(fn ($coding) => implode('|', [
+                                $coding->category->value,
+                                $coding->system,
+                                $coding->code,
+                            ]))
+                            ->map(fn ($coding): array => [
+                                'category' => $coding->category->value,
+                                'system' => $coding->system,
+                                'code' => $coding->code,
+                                'display' => $coding->display,
+                                'status' => $coding->status,
+                            ])
+                            ->values()
                             ->all(),
                         'signed_doctor_name' => $lockedConsultation->signed_doctor_name,
                         'signed_doctor_medical_license' => $lockedConsultation->signed_doctor_medical_license,
@@ -253,6 +273,29 @@ class DoctorConsultationController extends Controller
         });
 
         return new ConsultationResource($consultation);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $codings
+     */
+    private function syncCodings(Consultation $consultation, array $codings, User $doctor): void
+    {
+        $consultation->codings()->delete();
+
+        foreach ($codings as $coding) {
+            $consultation->codings()->create([
+                'patient_profile_id' => $consultation->patient_profile_id,
+                'recorded_by_user_id' => $doctor->id,
+                'category' => $coding['category'],
+                'system' => $coding['system'],
+                'code' => $coding['code'],
+                'display' => $coding['display'],
+                'status' => $coding['status'] ?? null,
+                'recorded_at' => now(),
+            ]);
+        }
+
+        $consultation->unsetRelation('codings');
     }
 
     private function syncSections(ClinicalHistoryRecord $record, array $sections): void
@@ -391,7 +434,7 @@ class DoctorConsultationController extends Controller
         ?ConsultationStatus $previous,
         ?array $before = null,
     ): void {
-        $consultation->loadMissing('clinicalHistoryRecord.entries.section');
+        $consultation->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
 
         $action = match (true) {
             $previous === null => 'consultation.created',
@@ -439,6 +482,21 @@ class DoctorConsultationController extends Controller
                 ->sortBy(fn ($entry) => (string) $entry->section?->key)
                 ->mapWithKeys(fn ($entry): array => [(string) $entry->section?->key => $entry->values])
                 ->all() ?? [],
+            'codings' => $consultation->codings
+                ->sortBy(fn ($coding) => implode('|', [
+                    $coding->category->value,
+                    $coding->system,
+                    $coding->code,
+                ]))
+                ->map(fn ($coding): array => [
+                    'category' => $coding->category->value,
+                    'system' => $coding->system,
+                    'code' => $coding->code,
+                    'display' => $coding->display,
+                    'status' => $coding->status,
+                ])
+                ->values()
+                ->all(),
             'signed_by_user_id' => $consultation->signed_by_user_id,
             'signed_at' => $consultation->signed_at?->toIso8601String(),
             'signature_digest' => $consultation->signature_digest,
