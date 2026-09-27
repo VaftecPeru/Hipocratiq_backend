@@ -89,7 +89,7 @@ class DoctorConsultationController extends Controller
 
         $query = Consultation::query()
             ->where('doctor_user_id', $doctor->id)
-            ->with(['clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy'])
+            ->with(['clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'codings', 'signedBy'])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -268,7 +268,7 @@ class DoctorConsultationController extends Controller
             $this->recordAudit($request, $clinic, $lockedConsultation, $previousStatus, $beforeAudit);
 
             return $lockedConsultation->fresh([
-                'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
+                'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'codings', 'signedBy',
             ]);
         });
 
@@ -475,7 +475,7 @@ class DoctorConsultationController extends Controller
      */
     private function auditSnapshot(Consultation $consultation): array
     {
-        $consultation->loadMissing('clinicalHistoryRecord.entries.section');
+        $consultation->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
 
         return [
             'consultation_id' => $consultation->id,
