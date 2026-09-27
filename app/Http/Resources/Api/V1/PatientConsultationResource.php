@@ -18,6 +18,7 @@ class PatientConsultationResource extends JsonResource
             'doctor.doctorProfile',
             'appointment',
             'clinicalHistoryRecord.entries.section',
+            'codings',
         ]);
         $record = $this->clinicalHistoryRecord;
 
@@ -28,6 +29,13 @@ class PatientConsultationResource extends JsonResource
             'status_label' => $this->status->label(),
             'chief_complaint' => $this->chief_complaint,
             'objective' => $this->objective,
+            'codings' => $this->codings->map(fn ($coding): array => [
+                'category' => $coding->category->value,
+                'system' => $coding->system,
+                'code' => $coding->code,
+                'display' => $coding->display,
+                'status' => $coding->status,
+            ])->values()->all(),
             'doctor' => $this->doctor === null ? null : [
                 'id' => $this->doctor->id,
                 'name' => $this->doctor->name,
