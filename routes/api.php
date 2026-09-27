@@ -70,6 +70,10 @@ Route::prefix('v1/fhir')->name('api.v1.fhir.')->group(function (): void {
         Route::get('/Organization/{organization}', [FhirReadController::class, 'organization'])->name('organization.read');
         Route::get('/Appointment/{appointment}', [FhirReadController::class, 'appointment'])->name('appointment.read');
         Route::get('/Encounter/{encounter}', [FhirReadController::class, 'encounter'])->name('encounter.read');
+        Route::get('/Condition/{condition}', [FhirReadController::class, 'condition'])->name('condition.read');
+        Route::get('/MedicationRequest/{medicationRequest}', [FhirReadController::class, 'medicationRequest'])->name('medication-request.read');
+        Route::get('/ServiceRequest/{serviceRequest}', [FhirReadController::class, 'serviceRequest'])->name('service-request.read');
+        Route::get('/DiagnosticReport/{diagnosticReport}', [FhirReadController::class, 'diagnosticReport'])->name('diagnostic-report.read');
         Route::get('/Consent/{consent}', [FhirReadController::class, 'consent'])->name('consent.read');
     });
 });
