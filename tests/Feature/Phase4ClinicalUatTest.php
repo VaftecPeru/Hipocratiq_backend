@@ -55,7 +55,7 @@ class Phase4ClinicalUatTest extends TestCase
 
         $appointmentId = (int) $appointment->json('data.id');
 
-        $this->resetSession();
+        $this->logoutCurrentWebSession();
         $this->authenticateWeb('medico@hipocratiq.com', 'doctor', 'staff');
 
         $consultation = $this->withSpaOrigin()
@@ -105,7 +105,7 @@ class Phase4ClinicalUatTest extends TestCase
             ->assertUnprocessable()
             ->assertJsonValidationErrors('status');
 
-        $this->resetSession();
+        $this->logoutCurrentWebSession();
         $this->authenticateWeb('paciente@hipocratiq.com', 'patient', 'patient');
 
         $this->withSpaOrigin()
@@ -170,8 +170,12 @@ class Phase4ClinicalUatTest extends TestCase
         $this->withCookie($cookie->getName(), $cookie->getValue());
     }
 
-    private function resetSession(): void
+    private function logoutCurrentWebSession(): void
     {
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/logout')
+            ->assertNoContent();
+
         $this->defaultCookies = [];
         $this->actingAsGuest();
     }
