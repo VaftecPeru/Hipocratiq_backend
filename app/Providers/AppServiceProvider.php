@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Contracts\BillingGateway;
 use App\Contracts\EpidemiologyAnalyzer;
+use App\Contracts\RegistrationOtpSender;
 use App\Contracts\SmsSender;
 use App\Contracts\VideoMeetingProvider;
 use App\Contracts\WhatsAppSender;
@@ -12,6 +13,7 @@ use App\Enums\UserStatus;
 use App\Models\ClinicMembership;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
+use App\Services\Auth\EmailRegistrationOtpSender;
 use App\Services\Auth\FixedOtpCodeGenerator;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\RandomOtpCodeGenerator;
@@ -51,6 +53,10 @@ class AppServiceProvider extends ServiceProvider
         });
         $this->app->singleton(ArraySmsSender::class);
         $this->app->singleton(UnavailableSmsSender::class);
+        $this->app->singleton(
+            RegistrationOtpSender::class,
+            fn () => $this->app->make(EmailRegistrationOtpSender::class),
+        );
         $this->app->singleton(
             SmsSender::class,
             fn () => match (config('sms.driver')) {

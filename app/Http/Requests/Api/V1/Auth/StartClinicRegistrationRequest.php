@@ -32,7 +32,7 @@ class StartClinicRegistrationRequest extends FormRequest
                 'regex:/\A[A-Za-z0-9._~:-]+\z/',
             ],
             'clinic_name' => ['required', 'string', 'max:160'],
-            'tax_id' => ['required', 'string', 'max:80'],
+            'tax_id' => ['required', 'string', 'max:80', $this->taxIdRule()],
             'country_code' => ['required', 'string', 'in:PE,MX,US'],
             'contact_phone' => ['required', 'string', 'max:30', $this->phoneRule('contact_phone')],
             'address' => ['required', 'string', 'max:240'],
@@ -53,6 +53,28 @@ class StartClinicRegistrationRequest extends FormRequest
             'admin_email' => is_string($this->input('admin_email')) ? strtolower(trim($this->input('admin_email'))) : $this->input('admin_email'),
             'tax_id' => is_string($this->input('tax_id')) ? strtoupper(trim($this->input('tax_id'))) : $this->input('tax_id'),
         ]);
+    }
+
+    private function taxIdRule(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            if ($this->input('country_code') !== 'MX') {
+                return;
+            }
+
+            $rfc = strtoupper(trim((string) $value));
+            $length = mb_strlen($rfc);
+
+            if (in_array($length, [12, 13], true) === false) {
+                $fail('El RFC debe tener 12 o 13 caracteres.');
+
+                return;
+            }
+
+            if (preg_match('/^[A-Z0-9Ñ&]+$/u', $rfc) !== 1) {
+                $fail('El RFC contiene caracteres no válidos.');
+            }
+        };
     }
 
     private function phoneRule(string $field): \Closure

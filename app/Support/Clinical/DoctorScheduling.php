@@ -10,6 +10,7 @@ use App\Enums\UserStatus;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\ClinicScheduleBlock;
+use App\Models\Consultation;
 use App\Models\DoctorProfile;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -191,6 +192,26 @@ final class DoctorScheduling
         if ($blockingAppointment !== null) {
             throw ValidationException::withMessages([
                 'scheduled_at' => ['La hora seleccionada ya está ocupada por otra cita del médico.'],
+            ]);
+        }
+    }
+
+    public function assertAppointmentEditable(Appointment $appointment, ?AppointmentStatus $nextStatus = null): void
+    {
+        // Call while holding the appointment row lock, shared with encounter creation.
+        $consultations = Consultation::query()->where('appointment_id', $appointment->id)->get(['status']);
+        if ($consultations->isEmpty()) {
+            return;
+        }
+
+        if (in_array($nextStatus, [AppointmentStatus::Confirmed, AppointmentStatus::Waiting], true)
+            && $consultations->every(fn (Consultation $consultation): bool => $consultation->status === ConsultationStatus::Draft)) {
+            return;
+        }
+
+        if ($consultations->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'appointment_id' => ['Esta cita tiene un registro clínico. Continúa o cierra la atención desde Consultas.'],
             ]);
         }
     }

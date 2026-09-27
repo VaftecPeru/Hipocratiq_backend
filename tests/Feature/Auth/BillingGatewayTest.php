@@ -205,7 +205,7 @@ class BillingGatewayTest extends TestCase
     {
         return [
             'clinic_name' => 'Clínica Santa Elena',
-            'tax_id' => 'RFC-123456',
+            'tax_id' => 'ABC010203AB9',
             'country_code' => 'MX',
             'contact_phone' => '55 1234 5678',
             'address' => 'Calle Principal 123, Ciudad de México',

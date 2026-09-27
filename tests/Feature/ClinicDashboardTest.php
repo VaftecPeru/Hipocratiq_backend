@@ -10,6 +10,7 @@ use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicScheduleBlock;
 use App\Models\ClinicSubscription;
+use App\Models\Consultation;
 use App\Models\DoctorProfile;
 use App\Models\PatientProfile;
 use App\Models\Plan;
@@ -222,22 +223,16 @@ class ClinicDashboardTest extends TestCase
         ]);
     }
 
-    public function test_clinic_admin_session_skips_unsubscribed_memberships_and_selects_the_first_eligible_clinic(): void
+    public function test_clinic_admin_session_skips_unsubscribed_memberships_and_uses_the_only_eligible_clinic(): void
     {
         $unsubscribedClinic = Clinic::factory()->create();
         [$eligibleClinic, $adminRole] = $this->createClinicRole(RoleKey::ClinicAdmin, 'Administrador Clínico');
-        $laterEligibleClinic = Clinic::factory()->create();
-        ClinicSubscription::factory()->create([
-            'clinic_id' => $laterEligibleClinic->id,
-            'plan_id' => Plan::query()->value('id'),
-        ]);
         $admin = User::factory()->create([
             'phone_number' => '+525510000013',
             'password' => 'SecurePass123',
         ]);
         $this->attachMembership($unsubscribedClinic, $admin, $adminRole);
         $this->attachMembership($eligibleClinic, $admin, $adminRole);
-        $this->attachMembership($laterEligibleClinic, $admin, $adminRole);
 
         $this->authenticate($admin, '55 1000 0013');
 
@@ -294,6 +289,36 @@ class ClinicDashboardTest extends TestCase
             ->assertJsonPath('data.0.patient.name', 'Paciente de Agenda')
             ->assertJsonPath('data.0.status', 'confirmed')
             ->assertJsonPath('meta.summary.confirmed', 1);
+    }
+
+    public function test_reception_registers_arrival_but_cannot_change_or_delete_a_linked_encounter(): void
+    {
+        [$clinic, $role] = $this->createClinicRole(RoleKey::Receptionist, 'Recepcionista');
+        $receptionist = User::factory()->create(['phone_number' => '+525510000090', 'password' => 'SecurePass123']);
+        $this->attachMembership($clinic, $receptionist, $role);
+        $doctor = User::factory()->create();
+        DoctorProfile::factory()->create(['user_id' => $doctor->id, 'clinic_id' => $clinic->id]);
+        $patient = PatientProfile::factory()->create(['clinic_id' => $clinic->id]);
+        $appointment = Appointment::factory()->create([
+            'clinic_id' => $clinic->id, 'doctor_user_id' => $doctor->id,
+            'patient_profile_id' => $patient->id, 'status' => 'confirmed',
+        ]);
+        $consultation = Consultation::query()->create([
+            'clinic_id' => $clinic->id, 'doctor_user_id' => $doctor->id,
+            'patient_profile_id' => $patient->id, 'appointment_id' => $appointment->id,
+            'status' => 'draft', 'chief_complaint' => 'Consulta de seguimiento.',
+        ]);
+        $this->authenticate($receptionist, '55 1000 0090');
+        $url = "/api/v1/auth/clinic/appointments/{$appointment->id}";
+        $this->withSpaOrigin()->patchJson($url.'/status', ['status' => 'waiting'])->assertOk();
+        $this->withSpaOrigin()->patchJson($url, ['notes' => 'Cambio administrativo'])->assertUnprocessable();
+        $this->withSpaOrigin()->deleteJson($url)->assertUnprocessable();
+        $consultation->update(['status' => 'in_progress']);
+        $appointment->update(['status' => 'in_consultation']);
+        $this->withSpaOrigin()->patchJson($url.'/status', ['status' => 'completed'])->assertUnprocessable();
+        $this->withSpaOrigin()->patchJson($url.'/status', ['status' => 'canceled'])->assertUnprocessable();
+        $this->assertDatabaseHas('appointments', ['id' => $appointment->id, 'status' => 'in_consultation']);
+        $this->assertDatabaseHas('consultations', ['id' => $consultation->id, 'appointment_id' => $appointment->id]);
     }
 
     public function test_clinic_appointments_enforce_doctor_schedule_status_transitions_and_active_doctors(): void

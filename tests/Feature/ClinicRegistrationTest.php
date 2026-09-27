@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\RegistrationOtpSender;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
 use App\Models\Clinic;
@@ -21,11 +22,28 @@ class ClinicRegistrationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
+    private object $registrationOtpSender;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->app->instance(OtpCodeGenerator::class, new FixedOtpCodeGenerator);
         $this->app->make(ArraySmsSender::class)->clear();
+        $this->registrationOtpSender = new class implements RegistrationOtpSender
+        {
+            /** @var list<array{email: string, recipient_name: string, code: string}> */
+            public array $deliveries = [];
+
+            public function send(string $email, string $recipientName, string $code): void
+            {
+                $this->deliveries[] = [
+                    'email' => $email,
+                    'recipient_name' => $recipientName,
+                    'code' => $code,
+                ];
+            }
+        };
+        $this->app->instance(RegistrationOtpSender::class, $this->registrationOtpSender);
         Role::query()->create(['key' => RoleKey::ClinicAdmin->value, 'name' => 'Administrador Clínico', 'scope' => RoleScope::Organization, 'is_system' => true]);
         Plan::query()->create(['key' => 'basic', 'name' => 'Básico', 'monthly_price_cents' => 4900, 'annual_price_cents' => 47000, 'currency' => 'USD', 'features' => [], 'publicly_selectable' => true, 'is_active' => true]);
         Plan::query()->create(['key' => 'professional', 'name' => 'Profesional', 'monthly_price_cents' => 9900, 'annual_price_cents' => 95000, 'currency' => 'USD', 'features' => [], 'publicly_selectable' => true, 'is_active' => true]);
@@ -290,7 +308,7 @@ class ClinicRegistrationTest extends TestCase
             ->postJson('/api/v1/auth/register/clinic/resend-otp')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('otp');
-        $this->assertCount(6, $this->app->make(ArraySmsSender::class)->messages());
+        $this->assertCount(6, $this->registrationOtpSender->deliveries);
     }
 
     public function test_protected_api_routes_return_json_401_without_accept_header(): void
@@ -304,7 +322,7 @@ class ClinicRegistrationTest extends TestCase
     {
         return [
             'clinic_name' => 'Clínica Santa Elena',
-            'tax_id' => 'RFC-123456',
+            'tax_id' => 'ABC010203AB9',
             'country_code' => 'MX',
             'contact_phone' => '55 1234 5678',
             'address' => 'Calle Principal 123, Ciudad de México',
