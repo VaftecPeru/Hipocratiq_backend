@@ -70,6 +70,7 @@ Route::prefix('v1/fhir')->name('api.v1.fhir.')->group(function (): void {
         Route::get('/Organization/{organization}', [FhirReadController::class, 'organization'])->name('organization.read');
         Route::get('/Appointment/{appointment}', [FhirReadController::class, 'appointment'])->name('appointment.read');
         Route::get('/Encounter/{encounter}', [FhirReadController::class, 'encounter'])->name('encounter.read');
+        Route::get('/Consent/{consent}', [FhirReadController::class, 'consent'])->name('consent.read');
     });
 });
 
