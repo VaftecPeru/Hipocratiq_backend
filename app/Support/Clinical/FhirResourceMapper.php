@@ -6,7 +6,10 @@ use App\Enums\AppointmentStatus;
 use App\Enums\ConsultationStatus;
 use App\Models\Appointment;
 use App\Models\Clinic;
+use App\Models\ClinicalCoding;
 use App\Models\Consultation;
+use App\Models\DoctorPrescription;
+use App\Models\LaboratoryOrder;
 use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\User;
@@ -50,7 +53,7 @@ final class FhirResourceMapper
                         'interaction' => [['code' => 'read']],
                         'versioning' => 'versioned-update',
                     ],
-                    ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter', 'Consent'],
+                    ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter', 'Condition', 'MedicationRequest', 'ServiceRequest', 'DiagnosticReport', 'Consent'],
                 ),
             ]],
         ];
@@ -185,6 +188,143 @@ final class FhirResourceMapper
         ], static fn (mixed $value): bool => $value !== null && $value !== []);
     }
 
+    public function condition(ClinicalCoding $coding): array
+    {
+        $coding->loadMissing(['patientProfile.user', 'consultation']);
+
+        return array_filter([
+            'resourceType' => 'Condition',
+            'id' => (string) $coding->id,
+            'meta' => $this->meta($coding->updated_at),
+            'clinicalStatus' => [
+                'coding' => [[
+                    'system' => 'http://terminology.hl7.org/CodeSystem/condition-clinical',
+                    'code' => $this->conditionClinicalStatus($coding->status),
+                ]],
+            ],
+            'category' => [[
+                'text' => $coding->category->value,
+            ]],
+            'code' => [
+                'coding' => [[
+                    'system' => $coding->system,
+                    'code' => $coding->code,
+                    'display' => $coding->display,
+                ]],
+                'text' => $coding->display,
+            ],
+            'subject' => [
+                'reference' => 'Patient/'.$coding->patient_profile_id,
+                'display' => $coding->patientProfile?->user?->name,
+            ],
+            'encounter' => [
+                'reference' => 'Encounter/'.$coding->consultation_id,
+            ],
+            'recordedDate' => $coding->recorded_at?->toIso8601String(),
+        ], static fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+
+    public function medicationRequest(DoctorPrescription $prescription): array
+    {
+        $prescription->loadMissing(['patientProfile.user', 'doctor', 'consultation']);
+
+        $dosageText = implode(' · ', array_values(array_filter([
+            $prescription->dosage,
+            $prescription->frequency,
+            $prescription->duration_days ? $prescription->duration_days.' días' : null,
+        ])));
+
+        return array_filter([
+            'resourceType' => 'MedicationRequest',
+            'id' => (string) $prescription->id,
+            'meta' => $this->meta($prescription->updated_at),
+            'status' => $this->medicationRequestStatus($prescription->status->value),
+            'intent' => 'order',
+            'medication' => [
+                'concept' => [
+                    'text' => $prescription->medication,
+                ],
+            ],
+            'subject' => [
+                'reference' => 'Patient/'.$prescription->patient_profile_id,
+                'display' => $prescription->patientProfile?->user?->name,
+            ],
+            'encounter' => $prescription->consultation_id ? [
+                'reference' => 'Encounter/'.$prescription->consultation_id,
+            ] : null,
+            'authoredOn' => $prescription->issued_at?->toIso8601String(),
+            'requester' => [
+                'reference' => 'Practitioner/'.$prescription->doctor_user_id,
+                'display' => $prescription->doctor?->name,
+            ],
+            'dosageInstruction' => $dosageText !== '' ? [[
+                'text' => $dosageText,
+            ]] : null,
+            'note' => $prescription->notes ? [['text' => $prescription->notes]] : null,
+        ], static fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+
+    public function serviceRequest(LaboratoryOrder $order): array
+    {
+        $order->loadMissing(['patientProfile.user', 'doctor', 'consultation']);
+
+        return array_filter([
+            'resourceType' => 'ServiceRequest',
+            'id' => (string) $order->id,
+            'meta' => $this->meta($order->updated_at),
+            'status' => $this->serviceRequestStatus($order->status->value),
+            'intent' => 'order',
+            'priority' => $this->serviceRequestPriority($order->priority),
+            'code' => [
+                'concept' => [
+                    'text' => $order->study_name,
+                ],
+            ],
+            'subject' => [
+                'reference' => 'Patient/'.$order->patient_profile_id,
+                'display' => $order->patientProfile?->user?->name,
+            ],
+            'encounter' => $order->consultation_id ? [
+                'reference' => 'Encounter/'.$order->consultation_id,
+            ] : null,
+            'authoredOn' => $order->ordered_at?->toIso8601String(),
+            'requester' => [
+                'reference' => 'Practitioner/'.$order->doctor_user_id,
+                'display' => $order->doctor?->name,
+            ],
+            'note' => $order->notes ? [['text' => $order->notes]] : null,
+        ], static fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+
+    public function diagnosticReport(LaboratoryOrder $order): array
+    {
+        $order->loadMissing(['patientProfile.user', 'doctor', 'consultation']);
+
+        return array_filter([
+            'resourceType' => 'DiagnosticReport',
+            'id' => (string) $order->id,
+            'meta' => $this->meta($order->updated_at),
+            'status' => $this->diagnosticReportStatus($order->status->value),
+            'code' => [
+                'text' => $order->study_name,
+            ],
+            'subject' => [
+                'reference' => 'Patient/'.$order->patient_profile_id,
+                'display' => $order->patientProfile?->user?->name,
+            ],
+            'encounter' => $order->consultation_id ? [
+                'reference' => 'Encounter/'.$order->consultation_id,
+            ] : null,
+            'effectiveDateTime' => ($order->result_at ?? $order->ordered_at)?->toIso8601String(),
+            'issued' => $order->result_at?->toIso8601String(),
+            'performer' => [[
+                'reference' => 'Practitioner/'.$order->doctor_user_id,
+                'display' => $order->doctor?->name,
+            ]],
+            'conclusion' => $order->result_summary,
+        ], static fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+
     public function consent(PatientConsent $consent): array
     {
         $consent->loadMissing(['patientProfile.user', 'clinic']);
@@ -285,6 +425,56 @@ final class FhirResourceMapper
             'f', 'female', 'femenino', 'mujer' => 'female',
             'other', 'otro' => 'other',
             default => 'unknown',
+        };
+    }
+
+    private function conditionClinicalStatus(?string $status): string
+    {
+        return match (strtolower(trim((string) $status))) {
+            'resolved', 'completed', 'inactive' => 'resolved',
+            'remission' => 'remission',
+            default => 'active',
+        };
+    }
+
+    private function medicationRequestStatus(string $status): string
+    {
+        return match ($status) {
+            'draft' => 'draft',
+            'active', 'renewal_due' => 'active',
+            'completed' => 'completed',
+            'canceled' => 'cancelled',
+            default => 'unknown',
+        };
+    }
+
+    private function serviceRequestStatus(string $status): string
+    {
+        return match ($status) {
+            'requested', 'in_progress', 'ready' => 'active',
+            'reviewed' => 'completed',
+            'canceled' => 'revoked',
+            default => 'unknown',
+        };
+    }
+
+    private function diagnosticReportStatus(string $status): string
+    {
+        return match ($status) {
+            'requested', 'in_progress' => 'preliminary',
+            'ready', 'reviewed' => 'final',
+            'canceled' => 'cancelled',
+            default => 'unknown',
+        };
+    }
+
+    private function serviceRequestPriority(?string $priority): string
+    {
+        return match (strtolower(trim((string) $priority))) {
+            'urgent', 'urgente' => 'urgent',
+            'asap', 'inmediata', 'inmediato' => 'asap',
+            'stat' => 'stat',
+            default => 'routine',
         };
     }
 
