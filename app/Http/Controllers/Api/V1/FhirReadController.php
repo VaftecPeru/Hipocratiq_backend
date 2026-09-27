@@ -3,11 +3,15 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\AuthenticationContext;
+use App\Enums\ClinicalCodingCategory;
 use App\Enums\RoleKey;
 use App\Http\Controllers\Controller;
 use App\Models\Appointment;
+use App\Models\ClinicalCoding;
 use App\Models\Clinic;
 use App\Models\Consultation;
+use App\Models\DoctorPrescription;
+use App\Models\LaboratoryOrder;
 use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\User;
@@ -41,6 +45,53 @@ final class FhirReadController extends Controller
         abort_unless($this->canAccessClinic($request, $organization), 404);
 
         return $this->fhir($mapper->organization($organization));
+    }
+
+    public function condition(Request $request, ClinicalCoding $condition, FhirResourceMapper $mapper): JsonResponse
+    {
+        abort_unless(in_array($condition->category, [
+            ClinicalCodingCategory::Diagnosis,
+            ClinicalCodingCategory::Problem,
+            ClinicalCodingCategory::Symptom,
+        ], true), 404);
+
+        $patient = $condition->patientProfile()->first();
+        abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
+
+        return $this->fhir($mapper->condition($condition));
+    }
+
+    public function medicationRequest(
+        Request $request,
+        DoctorPrescription $medicationRequest,
+        FhirResourceMapper $mapper,
+    ): JsonResponse {
+        $patient = $medicationRequest->patientProfile()->first();
+        abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
+
+        return $this->fhir($mapper->medicationRequest($medicationRequest));
+    }
+
+    public function serviceRequest(
+        Request $request,
+        LaboratoryOrder $serviceRequest,
+        FhirResourceMapper $mapper,
+    ): JsonResponse {
+        $patient = $serviceRequest->patientProfile()->first();
+        abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
+
+        return $this->fhir($mapper->serviceRequest($serviceRequest));
+    }
+
+    public function diagnosticReport(
+        Request $request,
+        LaboratoryOrder $diagnosticReport,
+        FhirResourceMapper $mapper,
+    ): JsonResponse {
+        $patient = $diagnosticReport->patientProfile()->first();
+        abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
+
+        return $this->fhir($mapper->diagnosticReport($diagnosticReport));
     }
 
     public function consent(Request $request, PatientConsent $consent, FhirResourceMapper $mapper): JsonResponse
