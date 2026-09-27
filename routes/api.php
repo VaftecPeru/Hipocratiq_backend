@@ -41,6 +41,7 @@ use App\Http\Controllers\Api\V1\DoctorProfileController;
 use App\Http\Controllers\Api\V1\DoctorWorkspaceController;
 use App\Http\Controllers\Api\V1\FhirReadController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\PatientConsentController;
 use App\Http\Controllers\Api\V1\PatientPortalController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
@@ -127,6 +128,9 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
         Route::prefix('patient')->name('patient.')->middleware('actor.context:patient')->group(function (): void {
             Route::get('/profile', [PatientPortalController::class, 'profile'])->name('profile.show');
+            Route::get('/consents', [PatientConsentController::class, 'index'])->name('consents.index');
+            Route::post('/consents', [PatientConsentController::class, 'store'])->name('consents.store');
+            Route::post('/consents/{consent}/revoke', [PatientConsentController::class, 'revoke'])->name('consents.revoke');
             Route::patch('/profile', [PatientPortalController::class, 'updateProfile'])->name('profile.update');
             Route::get('/appointments', [PatientPortalController::class, 'appointments'])->name('appointments.index');
             Route::get('/history', [PatientPortalController::class, 'history'])->name('history.index');
