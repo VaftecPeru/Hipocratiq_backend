@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\V1\DoctorPatientController;
 use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
 use App\Http\Controllers\Api\V1\DoctorWorkspaceController;
+use App\Http\Controllers\Api\V1\FhirReadController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\PatientPortalController;
 use Illuminate\Http\JsonResponse;
@@ -58,6 +59,18 @@ Route::get('/', function (): JsonResponse {
 Route::get('/health', [HealthController::class, 'ready'])->name('api.health');
 Route::get('/health/live', [HealthController::class, 'live'])->name('api.health.live');
 Route::get('/health/ready', [HealthController::class, 'ready'])->name('api.health.ready');
+
+Route::prefix('v1/fhir')->name('api.v1.fhir.')->group(function (): void {
+    Route::get('/metadata', [FhirReadController::class, 'metadata'])->name('metadata');
+
+    Route::middleware(['auth:sanctum', 'auth.session'])->group(function (): void {
+        Route::get('/Patient/{patient}', [FhirReadController::class, 'patient'])->name('patient.read');
+        Route::get('/Practitioner/{practitioner}', [FhirReadController::class, 'practitioner'])->name('practitioner.read');
+        Route::get('/Organization/{organization}', [FhirReadController::class, 'organization'])->name('organization.read');
+        Route::get('/Appointment/{appointment}', [FhirReadController::class, 'appointment'])->name('appointment.read');
+        Route::get('/Encounter/{encounter}', [FhirReadController::class, 'encounter'])->name('encounter.read');
+    });
+});
 
 Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
     Route::prefix('register/clinic')->name('register.clinic.')->group(function (): void {
