@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\Consultation;
+use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\User;
 use App\Support\Clinical\FhirResourceMapper;
@@ -40,6 +41,14 @@ final class FhirReadController extends Controller
         abort_unless($this->canAccessClinic($request, $organization), 404);
 
         return $this->fhir($mapper->organization($organization));
+    }
+
+    public function consent(Request $request, PatientConsent $consent, FhirResourceMapper $mapper): JsonResponse
+    {
+        $patient = $consent->patientProfile()->first();
+        abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
+
+        return $this->fhir($mapper->consent($consent));
     }
 
     public function appointment(Request $request, Appointment $appointment, FhirResourceMapper $mapper): JsonResponse
