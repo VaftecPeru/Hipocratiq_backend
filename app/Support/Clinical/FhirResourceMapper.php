@@ -7,6 +7,7 @@ use App\Enums\ConsultationStatus;
 use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\Consultation;
+use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\User;
 
@@ -49,7 +50,7 @@ final class FhirResourceMapper
                         'interaction' => [['code' => 'read']],
                         'versioning' => 'versioned-update',
                     ],
-                    ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter'],
+                    ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter', 'Consent'],
                 ),
             ]],
         ];
@@ -181,6 +182,42 @@ final class FhirResourceMapper
                     'text' => $appointment->clinic?->name,
                 ],
             ]] : null,
+        ], static fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+
+    public function consent(PatientConsent $consent): array
+    {
+        $consent->loadMissing(['patientProfile.user', 'clinic']);
+
+        return array_filter([
+            'resourceType' => 'Consent',
+            'id' => (string) $consent->id,
+            'meta' => $this->meta($consent->updated_at),
+            'status' => match ($consent->status->value) {
+                'granted' => 'active',
+                'revoked', 'expired' => 'inactive',
+                default => 'unknown',
+            },
+            'category' => [[
+                'text' => $consent->scope->value,
+            ]],
+            'subject' => [
+                'reference' => 'Patient/'.$consent->patient_profile_id,
+                'display' => $consent->patientProfile?->user?->name,
+            ],
+            'date' => $consent->created_at?->toIso8601String(),
+            'period' => array_filter([
+                'start' => $consent->effective_from?->toIso8601String(),
+                'end' => $consent->effective_until?->toIso8601String(),
+            ]),
+            'organization' => $consent->clinic_id ? [[
+                'reference' => 'Organization/'.$consent->clinic_id,
+                'display' => $consent->clinic?->name,
+            ]] : null,
+            'sourceReference' => [
+                'reference' => 'urn:hipocratiq:policy:'.$consent->policy_version,
+                'display' => 'HIPOCRATIQ policy '.$consent->policy_version,
+            ],
         ], static fn (mixed $value): bool => $value !== null && $value !== []);
     }
 
