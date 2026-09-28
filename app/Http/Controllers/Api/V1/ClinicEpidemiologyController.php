@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Contracts\EpidemiologyAnalyzer;
 use App\Enums\PatientConsentScope;
 use App\Enums\PatientConsentStatus;
@@ -129,8 +130,29 @@ class ClinicEpidemiologyController extends Controller
                     $analysisMessage = is_string($analysis['summary'] ?? null)
                         ? $analysis['summary']
                         : 'Análisis epidemiológico agregado disponible para revisión humana.';
+
+                    $this->recordExternalAnalysisAudit(
+                        request: $request,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.completed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients->count(),
+                        minimumCohortSize: $minimumCohortSize,
+                        provider: $this->analyzer->provider(),
+                    );
                 } catch (Throwable) {
                     $analysisMessage = 'El motor epidemiológico está configurado, pero no respondió. Se muestran datos internos sin predicción.';
+
+                    $this->recordExternalAnalysisAudit(
+                        request: $request,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.failed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients->count(),
+                        minimumCohortSize: $minimumCohortSize,
+                        provider: $this->analyzer->provider(),
+                        critical: true,
+                    );
                 }
             }
         }
@@ -248,6 +270,42 @@ class ClinicEpidemiologyController extends Controller
         }
 
         return $trend;
+    }
+
+    private function recordExternalAnalysisAudit(
+        Request $request,
+        Clinic $clinic,
+        string $action,
+        string $policyVersion,
+        int $cohortSize,
+        int $minimumCohortSize,
+        string $provider,
+        bool $critical = false,
+    ): void {
+        $actor = $request->user();
+
+        if ($actor === null) {
+            return;
+        }
+
+        app(RecordAdminAuditEvent::class)->handle(
+            actor: $actor,
+            request: $request,
+            module: 'epidemiology',
+            action: $action,
+            resourceType: 'clinic',
+            resourceId: $clinic->id,
+            resourceLabel: $clinic->name,
+            clinic: $clinic,
+            metadata: [
+                'provider' => $provider,
+                'policy_version' => $policyVersion,
+                'cohort_size' => $cohortSize,
+                'minimum_cohort_size' => $minimumCohortSize,
+                'payload_classification' => 'aggregate_only',
+            ],
+            critical: $critical,
+        );
     }
 
     private function source(int $count, string $label): array
