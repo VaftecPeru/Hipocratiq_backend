@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Enums\DoctorPracticeType;
 use App\Enums\LaboratoryOrderStatus;
+use App\Enums\PatientConsentScope;
+use App\Enums\PatientConsentStatus;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
 use App\Enums\TeleconsultationStatus;
@@ -14,6 +16,7 @@ use App\Models\DoctorMessage;
 use App\Models\DoctorPrescription;
 use App\Models\DoctorProfile;
 use App\Models\DoctorSubscription;
+use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\Plan;
 use App\Models\Role;
@@ -43,6 +46,7 @@ class DoctorWorkspaceTest extends TestCase
     public function test_independent_doctor_can_use_persistent_workspace_modules(): void
     {
         $patient = $this->ownedPatient('+525510000502');
+        $this->grantConsent($patient, PatientConsentScope::Telemedicine);
         $scheduledAt = now()->addDay()->setTime(10, 0);
 
         $prescription = $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/prescriptions', [
@@ -151,6 +155,7 @@ class DoctorWorkspaceTest extends TestCase
     public function test_workspace_status_transitions_are_server_validated(): void
     {
         $patient = $this->ownedPatient('+525510000503');
+        $this->grantConsent($patient, PatientConsentScope::Telemedicine);
         $order = $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/laboratory', [
             'patient_profile_id' => $patient->id,
             'study_name' => 'Hemograma completo',
@@ -309,6 +314,20 @@ class DoctorWorkspaceTest extends TestCase
         return $user->patientProfile()->create([
             'clinic_id' => null,
             'owner_doctor_user_id' => $doctor->id,
+        ]);
+    }
+
+    private function grantConsent(PatientProfile $patient, PatientConsentScope $scope): PatientConsent
+    {
+        return PatientConsent::query()->create([
+            'patient_profile_id' => $patient->id,
+            'clinic_id' => $patient->clinic_id,
+            'granted_by_user_id' => $patient->user_id,
+            'scope' => $scope,
+            'policy_version' => (string) config('clinical.consent_policy_version'),
+            'status' => PatientConsentStatus::Granted,
+            'source' => 'test',
+            'effective_from' => now()->subMinute(),
         ]);
     }
 
