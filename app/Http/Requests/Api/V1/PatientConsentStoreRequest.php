@@ -17,7 +17,12 @@ class PatientConsentStoreRequest extends FormRequest
     {
         return [
             'scope' => ['required', Rule::enum(PatientConsentScope::class)],
-            'policy_version' => ['required', 'string', 'max:40'],
+            'policy_version' => [
+                'required',
+                'string',
+                'max:40',
+                Rule::in([(string) config('clinical.consent_policy_version')]),
+            ],
             'effective_until' => ['nullable', 'date', 'after:now'],
         ];
     }
