@@ -10,8 +10,8 @@ use Illuminate\Http\Request;
 final class RecordClinicalAuditEvent
 {
     /**
-     * @param array<string, mixed>|null $before
-     * @param array<string, mixed>|null $after
+     * @param  array<string, mixed>|null  $before
+     * @param  array<string, mixed>|null  $after
      */
     public function handle(
         User $actor,
