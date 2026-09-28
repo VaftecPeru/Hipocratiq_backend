@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\V1\DoctorAppointmentController;
 use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
 use App\Http\Controllers\Api\V1\DoctorDashboardController;
+use App\Http\Controllers\Api\V1\DoctorImagingController;
 use App\Http\Controllers\Api\V1\DoctorPatientController;
 use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
@@ -235,6 +236,15 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/doctor/laboratory/{order}/status', [DoctorWorkspaceController::class, 'updateLaboratoryOrderStatus'])
             ->middleware('actor.context:doctor')
             ->name('doctor.laboratory.status.update');
+        Route::get('/doctor/imaging', [DoctorImagingController::class, 'index'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.imaging.index');
+        Route::post('/doctor/imaging', [DoctorImagingController::class, 'store'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.imaging.store');
+        Route::patch('/doctor/imaging/{study}/status', [DoctorImagingController::class, 'updateStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.imaging.status.update');
         Route::get('/doctor/teleconsultations', [DoctorWorkspaceController::class, 'teleconsultations'])
             ->middleware('actor.context:doctor')
             ->name('doctor.teleconsultations.index');
