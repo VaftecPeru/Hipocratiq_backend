@@ -718,7 +718,7 @@ class DoctorWorkspaceController extends Controller
             })
             ->exists();
 
-        if (!$active) {
+        if (! $active) {
             throw ValidationException::withMessages([
                 'patient_profile_id' => [
                     'El paciente debe otorgar un consentimiento clínico activo para '.$scope->value.' antes de continuar.',
