@@ -370,7 +370,7 @@ class DoctorConsultationController extends Controller
                 ->where('requested_doctor_user_id', $doctor->id)
                 ->exists();
 
-        if (! $connected) {
+        if (!$connected) {
             abort(403, 'No tienes un vínculo clínico con este paciente.');
         }
     }
@@ -516,7 +516,7 @@ class DoctorConsultationController extends Controller
             ? $consultation->clinic_id === null
             : $consultation->clinic_id === $clinic->id;
 
-        if (! $sameClinic || $consultation->doctor_user_id !== $doctor->id) {
+        if (!$sameClinic || $consultation->doctor_user_id !== $doctor->id) {
             abort(404, 'Consulta no encontrada.');
         }
     }
