@@ -512,24 +512,36 @@ class DoctorWorkspaceController extends Controller
         $analysisAvailable = false;
         $message = 'No hay un motor epidemiológico configurado. Se muestran únicamente fuentes clínicas disponibles.';
 
+        $cohortStatus = 'not_used';
+
         if ($this->epidemiologyAnalyzer->configured()) {
-            try {
-                $analysis = $this->epidemiologyAnalyzer->analyze([
-                    'period_days' => 90,
-                    'metrics' => [
-                        'monitored_patients' => $monitoredPatients,
-                        'consultations' => $consultations->count(),
-                        'laboratory_orders' => $laboratoryOrders->count(),
-                        'teleconsultations' => $teleconsultations->count(),
-                        'prescriptions' => $prescriptions->count(),
-                    ],
-                ]);
-                $analysisAvailable = true;
-                $message = is_string($analysis['summary'] ?? null)
-                    ? $analysis['summary']
-                    : 'Análisis epidemiológico agregado disponible para revisión humana.';
-            } catch (Throwable) {
-                $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+            if ($analysisMonitoredPatients < $minimumCohortSize) {
+                $cohortStatus = 'insufficient';
+                $message = sprintf(
+                    'La IA epidemiológica está configurada, pero la cohorte con consentimiento activo no alcanza el mínimo de privacidad (%d pacientes).',
+                    $minimumCohortSize,
+                );
+            } else {
+                $cohortStatus = 'eligible';
+
+                try {
+                    $analysis = $this->epidemiologyAnalyzer->analyze([
+                        'period_days' => 90,
+                        'metrics' => [
+                            'monitored_patients' => $analysisMonitoredPatients,
+                            'consultations' => (clone $consultations)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'laboratory_orders' => (clone $laboratoryOrders)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'teleconsultations' => (clone $teleconsultations)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'prescriptions' => (clone $prescriptions)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                        ],
+                    ]);
+                    $analysisAvailable = true;
+                    $message = is_string($analysis['summary'] ?? null)
+                        ? $analysis['summary']
+                        : 'Análisis epidemiológico agregado disponible para revisión humana.';
+                } catch (Throwable) {
+                    $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+                }
             }
         }
 
@@ -541,6 +553,13 @@ class DoctorWorkspaceController extends Controller
                 'analysis_available' => $analysisAvailable,
                 'provider' => $this->epidemiologyAnalyzer->provider(),
                 'message' => $message,
+                'analysis_cohort' => [
+                    'status' => $cohortStatus,
+                    'policy_version' => $policyVersion,
+                    'consented_patients' => $consentedPatientIds->count(),
+                    'monitored_patients' => $analysisMonitoredPatients,
+                    'minimum_required' => $minimumCohortSize,
+                ],
                 'metrics' => [
                     'monitored_patients' => $monitoredPatients,
                     'active_alerts' => count($analysis['alerts'] ?? []),
