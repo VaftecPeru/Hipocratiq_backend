@@ -10,7 +10,8 @@ final class OpenAiEpidemiologyAnalyzer implements EpidemiologyAnalyzer
 {
     public function configured(): bool
     {
-        return filled(config('integrations.ai.api_key'))
+        return config('integrations.ai.enabled') === true
+            && filled(config('integrations.ai.api_key'))
             && filled(config('integrations.ai.model'))
             && filled(config('integrations.ai.base_url'));
     }
