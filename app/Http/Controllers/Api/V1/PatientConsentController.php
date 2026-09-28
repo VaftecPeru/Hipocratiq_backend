@@ -22,6 +22,9 @@ final class PatientConsentController extends Controller
             'data' => PatientConsentResource::collection(
                 $patient->consents()->latest('id')->get(),
             ),
+            'meta' => [
+                'policy_version' => (string) config('clinical.consent_policy_version'),
+            ],
         ]);
     }
 
