@@ -40,12 +40,13 @@ class AdminInfrastructureController extends Controller
                     'history' => $backupHistory,
                     'capabilities' => [
                         'create' => $backupEnabled,
-                        'download' => $backupEnabled,
-                        'restore' => $backupEnabled,
+                        'download' => false,
+                        'restore' => false,
                         'verify' => $backupEnabled,
                     ],
+                    'restore_mode' => $backupEnabled ? 'cli_only' : 'unavailable',
                     'message' => $backupEnabled
-                        ? 'Respaldos PostgreSQL con manifiesto SHA-256 y restauración explícita disponibles.'
+                        ? 'Respaldos PostgreSQL con manifiesto SHA-256 disponibles. La restauración permanece restringida a operación administrativa controlada.'
                         : 'No hay un servicio de respaldos configurado en el backend.',
                 ],
                 'integrations' => $this->integrations(),
