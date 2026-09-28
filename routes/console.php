@@ -13,8 +13,14 @@ Schedule::command('appointments:send-whatsapp-reminders')
     ->withoutOverlapping();
 
 if (config('admin_operations.backups.enabled')) {
-    Schedule::command('backups:create')
-        ->dailyAt('02:00')
+    $backupSchedule = trim((string) config('admin_operations.backups.schedule', 'daily@02:00'));
+    $backupEvent = Schedule::command('backups:create')
         ->withoutOverlapping()
         ->onOneServer();
+
+    if (preg_match('/^daily@([01]\\d|2[0-3]):([0-5]\\d)$/', $backupSchedule, $matches) === 1) {
+        $backupEvent->dailyAt($matches[1].':'.$matches[2]);
+    } else {
+        $backupEvent->cron($backupSchedule);
+    }
 }
