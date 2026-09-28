@@ -10,6 +10,7 @@ use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\PatientConsent;
 use App\Models\PatientProfile;
+use App\Models\User;
 use App\Services\Epidemiology\OpenAiEpidemiologyAnalyzer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -62,6 +63,13 @@ class ClinicEpidemiologyConsentTest extends TestCase
         self::assertCount(1, $analyzer->snapshots);
         self::assertSame(1, $analyzer->snapshots[0]['metrics']['monitored_patients']);
         self::assertSame(1, $analyzer->snapshots[0]['metrics']['appointments']);
+        self::assertDatabaseHas('admin_audit_events', [
+            'clinic_id' => $clinic->id,
+            'module' => 'epidemiology',
+            'action' => 'epidemiology.analysis.completed',
+            'resource_type' => 'clinic',
+            'resource_id' => (string) $clinic->id,
+        ]);
     }
 
     public function test_external_analysis_is_suppressed_when_privacy_cohort_is_too_small(): void
@@ -115,8 +123,10 @@ class ClinicEpidemiologyConsentTest extends TestCase
 
     private function requestForClinic(Clinic $clinic): Request
     {
+        $actor = User::factory()->create(['country_code' => $clinic->country_code]);
         $request = Request::create('/api/v1/auth/clinic/epidemiology', 'GET');
         $request->attributes->set('clinic', $clinic);
+        $request->setUserResolver(static fn (): User => $actor);
 
         return $request;
     }
