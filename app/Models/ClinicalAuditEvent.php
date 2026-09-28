@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use LogicException;
 
 #[Fillable([
     'actor_user_id',
@@ -39,6 +40,17 @@ class ClinicalAuditEvent extends Model
     public function consultation(): BelongsTo
     {
         return $this->belongsTo(Consultation::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::updating(function (): void {
+            throw new LogicException('Los eventos de auditoría clínica son inmutables.');
+        });
+
+        static::deleting(function (): void {
+            throw new LogicException('Los eventos de auditoría clínica no se pueden eliminar.');
+        });
     }
 
     protected function casts(): array
