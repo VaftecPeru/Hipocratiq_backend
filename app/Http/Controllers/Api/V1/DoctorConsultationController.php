@@ -275,9 +275,6 @@ class DoctorConsultationController extends Controller
         return new ConsultationResource($consultation);
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $codings
-     */
     private function syncCodings(Consultation $consultation, array $codings, User $doctor): void
     {
         $consultation->codings()->delete();
@@ -430,9 +427,6 @@ class DoctorConsultationController extends Controller
         $appointment->fill(['status' => $next])->save();
     }
 
-    /**
-     * @param  array<string, mixed>|null  $before
-     */
     private function recordAudit(
         Request $request,
         ?Clinic $clinic,
@@ -470,9 +464,6 @@ class DoctorConsultationController extends Controller
         );
     }
 
-    /**
-     * @return  array<string, mixed>
-     */
     private function auditSnapshot(Consultation $consultation): array
     {
         $consultation->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
