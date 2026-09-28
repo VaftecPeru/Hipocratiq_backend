@@ -49,6 +49,7 @@ class ConsultationResource extends JsonResource
                 'specialty_license' => $this->signed_doctor_specialty_license,
                 'specialty' => $this->signed_doctor_specialty,
                 'digest' => $this->signature_digest,
+                'integrity_sha256' => $this->signature_digest,
             ],
             'completed_at' => $this->completed_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
