@@ -11,6 +11,7 @@ use App\Models\Clinic;
 use App\Models\ClinicalCoding;
 use App\Models\Consultation;
 use App\Models\DoctorPrescription;
+use App\Models\ImagingStudy;
 use App\Models\LaboratoryOrder;
 use App\Models\PatientConsent;
 use App\Models\PatientProfile;
@@ -92,6 +93,17 @@ final class FhirReadController extends Controller
         abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
 
         return $this->fhir($mapper->diagnosticReport($diagnosticReport));
+    }
+
+    public function imagingStudy(
+        Request $request,
+        ImagingStudy $imagingStudy,
+        FhirResourceMapper $mapper,
+    ): JsonResponse {
+        $patient = $imagingStudy->patientProfile()->first();
+        abort_unless($patient !== null && $this->canAccessPatient($request, $patient), 404);
+
+        return $this->fhir($mapper->imagingStudy($imagingStudy));
     }
 
     public function consent(Request $request, PatientConsent $consent, FhirResourceMapper $mapper): JsonResponse
