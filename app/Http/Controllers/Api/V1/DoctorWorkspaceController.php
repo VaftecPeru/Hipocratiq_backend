@@ -572,6 +572,7 @@ class DoctorWorkspaceController extends Controller
                 ],
                 'cohorts' => [],
                 'alerts' => $analysis['alerts'] ?? [],
+                'recommendations' => $analysis['recommendations'] ?? [],
                 'sources' => [
                     'clinical_history' => ['status' => $consultations->count() > 0 ? 'available' : 'no_data', 'label' => 'Historia clínica interna'],
                     'laboratory' => ['status' => $laboratoryOrders->count() > 0 ? 'available' : 'no_data', 'label' => 'Resultados de laboratorio internos'],
