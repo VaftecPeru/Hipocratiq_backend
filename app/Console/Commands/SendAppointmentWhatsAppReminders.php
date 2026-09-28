@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Contracts\WhatsAppSender;
+use App\Enums\PatientConsentScope;
+use App\Enums\PatientConsentStatus;
 use App\Models\Appointment;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -36,7 +38,24 @@ class SendAppointmentWhatsAppReminders extends Command
         }
 
         $appointments = Appointment::query()
-            ->with(['patientProfile.user', 'doctor', 'clinic'])
+            ->with([
+                'patientProfile.user',
+                'patientProfile.consents' => function ($query): void {
+                    $query
+                        ->where('scope', PatientConsentScope::WhatsAppNotifications->value)
+                        ->where('policy_version', (string) config('clinical.consent_policy_version'))
+                        ->where('status', PatientConsentStatus::Granted->value)
+                        ->whereNull('revoked_at')
+                        ->where('effective_from', '<=', now())
+                        ->where(function ($consentQuery): void {
+                            $consentQuery
+                                ->whereNull('effective_until')
+                                ->orWhere('effective_until', '>', now());
+                        });
+                },
+                'doctor',
+                'clinic',
+            ])
             ->whereBetween('scheduled_at', [$from, $to])
             ->whereIn('status', ['pending', 'confirmed'])
             ->get();
@@ -48,7 +67,7 @@ class SendAppointmentWhatsAppReminders extends Command
             $user = $profile?->user;
             $phone = $user?->phone_number;
 
-            if (! $profile?->whatsapp_consent || ! is_string($phone) || $phone === '') {
+            if ($profile === null || $profile->consents->isEmpty() || ! is_string($phone) || $phone === '') {
                 continue;
             }
 
