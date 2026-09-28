@@ -9,6 +9,7 @@ use App\Models\Clinic;
 use App\Models\ClinicalCoding;
 use App\Models\Consultation;
 use App\Models\DoctorPrescription;
+use App\Models\ImagingStudy;
 use App\Models\LaboratoryOrder;
 use App\Models\PatientConsent;
 use App\Models\PatientProfile;
@@ -53,7 +54,7 @@ final class FhirResourceMapper
                         'interaction' => [['code' => 'read']],
                         'versioning' => 'versioned-update',
                     ],
-                    ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter', 'Condition', 'MedicationRequest', 'ServiceRequest', 'DiagnosticReport', 'Consent'],
+                    ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter', 'Condition', 'MedicationRequest', 'ServiceRequest', 'DiagnosticReport', 'ImagingStudy', 'Consent'],
                 ),
             ]],
         ];
@@ -322,6 +323,47 @@ final class FhirResourceMapper
                 'display' => $order->doctor?->name,
             ]],
             'conclusion' => $order->result_summary,
+        ], static fn (mixed $value): bool => $value !== null && $value !== []);
+    }
+
+    public function imagingStudy(ImagingStudy $study): array
+    {
+        $study->loadMissing(['patientProfile.user', 'doctor', 'clinic', 'consultation']);
+
+        return array_filter([
+            'resourceType' => 'ImagingStudy',
+            'id' => (string) $study->id,
+            'meta' => $this->meta($study->updated_at),
+            'identifier' => [[
+                'system' => 'urn:hipocratiq:imaging:accession',
+                'value' => $study->accession_number,
+            ]],
+            'status' => match ($study->status->value) {
+                'available', 'reviewed' => 'available',
+                'canceled' => 'cancelled',
+                default => 'registered',
+            },
+            'modality' => [[
+                'coding' => [[
+                    'system' => 'http://dicom.nema.org/resources/ontology/DCM',
+                    'code' => $study->modality,
+                ]],
+            ]],
+            'subject' => [
+                'reference' => 'Patient/'.$study->patient_profile_id,
+                'display' => $study->patientProfile?->user?->name,
+            ],
+            'encounter' => $study->consultation_id ? [
+                'reference' => 'Encounter/'.$study->consultation_id,
+            ] : null,
+            'started' => $study->study_at?->toIso8601String(),
+            'referrer' => [
+                'reference' => 'Practitioner/'.$study->doctor_user_id,
+                'display' => $study->doctor?->name,
+            ],
+            'description' => $study->study_description,
+            'numberOfSeries' => null,
+            'numberOfInstances' => null,
         ], static fn (mixed $value): bool => $value !== null && $value !== []);
     }
 
