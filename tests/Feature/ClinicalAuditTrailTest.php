@@ -10,6 +10,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 use Tests\TestCase;
 
 class ClinicalAuditTrailTest extends TestCase
@@ -53,5 +54,45 @@ class ClinicalAuditTrailTest extends TestCase
         $this->assertNotSame(json_encode($event->after_payload), $raw->after_payload);
         $this->assertStringNotContainsString('chief_complaint', (string) $raw->before_payload);
         $this->assertStringNotContainsString('chief_complaint', (string) $raw->after_payload);
+    }
+
+    public function test_clinical_audit_event_cannot_be_updated(): void
+    {
+        $event = $this->createAuditEvent();
+
+        $this->expectException(LogicException::class);
+        $event->update(['action' => 'tampered']);
+    }
+
+    public function test_clinical_audit_event_cannot_be_deleted(): void
+    {
+        $event = $this->createAuditEvent();
+
+        $this->expectException(LogicException::class);
+        $event->delete();
+    }
+
+    private function createAuditEvent()
+    {
+        $actor = User::factory()->create();
+        $clinic = Clinic::factory()->create();
+        $patient = PatientProfile::factory()->create(['clinic_id' => $clinic->id]);
+        $consultation = Consultation::factory()->create([
+            'clinic_id' => $clinic->id,
+            'doctor_user_id' => $actor->id,
+            'patient_profile_id' => $patient->id,
+        ]);
+
+        $request = Request::create('/api/v1/auth/doctor/consultations/'.$consultation->id, 'PATCH');
+        $request->setUserResolver(fn () => $actor);
+
+        return app(RecordClinicalAuditEvent::class)->handle(
+            actor: $actor,
+            request: $request,
+            consultation: $consultation,
+            action: 'consultation.updated',
+            before: ['status' => 'draft'],
+            after: ['status' => 'in_progress'],
+        );
     }
 }
