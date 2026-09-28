@@ -10,6 +10,7 @@ use App\Models\Appointment;
 use App\Models\Clinic;
 use App\Models\PatientConsent;
 use App\Models\PatientProfile;
+use App\Services\Epidemiology\OpenAiEpidemiologyAnalyzer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Tests\TestCase;
@@ -98,6 +99,18 @@ class ClinicEpidemiologyConsentTest extends TestCase
         self::assertSame('insufficient', $payload['data']['analysis_cohort']['status']);
         self::assertSame(2, $payload['data']['analysis_cohort']['minimum_required']);
         self::assertCount(0, $analyzer->snapshots);
+    }
+
+    public function test_openai_analyzer_respects_explicit_enable_flag(): void
+    {
+        config([
+            'integrations.ai.enabled' => false,
+            'integrations.ai.api_key' => 'test-key',
+            'integrations.ai.model' => 'test-model',
+            'integrations.ai.base_url' => 'https://example.invalid/v1',
+        ]);
+
+        self::assertFalse((new OpenAiEpidemiologyAnalyzer)->configured());
     }
 
     private function requestForClinic(Clinic $clinic): Request
