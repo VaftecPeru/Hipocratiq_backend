@@ -276,7 +276,7 @@ class DoctorConsultationController extends Controller
     }
 
     /**
-     * @param array<int, array<string, mixed>> $codings
+     * @param  array<int, array<string, mixed>>  $codings
      */
     private function syncCodings(Consultation $consultation, array $codings, User $doctor): void
     {
@@ -431,7 +431,7 @@ class DoctorConsultationController extends Controller
     }
 
     /**
-     * @param array<string, mixed>|null $before
+     * @param  array<string, mixed>|null  $before
      */
     private function recordAudit(
         Request $request,
@@ -471,7 +471,7 @@ class DoctorConsultationController extends Controller
     }
 
     /**
-     * @return array<string, mixed>
+     * @return  array<string, mixed>
      */
     private function auditSnapshot(Consultation $consultation): array
     {
