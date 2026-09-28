@@ -10,6 +10,11 @@ return [
         'timeout_seconds' => (int) env('EPIDEMIOLOGICAL_AI_TIMEOUT_SECONDS', 20),
         'max_output_tokens' => (int) env('EPIDEMIOLOGICAL_AI_MAX_OUTPUT_TOKENS', 1200),
     ],
+    'imaging' => [
+        'provider' => env('IMAGING_PROVIDER', 'unavailable'),
+        'dicomweb_base_url' => env('IMAGING_DICOMWEB_BASE_URL'),
+        'viewer_base_url' => env('IMAGING_VIEWER_BASE_URL'),
+    ],
     'telemedicine' => [
         'provider' => env('TELEMEDICINE_PROVIDER', 'unavailable'),
         'base_url' => env('TELEMEDICINE_BASE_URL'),
