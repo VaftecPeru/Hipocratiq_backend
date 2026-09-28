@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Contracts\EpidemiologyAnalyzer;
 use App\Contracts\VideoMeetingProvider;
 use App\Enums\LaboratoryOrderStatus;
+use App\Enums\PatientConsentScope;
+use App\Enums\PatientConsentStatus;
 use App\Enums\PrescriptionStatus;
 use App\Enums\TeleconsultationStatus;
 use App\Http\Controllers\Controller;
@@ -21,6 +23,7 @@ use App\Models\Consultation;
 use App\Models\DoctorMessage;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
+use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\Teleconsultation;
 use App\Models\User;
@@ -273,6 +276,7 @@ class DoctorWorkspaceController extends Controller
         $data = $request->validated();
         $patient = PatientProfile::query()->findOrFail($data['patient_profile_id']);
         $this->assertPatientAccessible($doctor, $clinic, $patient);
+        $this->assertActiveConsent($patient, PatientConsentScope::Telemedicine);
         $appointment = isset($data['appointment_id'])
             ? $this->resolveOwnedAppointment($doctor, $clinic, (int) $data['appointment_id'], $patient->id)
             : null;
@@ -314,6 +318,14 @@ class DoctorWorkspaceController extends Controller
 
             $nextStatus = TeleconsultationStatus::from($request->validated('status'));
             $this->assertTeleconsultationStatusTransition($lockedTeleconsultation->status, $nextStatus);
+
+            if (in_array($nextStatus, [
+                TeleconsultationStatus::Waiting,
+                TeleconsultationStatus::InProgress,
+            ], true)) {
+                $patient = PatientProfile::query()->findOrFail($lockedTeleconsultation->patient_profile_id);
+                $this->assertActiveConsent($patient, PatientConsentScope::Telemedicine);
+            }
             $updates = ['status' => $nextStatus];
 
             if ($nextStatus === TeleconsultationStatus::InProgress && $lockedTeleconsultation->started_at === null) {
@@ -645,6 +657,31 @@ class DoctorWorkspaceController extends Controller
     {
         if (! $this->scopedMessagesQuery($doctor, $clinic)->whereKey($message->id)->exists()) {
             abort(404, 'Mensaje no encontrado.');
+        }
+    }
+
+    private function assertActiveConsent(PatientProfile $patient, PatientConsentScope $scope): void
+    {
+        $policyVersion = (string) config('clinical.consent_policy_version');
+
+        $active = PatientConsent::query()
+            ->where('patient_profile_id', $patient->id)
+            ->where('scope', $scope->value)
+            ->where('policy_version', $policyVersion)
+            ->where('status', PatientConsentStatus::Granted->value)
+            ->whereNull('revoked_at')
+            ->where('effective_from', '<=', now())
+            ->where(function (Builder $query): void {
+                $query->whereNull('effective_until')->orWhere('effective_until', '>', now());
+            })
+            ->exists();
+
+        if (!$active) {
+            throw ValidationException::withMessages([
+                'patient_profile_id' => [
+                    'El paciente debe otorgar un consentimiento clínico activo para '.$scope->value.' antes de continuar.',
+                ],
+            ]);
         }
     }
 
