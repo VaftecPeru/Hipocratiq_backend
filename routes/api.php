@@ -75,6 +75,7 @@ Route::prefix('v1/fhir')->name('api.v1.fhir.')->group(function (): void {
         Route::get('/MedicationRequest/{medicationRequest}', [FhirReadController::class, 'medicationRequest'])->name('medication-request.read');
         Route::get('/ServiceRequest/{serviceRequest}', [FhirReadController::class, 'serviceRequest'])->name('service-request.read');
         Route::get('/DiagnosticReport/{diagnosticReport}', [FhirReadController::class, 'diagnosticReport'])->name('diagnostic-report.read');
+        Route::get('/ImagingStudy/{imagingStudy}', [FhirReadController::class, 'imagingStudy'])->name('imaging-study.read');
         Route::get('/Consent/{consent}', [FhirReadController::class, 'consent'])->name('consent.read');
     });
 });
