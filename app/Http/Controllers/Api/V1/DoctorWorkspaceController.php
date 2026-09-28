@@ -480,6 +480,29 @@ class DoctorWorkspaceController extends Controller
             })
             ->count();
 
+        $policyVersion = (string) config('clinical.consent_policy_version');
+        $minimumCohortSize = max(1, (int) config('clinical.epidemiology.minimum_external_cohort_size', 10));
+        $connectedPatientIds = $this->connectedPatientsQuery($doctor, $clinic)
+            ->pluck('id')
+            ->filter()
+            ->unique()
+            ->values();
+        $consentedPatientIds = PatientConsent::query()
+            ->whereIn('patient_profile_id', $connectedPatientIds)
+            ->where('scope', PatientConsentScope::EpidemiologyAnonymized->value)
+            ->where('policy_version', $policyVersion)
+            ->where('status', PatientConsentStatus::Granted->value)
+            ->whereNull('revoked_at')
+            ->where('effective_from', '<=', now())
+            ->where(function (Builder $query): void {
+                $query->whereNull('effective_until')->orWhere('effective_until', '>', now());
+            })
+            ->pluck('patient_profile_id')
+            ->filter()
+            ->unique()
+            ->values();
+        $analysisMonitoredPatients = $consentedPatientIds->count();
+
         $analysis = [
             'trend' => 'not_configured',
             'alerts' => [],
