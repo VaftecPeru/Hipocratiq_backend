@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AdminAccessControlController;
 use App\Http\Controllers\Api\V1\AdminAuditController;
+use App\Http\Controllers\Api\V1\AdminBackupController;
 use App\Http\Controllers\Api\V1\AdminBillingController;
 use App\Http\Controllers\Api\V1\AdminClinicController;
 use App\Http\Controllers\Api\V1\AdminDashboardController;
@@ -473,6 +474,13 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/admin/infrastructure', [AdminInfrastructureController::class, 'show'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.infrastructure.show');
+        Route::post('/admin/backups', [AdminBackupController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.backups.store');
+        Route::post('/admin/backups/{backup}/verify', [AdminBackupController::class, 'verify'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->where('backup', '[A-Za-z0-9_-]+')
+            ->name('admin.backups.verify');
         Route::get('/admin/support-tickets', [AdminSupportTicketController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.support-tickets.index');
