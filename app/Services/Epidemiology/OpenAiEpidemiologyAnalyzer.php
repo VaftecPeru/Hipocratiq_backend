@@ -27,23 +27,77 @@ final class OpenAiEpidemiologyAnalyzer implements EpidemiologyAnalyzer
             throw new RuntimeException('El motor epidemiológico OpenAI no está configurado.');
         }
 
+        $payload = [
+            'model' => (string) config('integrations.ai.model'),
+            'instructions' => implode(' ', [
+                'Eres un motor de apoyo epidemiológico para datos AGREGADOS de una clínica.',
+                'No diagnostiques personas, no infieras identidades y no solicites datos personales.',
+                'Las alertas son señales operativas para revisión humana, no diagnósticos.',
+            ]),
+            'input' => json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+            'max_output_tokens' => (int) config('integrations.ai.max_output_tokens', 1200),
+        ];
+
+        if (config('integrations.ai.structured_output') === true) {
+            $payload['text'] = [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'epidemiology_analysis',
+                    'strict' => true,
+                    'schema' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'trend' => [
+                                'type' => 'string',
+                                'enum' => ['stable', 'rising', 'falling', 'mixed'],
+                            ],
+                            'forecasts' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'additionalProperties' => false,
+                                    'properties' => [
+                                        'title' => ['type' => 'string'],
+                                        'detail' => ['type' => 'string'],
+                                        'horizon_days' => ['type' => 'integer', 'minimum' => 1],
+                                    ],
+                                    'required' => ['title', 'detail', 'horizon_days'],
+                                ],
+                            ],
+                            'alerts' => [
+                                'type' => 'array',
+                                'items' => [
+                                    'type' => 'object',
+                                    'additionalProperties' => false,
+                                    'properties' => [
+                                        'title' => ['type' => 'string'],
+                                        'detail' => ['type' => 'string'],
+                                        'severity' => [
+                                            'type' => 'string',
+                                            'enum' => ['info', 'warning', 'critical'],
+                                        ],
+                                    ],
+                                    'required' => ['title', 'detail', 'severity'],
+                                ],
+                            ],
+                            'recommendations' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                            ],
+                            'summary' => ['type' => ['string', 'null']],
+                        ],
+                        'required' => ['trend', 'forecasts', 'alerts', 'recommendations', 'summary'],
+                    ],
+                ],
+            ];
+        }
+
         $response = Http::withToken((string) config('integrations.ai.api_key'))
             ->acceptJson()
             ->asJson()
             ->timeout((int) config('integrations.ai.timeout_seconds', 20))
-            ->post(rtrim((string) config('integrations.ai.base_url'), '/').'/responses', [
-                'model' => (string) config('integrations.ai.model'),
-                'instructions' => implode(' ', [
-                    'Eres un motor de apoyo epidemiológico para datos AGREGADOS de una clínica.',
-                    'No diagnostiques personas, no infieras identidades y no solicites datos personales.',
-                    'Devuelve únicamente JSON válido, sin markdown, con: trend (stable|rising|falling|mixed),',
-                    'forecasts (lista de objetos title, detail, horizon_days), alerts (title, detail, severity info|warning|critical),',
-                    'recommendations (lista de textos) y summary (texto breve).',
-                    'Las alertas son señales operativas para revisión humana, no diagnósticos.',
-                ]),
-                'input' => json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
-                'max_output_tokens' => (int) config('integrations.ai.max_output_tokens', 1200),
-            ]);
+            ->post(rtrim((string) config('integrations.ai.base_url'), '/').'/responses', $payload);
 
         if (! $response->successful()) {
             throw new RuntimeException('El proveedor epidemiológico respondió con estado '.$response->status().'.');
