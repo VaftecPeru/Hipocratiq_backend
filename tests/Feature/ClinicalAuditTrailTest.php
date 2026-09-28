@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Actions\Clinical\RecordClinicalAuditEvent;
 use App\Models\Clinic;
+use App\Models\ClinicalAuditEvent;
 use App\Models\Consultation;
 use App\Models\PatientProfile;
 use App\Models\User;
@@ -72,7 +73,7 @@ class ClinicalAuditTrailTest extends TestCase
         $event->delete();
     }
 
-    private function createAuditEvent()
+    private function createAuditEvent(): ClinicalAuditEvent
     {
         $actor = User::factory()->create();
         $clinic = Clinic::factory()->create();
