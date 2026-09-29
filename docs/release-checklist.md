@@ -142,17 +142,19 @@ Estos puntos son obligatorios únicamente cuando iOS forme parte del paquete de 
 - [ ] branch protection de `main`.
 - [ ] required checks antes de merge.
 
-## L. Evidencia de CI
-- [ ] Runner VPS `hipocratiq-vps` online.
-- [ ] Backend CI verde en self-hosted.
-- [ ] Frontend CI verde en self-hosted.
-- [ ] Frontend E2E verde en self-hosted.
-- [ ] Android CI verde en self-hosted.
+## L. Evidencia de CI / VPS
+- [ ] Checkout Backend de validación separado de producción.
+- [ ] Checkout Frontend/Mobile de validación separado de producción.
+- [ ] Backend `scripts/validate-vps.sh` verde.
+- [ ] Frontend `scripts/validate-vps.sh` verde.
+- [ ] Android `scripts/validate-mobile-vps.sh` verde.
+- [ ] UAT clínico incluido en evidencia Backend.
+- [ ] Playwright E2E incluido en evidencia Web.
+- [ ] APK/AAB de validación con SHA-256.
 - [ ] iOS CI verde solo si iOS está incluido en el release.
-- [ ] Sin jobs que fallen antes de iniciar pasos.
 
 ### Incidencia y resolución
-El bloqueo del 28/09/2026 ocurrió antes de asignar runner (`steps=[]`). Para el release actual se adopta un runner self-hosted Linux en el VPS VAFTEC, evitando depender de capacidad/minutos GitHub-hosted para Backend, Web y Android.
+El bloqueo del 28/09/2026 ocurrió antes de asignar runner (`steps=[]`). Para el release actual, los gates críticos se ejecutan directamente en el VPS mediante contenedores Docker aislados. GitHub Actions queda como evidencia secundaria cuando vuelva a disponer de capacidad.
 
 ## M. Autorización
 - [ ] Auditoría final emitida.
