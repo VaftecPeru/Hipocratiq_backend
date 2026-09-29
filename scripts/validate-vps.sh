@@ -144,7 +144,7 @@ docker run --rm --network "$NETWORK" \
   "$IMAGE" bash -lc '
     set -Eeuo pipefail
     psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
-      --command="DROP TABLE IF EXISTS backup_restore_probe; CREATE TABLE backup_restore_probe (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO backup_restore_probe (id, marker) VALUES (1, '''restored''');"
+      --command="DROP TABLE IF EXISTS backup_restore_probe; CREATE TABLE backup_restore_probe (id integer PRIMARY KEY); INSERT INTO backup_restore_probe (id) VALUES (314159);"
 
     backup_output="$(php artisan backups:create --no-interaction)"
     printf "%s\n" "$backup_output"
@@ -161,8 +161,8 @@ docker run --rm --network "$NETWORK" \
     php artisan backups:restore "$backup_id" --confirm="$backup_id" --no-interaction
 
     recovered="$(psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
-      --tuples-only --no-align --command="SELECT marker FROM backup_restore_probe WHERE id = 1;")"
-    [[ "$recovered" == "restored" ]] || {
+      --tuples-only --no-align --command="SELECT id FROM backup_restore_probe WHERE id = 314159;")"
+    [[ "$recovered" == "314159" ]] || {
       echo "ERROR: el restore no recuperó el dato centinela." >&2
       exit 1
     }
