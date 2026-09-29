@@ -24,7 +24,7 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] `pg_dump` disponible.
 - [ ] `pg_restore` disponible.
 - [ ] Backup previo al deploy.
-- [ ] Restore ensayado.
+- [ ] Restore ensayado con dato centinela recuperado en PostgreSQL aislado.
 
 ## C. Flujo clínico
 - [ ] Crear/agendar cita.
@@ -90,6 +90,7 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 ## G. UX/UI y accesibilidad
 - [ ] Línea visual HIPOCRATIQ consistente.
 - [ ] Branding correcto por rol.
+- [ ] El logo Mobile coincide byte a byte con el logo del login Web.
 - [ ] Focus visible.
 - [ ] Menús móviles con Escape/focus trap.
 - [ ] Touch targets adecuados.
@@ -108,7 +109,10 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] AAB validation.
 - [ ] Endpoint HTTPS de producción.
 - [ ] Identificador `com.vaftec.hipocratiq`.
-- [ ] Firma release configurada antes de publicación Play Store.
+- [ ] Firma release configurada mediante variables de entorno, sin secretos en Git.
+- [ ] APK release firmado generado.
+- [ ] AAB release firmado generado.
+- [ ] SHA-256 registrado para APK/AAB release.
 
 ## I. Mobile iOS — release independiente
 Estos puntos son obligatorios únicamente cuando iOS forme parte del paquete de publicación:
@@ -133,6 +137,7 @@ Estos puntos son obligatorios únicamente cuando iOS forme parte del paquete de 
 - [ ] APP_KEY segura.
 - [ ] OTP_HASH_KEY segura.
 - [ ] secretos fuera de Git.
+- [ ] Backend Web/API enlazado a loopback detrás del proxy.
 - [ ] PostgreSQL no expuesto públicamente.
 - [ ] backups.
 - [ ] logging.
