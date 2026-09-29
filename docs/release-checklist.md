@@ -24,7 +24,7 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] `pg_dump` disponible.
 - [ ] `pg_restore` disponible.
 - [ ] Backup previo al deploy.
-- [ ] Restore ensayado.
+- [ ] Restore ensayado con dato centinela recuperado en PostgreSQL aislado.
 
 ## C. Flujo clínico
 - [ ] Crear/agendar cita.
@@ -66,6 +66,7 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] ServiceRequest.
 - [ ] DiagnosticReport.
 - [ ] Consent.
+- [ ] ImagingStudy.
 - [ ] Control de acceso por recurso.
 - [ ] Content-Type FHIR JSON.
 
@@ -89,6 +90,8 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 ## G. UX/UI y accesibilidad
 - [ ] Línea visual HIPOCRATIQ consistente.
 - [ ] Branding correcto por rol.
+- [ ] El wordmark de autenticación Mobile coincide byte a byte con el logo del login Web.
+- [ ] El launcher Mobile coincide byte a byte con el isotipo Web oficial.
 - [ ] Focus visible.
 - [ ] Menús móviles con Escape/focus trap.
 - [ ] Touch targets adecuados.
@@ -107,9 +110,13 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] AAB validation.
 - [ ] Endpoint HTTPS de producción.
 - [ ] Identificador `com.vaftec.hipocratiq`.
-- [ ] Firma release configurada antes de publicación Play Store.
+- [ ] Firma release configurada mediante variables de entorno, sin secretos en Git.
+- [ ] APK release firmado generado.
+- [ ] AAB release firmado generado.
+- [ ] SHA-256 registrado para APK/AAB release.
 
-## I. Mobile iOS
+## I. Mobile iOS — release independiente
+Estos puntos son obligatorios únicamente cuando iOS forme parte del paquete de publicación:
 - [ ] Build iOS release `--no-codesign` de validación.
 - [ ] Bundle identifier correcto.
 - [ ] Assets/iconos.
@@ -131,6 +138,7 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] APP_KEY segura.
 - [ ] OTP_HASH_KEY segura.
 - [ ] secretos fuera de Git.
+- [ ] Backend Web/API enlazado a loopback detrás del proxy.
 - [ ] PostgreSQL no expuesto públicamente.
 - [ ] backups.
 - [ ] logging.
@@ -140,15 +148,19 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] branch protection de `main`.
 - [ ] required checks antes de merge.
 
-## L. Evidencia de CI
-- [ ] Backend CI verde.
-- [ ] Frontend CI verde.
-- [ ] Android CI verde.
-- [ ] iOS CI verde.
-- [ ] Sin jobs que fallen antes de iniciar pasos.
+## L. Evidencia de CI / VPS
+- [ ] Checkout Backend de validación separado de producción.
+- [ ] Checkout Frontend/Mobile de validación separado de producción.
+- [ ] Backend `scripts/validate-vps.sh` verde.
+- [ ] Frontend `scripts/validate-vps.sh` verde.
+- [ ] Android `scripts/validate-mobile-vps.sh` verde.
+- [ ] UAT clínico incluido en evidencia Backend.
+- [ ] Playwright E2E incluido en evidencia Web.
+- [ ] APK/AAB de validación con SHA-256.
+- [ ] iOS CI verde solo si iOS está incluido en el release.
 
-### Incidencia actual
-A fecha 28/09/2026 los jobs recientes de GitHub Actions terminan antes de exponer pasos de ejecución (`steps = null`) en los tres stacks. Esto se trata como blocker de infraestructura CI hasta identificar el mensaje de cuenta/runner en la interfaz de GitHub Actions.
+### Incidencia y resolución
+El bloqueo del 28/09/2026 ocurrió antes de asignar runner (`steps=[]`). Para el release actual, los gates críticos se ejecutan directamente en el VPS mediante contenedores Docker aislados. GitHub Actions queda como evidencia secundaria cuando vuelva a disponer de capacidad.
 
 ## M. Autorización
 - [ ] Auditoría final emitida.

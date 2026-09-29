@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, develop]
   pull_request:
@@ -22,7 +23,7 @@ jobs:
           POSTGRES_USER: root
           POSTGRES_PASSWORD: root
         ports:
-          - 5432:5432
+          - 5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -80,7 +81,7 @@ jobs:
           APP_ENV: testing
           DB_CONNECTION: pgsql
           DB_HOST: 127.0.0.1
-          DB_PORT: 5432
+          DB_PORT: ${{ job.services.postgres.ports[5432] }}
           DB_DATABASE: back_api
           DB_USERNAME: root
           DB_PASSWORD: root
@@ -113,6 +114,9 @@ jobs:
           done
           bash scripts/performance-smoke.sh
 
+      - name: Validate production deploy script
+        run: bash -n scripts/deploy-production.sh
+
       - name: Validate Docker Compose runtime
         run: docker compose config --quiet
 
@@ -123,4 +127,8 @@ jobs:
         run: |
           docker run --rm hipocratiq-backend:ci pg_dump --version
           docker run --rm hipocratiq-backend:ci pg_restore --version
+
+      - name: Cleanup backend CI image
+        if: always()
+        run: docker image rm --force hipocratiq-backend:ci 2>/dev/null || true
 

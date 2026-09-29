@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\EpidemiologyAnalyzer;
 use App\Enums\DoctorPracticeType;
 use App\Enums\LaboratoryOrderStatus;
 use App\Enums\PatientConsentScope;
@@ -12,6 +13,7 @@ use App\Enums\TeleconsultationStatus;
 use App\Models\Clinic;
 use App\Models\ClinicMembership;
 use App\Models\ClinicSubscription;
+use App\Models\Consultation;
 use App\Models\DoctorMessage;
 use App\Models\DoctorPrescription;
 use App\Models\DoctorProfile;
@@ -189,6 +191,82 @@ class DoctorWorkspaceTest extends TestCase
             ->assertJsonPath('data.status', TeleconsultationStatus::Waiting->value);
     }
 
+    public function test_telemedicine_requires_current_active_consent_to_create_and_start_session(): void
+    {
+        $patient = $this->ownedPatient('+525510000507');
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/teleconsultations', [
+            'patient_profile_id' => $patient->id,
+            'scheduled_at' => now()->addDays(3)->setTime(9, 0)->toIso8601String(),
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('patient_profile_id');
+
+        $consent = $this->grantConsent($patient, PatientConsentScope::Telemedicine);
+
+        $session = $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/teleconsultations', [
+            'patient_profile_id' => $patient->id,
+            'scheduled_at' => now()->addDays(3)->setTime(9, 30)->toIso8601String(),
+        ])->assertCreated();
+
+        $consent->update([
+            'status' => PatientConsentStatus::Revoked,
+            'revoked_at' => now(),
+        ]);
+
+        $this->withSpaOrigin()
+            ->patchJson(
+                "/api/v1/auth/doctor/teleconsultations/{$session->json('data.id')}/status",
+                ['status' => TeleconsultationStatus::Waiting->value],
+            )
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('patient_profile_id');
+    }
+
+    public function test_doctor_epidemiology_uses_only_consented_patients_with_recent_activity_and_audits_external_analysis(): void
+    {
+        config([
+            'clinical.consent_policy_version' => '2026-09',
+            'clinical.epidemiology.minimum_external_cohort_size' => 1,
+        ]);
+
+        $activePatient = $this->ownedPatient('+525510000508');
+        $inactivePatient = $this->ownedPatient('+525510000509');
+        $this->grantConsent($activePatient, PatientConsentScope::EpidemiologyAnonymized);
+        $this->grantConsent($inactivePatient, PatientConsentScope::EpidemiologyAnonymized);
+
+        Consultation::factory()->create([
+            'clinic_id' => null,
+            'doctor_user_id' => $this->doctor->id,
+            'patient_profile_id' => $activePatient->id,
+            'created_at' => now()->subDay(),
+        ]);
+
+        $analyzer = new RecordingDoctorEpidemiologyAnalyzer;
+        $this->app->instance(EpidemiologyAnalyzer::class, $analyzer);
+
+        $this->withSpaOrigin()
+            ->getJson('/api/v1/auth/doctor/epidemiology')
+            ->assertOk()
+            ->assertJsonPath('data.analysis_available', true)
+            ->assertJsonPath('data.analysis_cohort.status', 'eligible')
+            ->assertJsonPath('data.analysis_cohort.consented_patients', 2)
+            ->assertJsonPath('data.analysis_cohort.monitored_patients', 1)
+            ->assertJsonPath('data.metrics.monitored_patients', 1);
+
+        self::assertCount(1, $analyzer->snapshots);
+        self::assertSame(1, $analyzer->snapshots[0]['metrics']['monitored_patients']);
+        self::assertSame(1, $analyzer->snapshots[0]['metrics']['consultations']);
+
+        $this->assertDatabaseHas('admin_audit_events', [
+            'actor_user_id' => $this->doctor->id,
+            'module' => 'epidemiology',
+            'action' => 'epidemiology.analysis.completed',
+            'resource_type' => 'doctor',
+            'resource_id' => (string) $this->doctor->id,
+        ]);
+    }
+
     public function test_clinic_doctor_workspace_is_scoped_to_assigned_clinic(): void
     {
         $clinic = Clinic::factory()->create();
@@ -350,5 +428,34 @@ class DoctorWorkspaceTest extends TestCase
     private function withSpaOrigin(): static
     {
         return $this->withCredentials()->withHeader('Origin', 'http://localhost:3000');
+    }
+}
+
+final class RecordingDoctorEpidemiologyAnalyzer implements EpidemiologyAnalyzer
+{
+    /** @var array<int, array<string, mixed>> */
+    public array $snapshots = [];
+
+    public function configured(): bool
+    {
+        return true;
+    }
+
+    public function provider(): string
+    {
+        return 'test';
+    }
+
+    public function analyze(array $snapshot): array
+    {
+        $this->snapshots[] = $snapshot;
+
+        return [
+            'trend' => 'stable',
+            'forecasts' => [],
+            'alerts' => [],
+            'recommendations' => ['Revisión humana requerida.'],
+            'summary' => 'Aggregate doctor analysis fixture.',
+        ];
     }
 }
