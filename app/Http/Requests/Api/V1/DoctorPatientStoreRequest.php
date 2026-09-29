@@ -29,7 +29,6 @@ class DoctorPatientStoreRequest extends FormRequest
             'emergency_contact' => ['nullable', 'string', 'max:160'],
             'insurance' => ['nullable', 'string', 'max:120'],
             'is_returning_patient' => ['sometimes', 'boolean'],
-            'whatsapp_consent' => ['sometimes', 'boolean'],
         ];
     }
 
