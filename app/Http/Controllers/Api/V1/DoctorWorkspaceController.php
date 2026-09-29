@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Contracts\EpidemiologyAnalyzer;
 use App\Contracts\VideoMeetingProvider;
 use App\Enums\LaboratoryOrderStatus;
@@ -501,7 +502,13 @@ class DoctorWorkspaceController extends Controller
             ->filter()
             ->unique()
             ->values();
-        $analysisMonitoredPatients = $consentedPatientIds->count();
+        $analysisMonitoredPatientIds = collect([
+            (clone $consultations)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+            (clone $laboratoryOrders)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+            (clone $teleconsultations)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+            (clone $prescriptions)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+        ])->flatten()->filter()->unique()->values();
+        $analysisMonitoredPatients = $analysisMonitoredPatientIds->count();
 
         $analysis = [
             'trend' => 'not_configured',
@@ -539,8 +546,29 @@ class DoctorWorkspaceController extends Controller
                     $message = is_string($analysis['summary'] ?? null)
                         ? $analysis['summary']
                         : 'Análisis epidemiológico agregado disponible para revisión humana.';
+
+                    $this->recordDoctorExternalAnalysisAudit(
+                        request: $request,
+                        doctor: $doctor,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.completed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients,
+                        minimumCohortSize: $minimumCohortSize,
+                    );
                 } catch (Throwable) {
                     $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+
+                    $this->recordDoctorExternalAnalysisAudit(
+                        request: $request,
+                        doctor: $doctor,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.failed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients,
+                        minimumCohortSize: $minimumCohortSize,
+                        critical: true,
+                    );
                 }
             }
         }
@@ -581,6 +609,36 @@ class DoctorWorkspaceController extends Controller
                 ],
             ],
         ]);
+    }
+
+    private function recordDoctorExternalAnalysisAudit(
+        Request $request,
+        User $doctor,
+        ?Clinic $clinic,
+        string $action,
+        string $policyVersion,
+        int $cohortSize,
+        int $minimumCohortSize,
+        bool $critical = false,
+    ): void {
+        app(RecordAdminAuditEvent::class)->handle(
+            actor: $doctor,
+            request: $request,
+            module: 'epidemiology',
+            action: $action,
+            resourceType: 'doctor',
+            resourceId: $doctor->id,
+            resourceLabel: $doctor->name,
+            clinic: $clinic,
+            metadata: [
+                'provider' => $this->epidemiologyAnalyzer->provider(),
+                'policy_version' => $policyVersion,
+                'cohort_size' => $cohortSize,
+                'minimum_cohort_size' => $minimumCohortSize,
+                'payload_classification' => 'aggregate_only',
+            ],
+            critical: $critical,
+        );
     }
 
     /** @param Builder<DoctorPrescription|LaboratoryOrder|Teleconsultation|Consultation|Appointment> $query */
