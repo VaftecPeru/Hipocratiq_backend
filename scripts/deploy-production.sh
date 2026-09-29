@@ -106,6 +106,15 @@ compose up -d --no-deps app queue-worker scheduler
 compose exec -T app php artisan optimize:clear
 compose exec -T app php artisan migrate:status --no-interaction >/dev/null
 
+for service in app queue-worker scheduler; do
+  container_id="$(compose ps -q "$service")"
+  if [[ -z "$container_id" ]] || [[ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != "true" ]]; then
+    echo "ERROR: el servicio $service no quedó en ejecución." >&2
+    compose ps
+    exit 1
+  fi
+done
+
 echo "Esperando readiness interno..."
 READY=0
 for attempt in {1..30}; do
