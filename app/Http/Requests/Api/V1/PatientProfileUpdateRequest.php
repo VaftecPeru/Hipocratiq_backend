@@ -31,7 +31,6 @@ class PatientProfileUpdateRequest extends FormRequest
             'address' => ['sometimes', 'nullable', 'string', 'max:240'],
             'emergency_contact' => ['sometimes', 'nullable', 'string', 'max:160'],
             'insurance' => ['sometimes', 'nullable', 'string', 'max:120'],
-            'whatsapp_consent' => ['sometimes', 'boolean'],
         ];
     }
 
