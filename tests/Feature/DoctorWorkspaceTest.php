@@ -189,6 +189,38 @@ class DoctorWorkspaceTest extends TestCase
             ->assertJsonPath('data.status', TeleconsultationStatus::Waiting->value);
     }
 
+    public function test_telemedicine_requires_current_active_consent_to_create_and_start_session(): void
+    {
+        $patient = $this->ownedPatient('+525510000507');
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/teleconsultations', [
+            'patient_profile_id' => $patient->id,
+            'scheduled_at' => now()->addDays(3)->setTime(9, 0)->toIso8601String(),
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('patient_profile_id');
+
+        $consent = $this->grantConsent($patient, PatientConsentScope::Telemedicine);
+
+        $session = $this->withSpaOrigin()->postJson('/api/v1/auth/doctor/teleconsultations', [
+            'patient_profile_id' => $patient->id,
+            'scheduled_at' => now()->addDays(3)->setTime(9, 30)->toIso8601String(),
+        ])->assertCreated();
+
+        $consent->update([
+            'status' => PatientConsentStatus::Revoked,
+            'revoked_at' => now(),
+        ]);
+
+        $this->withSpaOrigin()
+            ->patchJson(
+                "/api/v1/auth/doctor/teleconsultations/{$session->json('data.id')}/status",
+                ['status' => TeleconsultationStatus::Waiting->value],
+            )
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('patient_profile_id');
+    }
+
     public function test_clinic_doctor_workspace_is_scoped_to_assigned_clinic(): void
     {
         $clinic = Clinic::factory()->create();
