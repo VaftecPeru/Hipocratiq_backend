@@ -62,7 +62,6 @@ final class UpdateClinicPatient
                 'emergency_contact',
                 'insurance',
                 'is_returning_patient',
-                'whatsapp_consent',
             ]);
 
             if ($profileData !== []) {
