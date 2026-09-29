@@ -7,7 +7,6 @@ use App\Contracts\EpidemiologyAnalyzer;
 use App\Contracts\VideoMeetingProvider;
 use App\Enums\LaboratoryOrderStatus;
 use App\Enums\PatientConsentScope;
-use App\Enums\PatientConsentStatus;
 use App\Enums\PrescriptionStatus;
 use App\Enums\TeleconsultationStatus;
 use App\Http\Controllers\Controller;
@@ -24,10 +23,10 @@ use App\Models\Consultation;
 use App\Models\DoctorMessage;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
-use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\Teleconsultation;
 use App\Models\User;
+use App\Support\Clinical\ActivePatientConsent;
 use App\Support\Clinical\DoctorClinicScope;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -43,6 +42,7 @@ class DoctorWorkspaceController extends Controller
     public function __construct(
         private VideoMeetingProvider $videoProvider,
         private EpidemiologyAnalyzer $epidemiologyAnalyzer,
+        private ActivePatientConsent $activePatientConsent,
     ) {}
 
     public function prescriptions(Request $request): JsonResponse
@@ -488,25 +488,11 @@ class DoctorWorkspaceController extends Controller
             ->filter()
             ->unique()
             ->values();
-        $consentedPatientIds = PatientConsent::query()
-            ->whereIn('patient_profile_id', $connectedPatientIds)
-            ->when(
-                $clinic === null,
-                fn (Builder $query): Builder => $query->whereNull('clinic_id'),
-                fn (Builder $query): Builder => $query->where('clinic_id', $clinic->id),
-            )
-            ->where('scope', PatientConsentScope::EpidemiologyAnonymized->value)
-            ->where('policy_version', $policyVersion)
-            ->where('status', PatientConsentStatus::Granted->value)
-            ->whereNull('revoked_at')
-            ->where('effective_from', '<=', now())
-            ->where(function (Builder $query): void {
-                $query->whereNull('effective_until')->orWhere('effective_until', '>', now());
-            })
-            ->pluck('patient_profile_id')
-            ->filter()
-            ->unique()
-            ->values();
+        $consentedPatientIds = $this->activePatientConsent->patientIds(
+            patientIds: $connectedPatientIds,
+            scope: PatientConsentScope::EpidemiologyAnonymized,
+            clinicId: $clinic?->id,
+        );
         $analysisMonitoredPatientIds = collect([
             (clone $consultations)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
             (clone $laboratoryOrders)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
@@ -768,26 +754,7 @@ class DoctorWorkspaceController extends Controller
 
     private function assertActiveConsent(PatientProfile $patient, PatientConsentScope $scope): void
     {
-        $policyVersion = (string) config('clinical.consent_policy_version');
-
-        $active = PatientConsent::query()
-            ->where('patient_profile_id', $patient->id)
-            ->when(
-                $patient->clinic_id === null,
-                fn (Builder $query): Builder => $query->whereNull('clinic_id'),
-                fn (Builder $query): Builder => $query->where('clinic_id', $patient->clinic_id),
-            )
-            ->where('scope', $scope->value)
-            ->where('policy_version', $policyVersion)
-            ->where('status', PatientConsentStatus::Granted->value)
-            ->whereNull('revoked_at')
-            ->where('effective_from', '<=', now())
-            ->where(function (Builder $query): void {
-                $query->whereNull('effective_until')->orWhere('effective_until', '>', now());
-            })
-            ->exists();
-
-        if (! $active) {
+        if (! $this->activePatientConsent->allows($patient, $scope)) {
             throw ValidationException::withMessages([
                 'patient_profile_id' => [
                     'El paciente debe otorgar un consentimiento clínico activo para '.$scope->value.' antes de continuar.',
