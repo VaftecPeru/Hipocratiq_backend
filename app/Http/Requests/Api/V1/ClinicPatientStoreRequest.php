@@ -35,7 +35,6 @@ class ClinicPatientStoreRequest extends FormRequest
             'emergency_contact' => ['nullable', 'string', 'max:160'],
             'insurance' => ['nullable', 'string', 'max:120'],
             'is_returning_patient' => ['sometimes', 'boolean'],
-            'whatsapp_consent' => ['sometimes', 'boolean'],
             'requested_doctor_user_id' => ['nullable', 'integer', Rule::exists('users', 'id')],
             'specialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)->whereNull('parent_id')],
             'subspecialty_id' => ['nullable', 'integer', Rule::exists('specialties', 'id')->where('is_active', true)],
