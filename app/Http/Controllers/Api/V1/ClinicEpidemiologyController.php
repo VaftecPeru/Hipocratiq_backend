@@ -5,13 +5,12 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Contracts\EpidemiologyAnalyzer;
 use App\Enums\PatientConsentScope;
-use App\Enums\PatientConsentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Clinic;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
-use App\Models\PatientConsent;
 use App\Models\Teleconsultation;
+use App\Support\Clinical\ActivePatientConsent;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +19,10 @@ use Throwable;
 
 class ClinicEpidemiologyController extends Controller
 {
-    public function __construct(private EpidemiologyAnalyzer $analyzer) {}
+    public function __construct(
+        private EpidemiologyAnalyzer $analyzer,
+        private ActivePatientConsent $activePatientConsent,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
@@ -65,7 +67,12 @@ class ClinicEpidemiologyController extends Controller
 
         $policyVersion = (string) config('clinical.consent_policy_version');
         $minimumCohortSize = max(1, (int) config('clinical.epidemiology.minimum_external_cohort_size', 10));
-        $consentedPatientIds = $this->consentedPatientIds($clinic, $now, $policyVersion);
+        $consentedPatientIds = $this->activePatientConsent->patientIds(
+            patientIds: $clinic->patientProfiles()->pluck('id'),
+            scope: PatientConsentScope::EpidemiologyAnonymized,
+            clinicId: $clinic->id,
+            at: $now,
+        );
 
         $analysisAppointments = $this->forPatients($appointments, $consentedPatientIds);
         $analysisConsultations = $this->forPatients($consultations, $consentedPatientIds);
@@ -203,24 +210,6 @@ class ClinicEpidemiologyController extends Controller
                 ],
             ],
         ]);
-    }
-
-    private function consentedPatientIds(Clinic $clinic, CarbonImmutable $now, string $policyVersion): Collection
-    {
-        return PatientConsent::query()
-            ->where('clinic_id', $clinic->id)
-            ->where('scope', PatientConsentScope::EpidemiologyAnonymized->value)
-            ->where('policy_version', $policyVersion)
-            ->where('status', PatientConsentStatus::Granted->value)
-            ->whereNull('revoked_at')
-            ->where('effective_from', '<=', $now)
-            ->where(function ($query) use ($now): void {
-                $query->whereNull('effective_until')->orWhere('effective_until', '>', $now);
-            })
-            ->pluck('patient_profile_id')
-            ->filter()
-            ->unique()
-            ->values();
     }
 
     private function forPatients(Collection $rows, Collection $patientIds): Collection
