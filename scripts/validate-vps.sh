@@ -46,7 +46,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-echo "[1/10] Build imagen CI"
+echo "[1/11] Build imagen CI"
 docker build --pull -f Dockerfile.ci -t "$IMAGE" .
 
 run_ci() {
@@ -63,14 +63,14 @@ run_ci() {
     "$IMAGE" "$@"
 }
 
-echo "[2/10] Composer validate + audit"
+echo "[2/11] Composer validate + audit"
 run_ci composer validate --no-interaction
 run_ci composer audit --locked --no-interaction
 
-echo "[3/10] Laravel Pint"
+echo "[3/11] Laravel Pint"
 run_ci vendor/bin/pint --test
 
-echo "[4/10] PHPUnit completo"
+echo "[4/11] PHPUnit completo"
 docker run --rm \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
@@ -83,7 +83,7 @@ docker run --rm \
   -e DB_DATABASE=:memory: \
   "$IMAGE" composer test
 
-echo "[5/10] PostgreSQL 17 + migraciones limpias"
+echo "[5/11] PostgreSQL 17 + migraciones limpias"
 docker network create "$NETWORK" >/dev/null
 docker run -d --name "$POSTGRES" --network "$NETWORK" \
   -e POSTGRES_DB=back_api \
@@ -120,7 +120,55 @@ docker run --rm --network "$NETWORK" \
   -e DB_URL= \
   "$IMAGE" php artisan migrate:fresh --force --no-interaction
 
-echo "[6/10] UAT clínico explícito"
+echo "[6/11] Backup create/verify/restore aislado"
+docker run --rm --network "$NETWORK" \
+  -e APP_ENV=testing \
+  -e APP_KEY="$TEST_APP_KEY" \
+  -e OTP_HASH_KEY=ci-test-hash-key \
+  -e OTP_FIXED_CODE=123456 \
+  -e CACHE_STORE=array \
+  -e SESSION_DRIVER=array \
+  -e QUEUE_CONNECTION=sync \
+  -e DB_CONNECTION=pgsql \
+  -e DB_HOST="$POSTGRES" \
+  -e DB_PORT=5432 \
+  -e DB_DATABASE=back_api \
+  -e DB_USERNAME=root \
+  -e DB_PASSWORD=root \
+  -e DB_URL= \
+  -e PGPASSWORD=root \
+  -e BACKUP_SERVICE_ENABLED=true \
+  -e BACKUP_SERVICE_PROVIDER=postgresql \
+  -e BACKUP_STORAGE_DISK=local \
+  -e BACKUP_PREFIX=ci-validation \
+  "$IMAGE" bash -lc '
+    set -Eeuo pipefail
+    psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
+      --command="DROP TABLE IF EXISTS backup_restore_probe; CREATE TABLE backup_restore_probe (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO backup_restore_probe (id, marker) VALUES (1, '''restored''');"
+
+    backup_output="$(php artisan backups:create --no-interaction)"
+    printf "%s\n" "$backup_output"
+    backup_id="$(printf "%s\n" "$backup_output" | awk -F": " "/Respaldo creado:/{print \$2; exit}")"
+
+    if [[ -z "$backup_id" ]]; then
+      echo "ERROR: no se pudo extraer el ID del backup de prueba." >&2
+      exit 1
+    fi
+
+    php artisan backups:verify "$backup_id" --no-interaction
+    psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
+      --command="DROP TABLE backup_restore_probe;"
+    php artisan backups:restore "$backup_id" --confirm="$backup_id" --no-interaction
+
+    recovered="$(psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
+      --tuples-only --no-align --command="SELECT marker FROM backup_restore_probe WHERE id = 1;")"
+    [[ "$recovered" == "restored" ]] || {
+      echo "ERROR: el restore no recuperó el dato centinela." >&2
+      exit 1
+    }
+  '
+
+echo "[7/11] UAT clínico explícito"
 docker run --rm \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
@@ -133,7 +181,7 @@ docker run --rm \
   -e DB_DATABASE=:memory: \
   "$IMAGE" php artisan test tests/Feature/Phase4ClinicalUatTest.php tests/Feature/DoctorWorkspaceTest.php tests/Feature/ClinicEpidemiologyConsentTest.php
 
-echo "[7/10] Performance smoke"
+echo "[8/11] Performance smoke"
 docker run -d --name "$APP" --network "$NETWORK" \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
@@ -165,16 +213,16 @@ docker run --rm --network "$NETWORK" \
   -e PERF_MAX_P95_SECONDS="${PERF_MAX_P95_SECONDS:-1.500}" \
   "$IMAGE" bash scripts/performance-smoke.sh "http://$APP:8000/api/v1/auth/register/clinic/plans"
 
-echo "[8/10] Compose + deploy script"
+echo "[9/11] Compose + deploy script"
 docker compose --env-file .env.example config --quiet
 bash -n scripts/deploy-production.sh
 
-echo "[9/10] Build imagen de producción"
+echo "[10/11] Build imagen de producción"
 docker build -t "$RELEASE_IMAGE" .
 docker run --rm "$RELEASE_IMAGE" pg_dump --version
 docker run --rm "$RELEASE_IMAGE" pg_restore --version
 
-echo "[10/10] Route list + readiness contract"
+echo "[11/11] Route list + readiness contract"
 run_ci php artisan route:list >/dev/null
 run_ci php artisan test tests/Feature/HealthEndpointTest.php
 
