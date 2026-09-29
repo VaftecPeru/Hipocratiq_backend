@@ -1,7 +1,9 @@
 <?php
 
 use Illuminate\Foundation\Inspiring;
+use Cron\CronExpression;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -20,7 +22,11 @@ if (config('admin_operations.backups.enabled')) {
 
     if (preg_match('/^daily@([01]\\d|2[0-3]):([0-5]\\d)$/', $backupSchedule, $matches) === 1) {
         $backupEvent->dailyAt($matches[1].':'.$matches[2]);
-    } else {
+    } elseif (CronExpression::isValidExpression($backupSchedule)) {
         $backupEvent->cron($backupSchedule);
+    } else {
+        Log::error('BACKUP_SCHEDULE inválido; el respaldo automático no fue programado.', [
+            'schedule' => $backupSchedule,
+        ]);
     }
 }
