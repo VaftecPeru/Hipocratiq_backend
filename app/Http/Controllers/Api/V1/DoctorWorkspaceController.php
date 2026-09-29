@@ -490,6 +490,11 @@ class DoctorWorkspaceController extends Controller
             ->values();
         $consentedPatientIds = PatientConsent::query()
             ->whereIn('patient_profile_id', $connectedPatientIds)
+            ->when(
+                $clinic === null,
+                fn (Builder $query): Builder => $query->whereNull('clinic_id'),
+                fn (Builder $query): Builder => $query->where('clinic_id', $clinic->id),
+            )
             ->where('scope', PatientConsentScope::EpidemiologyAnonymized->value)
             ->where('policy_version', $policyVersion)
             ->where('status', PatientConsentStatus::Granted->value)
@@ -767,6 +772,11 @@ class DoctorWorkspaceController extends Controller
 
         $active = PatientConsent::query()
             ->where('patient_profile_id', $patient->id)
+            ->when(
+                $patient->clinic_id === null,
+                fn (Builder $query): Builder => $query->whereNull('clinic_id'),
+                fn (Builder $query): Builder => $query->where('clinic_id', $patient->clinic_id),
+            )
             ->where('scope', $scope->value)
             ->where('policy_version', $policyVersion)
             ->where('status', PatientConsentStatus::Granted->value)
