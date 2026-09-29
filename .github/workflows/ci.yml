@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, develop]
   pull_request:
@@ -10,24 +11,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  lint:
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
 
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: back_api
-          POSTGRES_USER: root
-          POSTGRES_PASSWORD: root
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+jobs:
+  quality:
+    name: Backend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v5
@@ -54,13 +45,13 @@ jobs:
         run: cp .env.example .env
 
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress --verbose
+        run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Prepare environment
-        run: |
-          php artisan key:generate --ansi
-          echo "OTP_HASH_KEY=ci-test-hash-key" >> .env
-          echo "OTP_FIXED_CODE=123456" >> .env
+      - name: Prepare Laravel application
+        run: php artisan key:generate --ansi
+
+      - name: Validate Composer metadata
+        run: composer validate --no-interaction
 
       - name: Audit Composer dependencies
         run: composer audit --locked --no-interaction
@@ -73,6 +64,49 @@ jobs:
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'
+
+      - name: Validate routes
+        run: php artisan route:list --except-vendor
+
+  release-validation:
+    name: Backend release validation
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: back_api
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: root
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_sqlite, pdo_pgsql, redis
+          coverage: none
+
+      - name: Create environment file
+        run: cp .env.example .env
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Prepare Laravel application
+        run: php artisan key:generate --ansi
 
       - name: Validate PostgreSQL migrations
         run: php artisan migrate --force --no-interaction
@@ -123,4 +157,3 @@ jobs:
         run: |
           docker run --rm hipocratiq-backend:ci pg_dump --version
           docker run --rm hipocratiq-backend:ci pg_restore --version
-
