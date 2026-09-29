@@ -16,14 +16,17 @@ Schedule::command('appointments:send-whatsapp-reminders')
 
 if (config('admin_operations.backups.enabled')) {
     $backupSchedule = trim((string) config('admin_operations.backups.schedule', 'daily@02:00'));
-    $backupEvent = Schedule::command('backups:create')
-        ->withoutOverlapping()
-        ->onOneServer();
 
     if (preg_match('/^daily@([01]\\d|2[0-3]):([0-5]\\d)$/', $backupSchedule, $matches) === 1) {
-        $backupEvent->dailyAt($matches[1].':'.$matches[2]);
+        Schedule::command('backups:create')
+            ->dailyAt($matches[1].':'.$matches[2])
+            ->withoutOverlapping()
+            ->onOneServer();
     } elseif (CronExpression::isValidExpression($backupSchedule)) {
-        $backupEvent->cron($backupSchedule);
+        Schedule::command('backups:create')
+            ->cron($backupSchedule)
+            ->withoutOverlapping()
+            ->onOneServer();
     } else {
         Log::error('BACKUP_SCHEDULE inválido; el respaldo automático no fue programado.', [
             'schedule' => $backupSchedule,
