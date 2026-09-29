@@ -1,76 +1,91 @@
 # Auditoría de hardening y desbloqueo CI — HIPOCRATIQ
 
 Fecha: 29/09/2026  
-Rama de trabajo: `audit/fase3-fase6-hardening-20260929`  
+Rama: `audit/fase3-fase6-hardening-20260929`  
 Base: `develop`
 
-## 1. Hallazgo raíz del bloqueo
+## 1. Diagnóstico del bloqueo
 
-Los últimos jobs de Backend, Frontend y Mobile fallan antes de ejecutar el primer step:
+Los jobs recientes de Backend, Frontend y Mobile terminaban antes de ejecutar el primer step:
+
 - `runner_name` vacío;
 - `steps=[]`;
-- duración aproximada de 3–5 segundos;
-- reintentos reproducen el mismo patrón.
+- ejecución de pocos segundos;
+- el reintento reproducía el mismo patrón.
 
-Se verificó además que los YAML eran idénticos entre ejecuciones verdes y las primeras ejecuciones rojas. Por tanto, el fallo no se origina en un cambio de sintaxis del workflow.
+Se comparó la última ejecución verde con las primeras rojas y el YAML no había cambiado en el punto de transición. Esto descarta una regresión de sintaxis como causa primaria.
 
-GitHub Actions en repositorios privados consume cuota de minutos del propietario. Cuando la cuota se agota y no existe un método de pago/budget disponible, GitHub bloquea nuevas ejecuciones. El patrón observado es compatible con este escenario y no existe evidencia de una incidencia pública general de GitHub Actions en el periodo auditado.
+La evidencia es compatible con un bloqueo de capacidad/cuota de GitHub-hosted runners en repositorios privados. La API disponible no expone el mensaje de facturación de la cuenta, por lo que se documenta como causa operacional probable, no como una conclusión basada únicamente en el código.
 
-## 2. Correcciones aplicadas en rama aislada
+## 2. Solución adoptada
 
-### Backend
-- Validación estricta de `BACKUP_SCHEDULE`.
-- Un cron inválido ya no se registra silenciosamente.
-- La IA epidemiológica del médico ahora calcula la cohorte sobre pacientes consentidos que realmente tuvieron actividad clínica durante la ventana analizada.
-- Se auditan las llamadas externas de IA epidemiológica del médico, tanto exitosas como fallidas.
-- Se añadió prueba negativa para bloquear creación/inicio de teleconsulta cuando el consentimiento de telemedicina no está vigente.
+VAFTEC optó por usar su VPS Linux como runner self-hosted para los gates Linux.
 
-### Frontend Web
-- Se eliminó una entrada duplicada de `develop`.
-- Se añadió `workflow_dispatch`.
-- Se añadió `concurrency` con cancelación de ejecuciones obsoletas.
-- El E2E completo queda reservado para PR, `main` o ejecución manual; `develop` conserva CI rápido.
+Los jobs Backend, Web y Android ahora usan:
 
-### Mobile
-- Se añadió `workflow_dispatch`.
-- Se añadió `concurrency` con cancelación de ejecuciones obsoletas.
-- Android continúa validándose en `develop`.
-- iOS/macOS queda reservado para PR, `main` o ejecución manual, evitando consumir runner macOS en cada commit.
+`[self-hosted, linux, x64, hipocratiq-vps]`
 
-## 3. Justificación DevSecOps
+El job iOS permanece manual sobre macOS y no bloquea el release Web/Backend/Android de esta etapa.
 
-La reducción de consumo no elimina gates. Se separa:
-- feedback rápido en `develop`;
-- validación exhaustiva en Pull Request / release candidate;
-- build iOS bajo gate de release.
+Se añadió `docs/SELF_HOSTED_RUNNER_VPS.md` con la configuración segura del runner.
 
-Esta estrategia reduce gasto de minutos y disminuye la probabilidad de bloquear todo el pipeline por consumo innecesario.
+## 3. Seguridad del runner VPS
 
-## 4. Estado de ramas
+Para evitar ejecutar código no validado dentro del mismo host de producción:
 
-- `develop` no fue modificado durante esta auditoría.
-- `main` no fue modificado.
-- Todos los cambios están aislados en `audit/fase3-fase6-hardening-20260929`.
+- se retiró el trigger automático por Pull Request de los workflows self-hosted;
+- se permite `push` a `develop`/`main` y ejecución manual;
+- se añadió `concurrency` para cancelar ejecuciones obsoletas;
+- el E2E Web elimina sus procesos en segundo plano al finalizar;
+- iOS solo se habilita manualmente;
+- se exige usuario Linux dedicado y secretos fuera del repositorio.
 
-## 5. Acción externa necesaria para restablecer GitHub-hosted runners
+## 4. Backend — mantenimiento aplicado
 
-Verificar en GitHub:
-1. Settings → Billing and licensing / Billing.
-2. Revisar Actions usage/minutes.
-3. Si la cuota está agotada, configurar un budget/método de pago o esperar al reinicio del ciclo.
-4. Alternativa: registrar runner self-hosted controlado por VAFTEC para CI Linux.
+- Validación estricta de `BACKUP_SCHEDULE` antes de registrar el cron.
+- Un cron inválido deja evidencia en log y no crea una programación ambigua.
+- Telemedicina exige consentimiento vigente al crear y al iniciar una sesión.
+- Prueba negativa de revocación de consentimiento de telemedicina.
+- IA epidemiológica del médico calcula la cohorte externa únicamente con pacientes:
+  - conectados al médico;
+  - con consentimiento epidemiológico vigente;
+  - con actividad clínica real dentro de la ventana de 90 días.
+- Se auditan llamadas externas de IA epidemiológica del médico, tanto exitosas como fallidas.
+- Se añadió prueba de regresión para cohorte activa + auditoría.
+- CI Backend se enruta al runner VPS.
 
-Hasta restablecer capacidad de runner no es posible obtener evidencia verde nueva desde GitHub Actions, aunque el código del pipeline haya sido endurecido.
+## 5. Web — mantenimiento aplicado
 
-## 6. Gate antes de integrar a develop
+- Se eliminó la rama `develop` duplicada del YAML.
+- `workflow_dispatch` disponible.
+- `concurrency` habilitado.
+- Web CI usa runner VPS.
+- E2E usa runner VPS, pero solo en ejecución manual o `main`.
+- Cleanup explícito de procesos fake-backend/Next al terminar E2E.
 
-Antes del merge de esta rama a `develop`:
-- revisar diff;
-- restablecer capacidad de Actions;
-- ejecutar CI Backend;
-- ejecutar CI Web;
-- ejecutar Android CI;
-- ejecutar iOS CI como gate de release;
-- confirmar que no existen P0 nuevos.
+## 6. Mobile — mantenimiento aplicado
 
-No se autoriza merge a `main` en esta etapa.
+- Android usa runner VPS.
+- Se prepara Java 17 + Android SDK + Flutter dentro del workflow.
+- Se mantienen gates: format, analyze, tests, APK y AAB de validación.
+- iOS queda como ejecución manual opcional; requiere macOS.
+- La firma Android de producción sigue separada de los binarios técnicos de validación.
+
+## 7. Estado de release
+
+`main` continúa sin modificaciones.
+
+La rama de auditoría todavía no debe promoverse a `main` hasta obtener evidencia real en el VPS:
+
+1. Backend CI verde.
+2. Web CI verde.
+3. Web E2E verde.
+4. Android CI verde.
+5. UAT clínico + consentimiento verdes.
+6. Migraciones PostgreSQL válidas.
+7. Backup creado y verificado; restore ensayado sobre entorno controlado.
+8. Auditoría final sin P0.
+
+## 8. Alcance de iOS
+
+El release Web/Backend/Android no debe quedar bloqueado por iOS si iOS no forma parte del paquete de publicación actual. Un `.ipa` exige macOS, certificado y provisioning profile de Apple; será un gate de publicación iOS independiente.
