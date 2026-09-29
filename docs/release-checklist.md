@@ -90,7 +90,8 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 ## G. UX/UI y accesibilidad
 - [ ] Línea visual HIPOCRATIQ consistente.
 - [ ] Branding correcto por rol.
-- [ ] El logo Mobile coincide byte a byte con el logo del login Web.
+- [ ] El wordmark de autenticación Mobile coincide byte a byte con el logo del login Web.
+- [ ] El launcher Mobile coincide byte a byte con el isotipo Web oficial.
 - [ ] Focus visible.
 - [ ] Menús móviles con Escape/focus trap.
 - [ ] Touch targets adecuados.
