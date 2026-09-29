@@ -128,3 +128,50 @@ Solo entonces se promueve `develop` a `main`.
 - `main`: sin modificar.
 - Backend PR #39: draft hacia `develop`.
 - Frontend PR #40: draft hacia `develop`.
+
+
+## 11. Hallazgos finales de auditoría
+
+### Seguridad de exposición
+- Se detectó y corrigió una publicación accidental del Backend como `8000:8000`.
+- El candidato conserva `127.0.0.1:8000:8000`, coherente con la topología productiva detrás del proxy.
+- PostgreSQL y Redis permanecen ligados a loopback.
+
+### Restore probado por diseño
+- El gate VPS ahora ejecuta un ciclo completo en PostgreSQL 17 aislado:
+  1. crea dato centinela;
+  2. genera backup;
+  3. verifica manifiesto SHA-256;
+  4. elimina el dato;
+  5. restaura;
+  6. confirma recuperación del dato centinela.
+- No se toca la base productiva.
+
+### Web / E2E
+- El fake backend E2E escucha en `0.0.0.0` dentro del contenedor para permitir comunicación por red Docker.
+- El tráfico sigue aislado en la red temporal del gate.
+
+### Branding Mobile
+- Wordmark autenticación Mobile = mismo blob Git que el login Web:
+  `bed9373c04b9d4ae192f19901605ac5400dd3a02`.
+- Launcher Mobile = mismo blob Git que el isotipo Web oficial:
+  `43a82fe44ddbc3b6c96a40e104d1e0c21a18eeec`.
+- El gate Mobile compara byte a byte ambos pares antes de compilar.
+
+### Android release
+- Se añadió firma parametrizada por variables de entorno, sin credenciales en Git.
+- `scripts/build-android-release.sh` genera APK y AAB release únicamente cuando existen:
+  - `ANDROID_KEYSTORE_PATH`;
+  - `ANDROID_KEYSTORE_PASSWORD`;
+  - `ANDROID_KEY_ALIAS`;
+  - `ANDROID_KEY_PASSWORD`.
+- Los artefactos incluyen SHA-256.
+
+## 12. Estado del candidato
+
+- Backend audit branch: sin divergencia respecto a `develop` (solo commits por delante).
+- Frontend/Mobile audit branch: sin divergencia respecto a `develop`.
+- PR Backend #39: draft, mergeable.
+- PR Frontend #40: draft, mergeable.
+- `main`: no modificada por este hardening.
+- Gate pendiente: ejecución real de Backend/Web/Android en checkout aislado del VPS.
