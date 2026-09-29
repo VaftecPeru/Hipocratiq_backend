@@ -1,6 +1,6 @@
 <?php
 
-use Cron\CronExpression;
+use App\Support\Backups\BackupSchedule;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
@@ -15,21 +15,22 @@ Schedule::command('appointments:send-whatsapp-reminders')
     ->withoutOverlapping();
 
 if (config('admin_operations.backups.enabled')) {
-    $backupSchedule = trim((string) config('admin_operations.backups.schedule', 'daily@02:00'));
+    $configuredSchedule = trim((string) config('admin_operations.backups.schedule', 'daily@02:00'));
+    $backupSchedule = BackupSchedule::parse($configuredSchedule);
 
-    if (preg_match('/^daily@([01]\\d|2[0-3]):([0-5]\\d)$/', $backupSchedule, $matches) === 1) {
-        Schedule::command('backups:create')
-            ->dailyAt($matches[1].':'.$matches[2])
-            ->withoutOverlapping()
-            ->onOneServer();
-    } elseif (CronExpression::isValidExpression($backupSchedule)) {
-        Schedule::command('backups:create')
-            ->cron($backupSchedule)
-            ->withoutOverlapping()
-            ->onOneServer();
-    } else {
+    if ($backupSchedule === null) {
         Log::error('BACKUP_SCHEDULE inválido; el respaldo automático no fue programado.', [
-            'schedule' => $backupSchedule,
+            'schedule' => $configuredSchedule,
         ]);
+    } else {
+        $event = Schedule::command('backups:create')
+            ->withoutOverlapping()
+            ->onOneServer();
+
+        if ($backupSchedule['mode'] === 'daily') {
+            $event->dailyAt($backupSchedule['value']);
+        } else {
+            $event->cron($backupSchedule['value']);
+        }
     }
 }
