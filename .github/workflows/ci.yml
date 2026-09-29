@@ -112,6 +112,9 @@ jobs:
           done
           bash scripts/performance-smoke.sh
 
+      - name: Validate production deploy script
+        run: bash -n scripts/deploy-production.sh
+
       - name: Validate Docker Compose runtime
         run: docker compose config --quiet
 
