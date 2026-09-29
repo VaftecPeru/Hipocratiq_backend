@@ -43,7 +43,8 @@ Valida:
 - health contract;
 - Docker Compose;
 - build de imagen productiva;
-- disponibilidad de `pg_dump`/`pg_restore`.
+- disponibilidad de `pg_dump`/`pg_restore`;
+- backup + verificación SHA-256 + restore real con dato centinela.
 
 La evidencia se guarda por defecto en:
 
@@ -89,6 +90,7 @@ Valida:
 - dart format;
 - flutter analyze;
 - flutter test;
+- paridad exacta del logo Login Web / App;
 - launcher icons;
 - APK de validación;
 - AAB de validación;
@@ -99,6 +101,15 @@ Los artefactos se guardan en:
 `/tmp/hipocratiq-validation/android-<timestamp>/`
 
 Estos binarios son de validación. La publicación en Google Play requiere firma release real.
+
+Para generar los artefactos release firmados, una vez disponible la keystore:
+
+```bash
+cd /srv/hipocratiq-ci/frontend
+bash scripts/build-android-release.sh
+```
+
+La keystore y contraseñas se inyectan por variables de entorno y nunca se guardan en Git.
 
 ## Flujo de ramas
 
