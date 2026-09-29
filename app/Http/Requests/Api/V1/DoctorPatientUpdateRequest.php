@@ -34,7 +34,6 @@ class DoctorPatientUpdateRequest extends FormRequest
             'emergency_contact' => ['sometimes', 'nullable', 'string', 'max:160'],
             'insurance' => ['sometimes', 'nullable', 'string', 'max:120'],
             'is_returning_patient' => ['sometimes', 'boolean'],
-            'whatsapp_consent' => ['sometimes', 'boolean'],
         ];
     }
 
