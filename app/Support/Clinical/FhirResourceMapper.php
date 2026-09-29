@@ -52,7 +52,7 @@ final class FhirResourceMapper
                     fn (string $type): array => [
                         'type' => $type,
                         'interaction' => [['code' => 'read']],
-                        'versioning' => 'versioned-update',
+                        'versioning' => 'no-version',
                     ],
                     ['Patient', 'Practitioner', 'Organization', 'Appointment', 'Encounter', 'Condition', 'MedicationRequest', 'ServiceRequest', 'DiagnosticReport', 'ImagingStudy', 'Consent'],
                 ),
@@ -446,9 +446,7 @@ final class FhirResourceMapper
     private function meta(mixed $updatedAt): array
     {
         return array_filter([
-            'versionId' => $updatedAt ? (string) $updatedAt->getTimestamp() : null,
             'lastUpdated' => $updatedAt?->toIso8601String(),
-            'profile' => ['http://hl7.org/fhir/StructureDefinition/'.'Resource'],
         ], static fn (mixed $value): bool => $value !== null);
     }
 
