@@ -66,6 +66,7 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] ServiceRequest.
 - [ ] DiagnosticReport.
 - [ ] Consent.
+- [ ] ImagingStudy.
 - [ ] Control de acceso por recurso.
 - [ ] Content-Type FHIR JSON.
 
@@ -109,7 +110,8 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] Identificador `com.vaftec.hipocratiq`.
 - [ ] Firma release configurada antes de publicación Play Store.
 
-## I. Mobile iOS
+## I. Mobile iOS — release independiente
+Estos puntos son obligatorios únicamente cuando iOS forme parte del paquete de publicación:
 - [ ] Build iOS release `--no-codesign` de validación.
 - [ ] Bundle identifier correcto.
 - [ ] Assets/iconos.
@@ -141,14 +143,16 @@ Este checklist es obligatorio antes de solicitar merge de `develop` a `main`.
 - [ ] required checks antes de merge.
 
 ## L. Evidencia de CI
-- [ ] Backend CI verde.
-- [ ] Frontend CI verde.
-- [ ] Android CI verde.
-- [ ] iOS CI verde.
+- [ ] Runner VPS `hipocratiq-vps` online.
+- [ ] Backend CI verde en self-hosted.
+- [ ] Frontend CI verde en self-hosted.
+- [ ] Frontend E2E verde en self-hosted.
+- [ ] Android CI verde en self-hosted.
+- [ ] iOS CI verde solo si iOS está incluido en el release.
 - [ ] Sin jobs que fallen antes de iniciar pasos.
 
-### Incidencia actual
-A fecha 28/09/2026 los jobs recientes de GitHub Actions terminan antes de exponer pasos de ejecución (`steps = null`) en los tres stacks. Esto se trata como blocker de infraestructura CI hasta identificar el mensaje de cuenta/runner en la interfaz de GitHub Actions.
+### Incidencia y resolución
+El bloqueo del 28/09/2026 ocurrió antes de asignar runner (`steps=[]`). Para el release actual se adopta un runner self-hosted Linux en el VPS VAFTEC, evitando depender de capacidad/minutos GitHub-hosted para Backend, Web y Android.
 
 ## M. Autorización
 - [ ] Auditoría final emitida.
