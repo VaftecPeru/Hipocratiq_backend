@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Contracts\EpidemiologyAnalyzer;
 use App\Contracts\VideoMeetingProvider;
 use App\Enums\LaboratoryOrderStatus;
@@ -468,11 +469,12 @@ class DoctorWorkspaceController extends Controller
     {
         $doctor = $request->user();
         $clinic = DoctorClinicScope::clinicOrNull($doctor);
-        $from = now()->subDays(90)->startOfDay();
-        $consultations = $this->doctorQuery(Consultation::query(), $doctor, $clinic)->whereBetween('created_at', [$from, now()]);
-        $laboratoryOrders = $this->doctorQuery(LaboratoryOrder::query(), $doctor, $clinic)->whereBetween('ordered_at', [$from, now()]);
-        $teleconsultations = $this->doctorQuery(Teleconsultation::query(), $doctor, $clinic)->whereBetween('scheduled_at', [$from, now()]);
-        $prescriptions = $this->doctorQuery(DoctorPrescription::query(), $doctor, $clinic)->whereBetween('issued_at', [$from, now()]);
+        $now = CarbonImmutable::now();
+        $from = $now->subDays(90)->startOfDay();
+        $consultations = $this->doctorQuery(Consultation::query(), $doctor, $clinic)->whereBetween('created_at', [$from, $now]);
+        $laboratoryOrders = $this->doctorQuery(LaboratoryOrder::query(), $doctor, $clinic)->whereBetween('ordered_at', [$from, $now]);
+        $teleconsultations = $this->doctorQuery(Teleconsultation::query(), $doctor, $clinic)->whereBetween('scheduled_at', [$from, $now]);
+        $prescriptions = $this->doctorQuery(DoctorPrescription::query(), $doctor, $clinic)->whereBetween('issued_at', [$from, $now]);
         $monitoredPatients = $this->connectedPatientsQuery($doctor, $clinic)
             ->whereHas('consultations', function (Builder $query) use ($doctor, $clinic, $from): void {
                 $query->where('doctor_user_id', $doctor->id)->whereBetween('created_at', [$from, now()]);
@@ -501,7 +503,14 @@ class DoctorWorkspaceController extends Controller
             ->filter()
             ->unique()
             ->values();
-        $analysisMonitoredPatients = $consentedPatientIds->count();
+        $activePatientIds = collect([
+            (clone $consultations)->pluck('patient_profile_id'),
+            (clone $laboratoryOrders)->pluck('patient_profile_id'),
+            (clone $teleconsultations)->pluck('patient_profile_id'),
+            (clone $prescriptions)->pluck('patient_profile_id'),
+        ])->flatten()->filter()->unique()->values();
+        $analysisPatientIds = $consentedPatientIds->intersect($activePatientIds)->values();
+        $analysisMonitoredPatients = $analysisPatientIds->count();
 
         $analysis = [
             'trend' => 'not_configured',
@@ -529,18 +538,39 @@ class DoctorWorkspaceController extends Controller
                         'period_days' => 90,
                         'metrics' => [
                             'monitored_patients' => $analysisMonitoredPatients,
-                            'consultations' => (clone $consultations)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
-                            'laboratory_orders' => (clone $laboratoryOrders)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
-                            'teleconsultations' => (clone $teleconsultations)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
-                            'prescriptions' => (clone $prescriptions)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'consultations' => (clone $consultations)->whereIn('patient_profile_id', $analysisPatientIds)->count(),
+                            'laboratory_orders' => (clone $laboratoryOrders)->whereIn('patient_profile_id', $analysisPatientIds)->count(),
+                            'teleconsultations' => (clone $teleconsultations)->whereIn('patient_profile_id', $analysisPatientIds)->count(),
+                            'prescriptions' => (clone $prescriptions)->whereIn('patient_profile_id', $analysisPatientIds)->count(),
                         ],
                     ]);
                     $analysisAvailable = true;
                     $message = is_string($analysis['summary'] ?? null)
                         ? $analysis['summary']
                         : 'Análisis epidemiológico agregado disponible para revisión humana.';
+
+                    $this->recordDoctorEpidemiologyAudit(
+                        request: $request,
+                        doctor: $doctor,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.completed',
+                        cohortSize: $analysisMonitoredPatients,
+                        minimumCohortSize: $minimumCohortSize,
+                        provider: $this->epidemiologyAnalyzer->provider(),
+                    );
                 } catch (Throwable) {
                     $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+
+                    $this->recordDoctorEpidemiologyAudit(
+                        request: $request,
+                        doctor: $doctor,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.failed',
+                        cohortSize: $analysisMonitoredPatients,
+                        minimumCohortSize: $minimumCohortSize,
+                        provider: $this->epidemiologyAnalyzer->provider(),
+                        critical: true,
+                    );
                 }
             }
         }
@@ -581,6 +611,36 @@ class DoctorWorkspaceController extends Controller
                 ],
             ],
         ]);
+    }
+
+    private function recordDoctorEpidemiologyAudit(
+        Request $request,
+        User $doctor,
+        ?Clinic $clinic,
+        string $action,
+        int $cohortSize,
+        int $minimumCohortSize,
+        string $provider,
+        bool $critical = false,
+    ): void {
+        app(RecordAdminAuditEvent::class)->handle(
+            actor: $doctor,
+            request: $request,
+            module: 'epidemiology',
+            action: $action,
+            resourceType: 'doctor',
+            resourceId: $doctor->id,
+            resourceLabel: $doctor->name,
+            clinic: $clinic,
+            metadata: [
+                'scope' => PatientConsentScope::EpidemiologyAnonymized->value,
+                'policy_version' => (string) config('clinical.consent_policy_version'),
+                'cohort_size' => $cohortSize,
+                'minimum_cohort_size' => $minimumCohortSize,
+                'provider' => $provider,
+            ],
+            critical: $critical,
+        );
     }
 
     /** @param Builder<DoctorPrescription|LaboratoryOrder|Teleconsultation|Consultation|Appointment> $query */
