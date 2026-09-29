@@ -123,3 +123,7 @@ jobs:
           docker run --rm hipocratiq-backend:ci pg_dump --version
           docker run --rm hipocratiq-backend:ci pg_restore --version
 
+      - name: Cleanup backend CI image
+        if: always()
+        run: docker image rm --force hipocratiq-backend:ci 2>/dev/null || true
+
