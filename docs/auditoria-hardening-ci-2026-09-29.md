@@ -11,81 +11,120 @@ Los jobs recientes de Backend, Frontend y Mobile terminaban antes de ejecutar el
 - `runner_name` vacío;
 - `steps=[]`;
 - ejecución de pocos segundos;
-- el reintento reproducía el mismo patrón.
+- los reintentos reproducían el mismo patrón.
 
-Se comparó la última ejecución verde con las primeras rojas y el YAML no había cambiado en el punto de transición. Esto descarta una regresión de sintaxis como causa primaria.
+Se comparó la última ejecución verde con las primeras rojas y los YAML eran idénticos en el punto de transición. La evidencia no corresponde a una regresión de sintaxis del workflow.
 
-La evidencia es compatible con un bloqueo de capacidad/cuota de GitHub-hosted runners en repositorios privados. La API disponible no expone el mensaje de facturación de la cuenta, por lo que se documenta como causa operacional probable, no como una conclusión basada únicamente en el código.
+El patrón es compatible con indisponibilidad/capacidad de GitHub-hosted runners para la cuenta. La API disponible no expone el mensaje de facturación de la cuenta, por lo que no se atribuye el bloqueo a una causa de facturación como hecho probado.
 
-## 2. Solución adoptada
+## 2. Decisión de infraestructura
 
-VAFTEC optó por usar su VPS Linux como runner self-hosted para los gates Linux.
+VAFTEC decidió utilizar su VPS para ejecutar las pruebas directamente.
 
-Los jobs Backend, Web y Android ahora usan:
+Se descartó instalar un runner permanente de GitHub Actions en el servidor productivo. En su lugar:
 
-`[self-hosted, linux, x64, hipocratiq-vps]`
+- GitHub Actions queda como verificación secundaria;
+- los gates críticos se ejecutan mediante scripts versionados;
+- PHP, Node, Playwright, Flutter, Android SDK y PostgreSQL de prueba se encapsulan en Docker;
+- los checkouts de validación deben vivir separados de los checkouts productivos;
+- no se cargan secretos ni bases productivas en las suites.
 
-El job iOS permanece manual sobre macOS y no bloquea el release Web/Backend/Android de esta etapa.
+Guía operativa: `docs/VPS_VALIDATION.md`.
 
-Se añadió `docs/SELF_HOSTED_RUNNER_VPS.md` con la configuración segura del runner.
+## 3. Backend — mantenimiento aplicado
 
-## 3. Seguridad del runner VPS
-
-Para evitar ejecutar código no validado dentro del mismo host de producción:
-
-- se retiró el trigger automático por Pull Request de los workflows self-hosted;
-- se permite `push` a `develop`/`main` y ejecución manual;
-- se añadió `concurrency` para cancelar ejecuciones obsoletas;
-- el E2E Web elimina sus procesos en segundo plano al finalizar;
-- iOS solo se habilita manualmente;
-- se exige usuario Linux dedicado y secretos fuera del repositorio.
-
-## 4. Backend — mantenimiento aplicado
-
-- Validación estricta de `BACKUP_SCHEDULE` antes de registrar el cron.
-- Un cron inválido deja evidencia en log y no crea una programación ambigua.
+- Validación estricta de `BACKUP_SCHEDULE`.
+- Un cron inválido se registra y no crea una programación ambigua.
 - Telemedicina exige consentimiento vigente al crear y al iniciar una sesión.
-- Prueba negativa de revocación de consentimiento de telemedicina.
-- IA epidemiológica del médico calcula la cohorte externa únicamente con pacientes:
+- Prueba negativa de revocación de consentimiento.
+- IA epidemiológica médica utiliza únicamente pacientes:
   - conectados al médico;
   - con consentimiento epidemiológico vigente;
   - con actividad clínica real dentro de la ventana de 90 días.
-- Se auditan llamadas externas de IA epidemiológica del médico, tanto exitosas como fallidas.
-- Se añadió prueba de regresión para cohorte activa + auditoría.
-- CI Backend se enruta al runner VPS.
+- Auditoría de llamadas externas de IA completadas/fallidas.
+- Prueba de regresión de cohorte activa y auditoría.
+- `Dockerfile.ci` para toolchain Backend aislado.
+- `scripts/validate-vps.sh` con Composer audit, Pint, PHPUnit, PostgreSQL, migraciones, UAT, performance, health y build productivo.
+- El PostgreSQL de prueba no publica el puerto fijo 5432 sobre producción.
+- `scripts/deploy-production.sh` con backup/verificación, fast-forward, migraciones, health y rollback de código.
 
-## 5. Web — mantenimiento aplicado
+## 4. Web — mantenimiento aplicado
 
-- Se eliminó la rama `develop` duplicada del YAML.
-- `workflow_dispatch` disponible.
-- `concurrency` habilitado.
-- Web CI usa runner VPS.
-- E2E usa runner VPS, pero solo en ejecución manual o `main`.
-- Cleanup explícito de procesos fake-backend/Next al terminar E2E.
+- Se eliminó la entrada duplicada de `develop`.
+- `workflow_dispatch` y `concurrency` quedan disponibles en GitHub Actions.
+- E2E completo se reserva para PR/main/manual en GitHub-hosted.
+- Cleanup de procesos E2E.
+- `front_web/Dockerfile.ci` encapsula Node 22.
+- `front_web/Dockerfile.e2e` encapsula Playwright/Chromium.
+- `scripts/validate-vps.sh` ejecuta audit, typecheck, regresiones, lint, build, E2E por rol, imagen productiva y smoke.
+- `scripts/deploy-production.sh` actualiza el contenedor Web con rollback de código si falla el smoke.
 
-## 6. Mobile — mantenimiento aplicado
+## 5. Mobile Android — mantenimiento aplicado
 
-- Android usa runner VPS.
-- Se prepara Java 17 + Android SDK + Flutter dentro del workflow.
-- Se mantienen gates: format, analyze, tests, APK y AAB de validación.
-- iOS queda como ejecución manual opcional; requiere macOS.
-- La firma Android de producción sigue separada de los binarios técnicos de validación.
+- GitHub-hosted permanece como evidencia secundaria.
+- iOS se mantiene como gate manual para evitar consumir macOS en cada push.
+- `front_movil/Dockerfile.android-ci` encapsula Flutter 3.44.4 + Android SDK.
+- `scripts/validate-mobile-vps.sh` ejecuta format/analyze/tests y genera APK/AAB de validación con checksums.
+- La firma Android de publicación permanece separada y requiere keystore real.
 
-## 7. Estado de release
+## 6. Migraciones y rollback
 
-`main` continúa sin modificaciones.
+Entre `main` y el candidato se agregan únicamente cuatro tablas:
 
-La rama de auditoría todavía no debe promoverse a `main` hasta obtener evidencia real en el VPS:
+- `clinical_audit_events`;
+- `patient_consents`;
+- `clinical_codings`;
+- `imaging_studies`.
 
-1. Backend CI verde.
-2. Web CI verde.
-3. Web E2E verde.
-4. Android CI verde.
-5. UAT clínico + consentimiento verdes.
-6. Migraciones PostgreSQL válidas.
-7. Backup creado y verificado; restore ensayado sobre entorno controlado.
-8. Auditoría final sin P0.
+No existen operaciones destructivas en `up()` para estas migraciones. El rollback automático de deploy se limita al código. Un restore de PostgreSQL requiere confirmación humana y el ID exacto del backup.
 
-## 8. Alcance de iOS
+## 7. Interoperabilidad / imagenología
 
-El release Web/Backend/Android no debe quedar bloqueado por iOS si iOS no forma parte del paquete de publicación actual. Un `.ipa` exige macOS, certificado y provisioning profile de Apple; será un gate de publicación iOS independiente.
+El estado actual ya no es “sin imagenología”:
+
+- existe workflow médico de `ImagingStudy`;
+- configuración para DICOMweb/visor;
+- auditoría de estudios;
+- recurso FHIR R5 `ImagingStudy`.
+
+Esto significa **DICOM/PACS-ready a nivel de integración y metadatos**, no un PACS/VNA productivo. La conexión real a PACS/DICOMweb sigue dependiendo del proveedor y credenciales externas.
+
+## 8. Facturación
+
+El core dispone de:
+
+- adapter `BillingGateway`;
+- idempotency key saliente;
+- pagos manuales auditados;
+- reembolsos manuales serializados con row lock.
+
+El adapter HTTP actual exige respuesta síncrona `succeeded`. No existe webhook provider-specific dentro del monolito. Antes del go-live de cobro real debe definirse si los webhooks pertenecen al servicio externo indicado por `BILLING_HTTP_ENDPOINT` o al core HIPOCRATIQ; no se implementa un webhook genérico sin definir contrato/proveedor.
+
+## 9. Gate antes de integrar a develop
+
+La rama técnica no debe integrarse hasta:
+
+1. revisión final del diff;
+2. scripts VPS sintácticamente válidos;
+3. checklist/auditoría coherentes;
+4. autorización explícita para merge a `develop`.
+
+Después del merge a `develop`, en VPS aislado:
+
+1. Backend verde;
+2. Web verde;
+3. Playwright E2E verde;
+4. Android verde;
+5. UAT clínico/consentimiento verde;
+6. migraciones PostgreSQL verdes;
+7. backup creado/verificado y restore ensayado en entorno controlado;
+8. sin P0 abiertos.
+
+Solo entonces se promueve `develop` a `main`.
+
+## 10. Estado
+
+- `develop`: sin modificar por esta auditoría.
+- `main`: sin modificar.
+- Backend PR #39: draft hacia `develop`.
+- Frontend PR #40: draft hacia `develop`.
