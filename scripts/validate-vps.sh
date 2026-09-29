@@ -58,6 +58,8 @@ run_ci() {
     -e CACHE_STORE=array \
     -e SESSION_DRIVER=array \
     -e QUEUE_CONNECTION=sync \
+    -e DB_CONNECTION=sqlite \
+    -e DB_DATABASE=:memory: \
     "$IMAGE" "$@"
 }
 
