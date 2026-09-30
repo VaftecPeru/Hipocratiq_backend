@@ -1,6 +1,7 @@
 .git
 .env
 .env.*
+!.env.example
 .auth-cookies.txt
 .codebase-memory
 .phpunit.result.cache

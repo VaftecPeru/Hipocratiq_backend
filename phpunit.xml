@@ -19,6 +19,10 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_KEY" value="base64:YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="/>
+        <env name="APP_URL" value="http://localhost"/>
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost:3000,127.0.0.1:3000"/>
+        <env name="CORS_ALLOWED_ORIGINS" value="http://localhost:3000"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
@@ -31,6 +35,8 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="SMS_DRIVER" value="array"/>
+        <env name="OTP_HASH_KEY" value="hipocratiq-test-otp-hash-key"/>
+        <env name="OTP_FIXED_CODE" value="123456"/>
         <env name="BILLING_DRIVER" value="simulated"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
