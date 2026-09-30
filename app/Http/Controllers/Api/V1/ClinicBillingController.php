@@ -217,7 +217,8 @@ class ClinicBillingController extends Controller
                 'clinic_invoices.id',
             )
             ->where('clinic_invoices.clinic_id', $clinic->getKey())
-            ->whereBetween('clinic_invoices.issue_date', [$from->toDateString(), $to->toDateString()])
+            ->whereDate('clinic_invoices.issue_date', '>=', $from->toDateString())
+            ->whereDate('clinic_invoices.issue_date', '<=', $to->toDateString())
             ->where('clinic_invoices.status', '!=', ClinicInvoiceStatus::Voided->value)
             ->when($currency, fn (Builder $query, string $value): Builder => $query->where('clinic_invoices.currency', $value))
             ->select('clinic_invoices.currency')
@@ -287,7 +288,8 @@ class ClinicBillingController extends Controller
                     ->where('status', ClinicInvoicePaymentStatus::Confirmed->value)
                     ->orderBy('paid_at'),
             ])
-            ->whereBetween('issue_date', [$from->toDateString(), $to->toDateString()])
+            ->whereDate('issue_date', '>=', $from->toDateString())
+            ->whereDate('issue_date', '<=', $to->toDateString())
             ->when($currency, fn (Builder $query, string $value): Builder => $query->where('currency', $value))
             ->latest('issue_date')
             ->latest('id')
