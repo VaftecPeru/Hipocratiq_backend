@@ -90,5 +90,8 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "conflict": {
+        "league/flysystem": "<3.35.3"
+    }
 }
