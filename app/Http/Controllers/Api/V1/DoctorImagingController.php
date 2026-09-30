@@ -143,6 +143,7 @@ final class DoctorImagingController extends Controller
     {
         if ($clinic === null) {
             abort_unless($patient->clinic_id === null && $patient->owner_doctor_user_id === $doctor->id, 404);
+
             return;
         }
 
