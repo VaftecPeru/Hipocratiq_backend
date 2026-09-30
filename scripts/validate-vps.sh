@@ -70,7 +70,7 @@ run_ci composer audit --locked --no-interaction
 echo "[2b/11] Baseline de versiones de seguridad"
 run_ci php -r '
 require "vendor/autoload.php";
-use Composer\\InstalledVersions;
+use Composer\InstalledVersions;
 $requirements = [
     "laravel/framework" => "13.30.0",
     "league/flysystem" => "3.35.3",
