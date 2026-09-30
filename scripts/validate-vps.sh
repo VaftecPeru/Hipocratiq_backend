@@ -67,6 +67,23 @@ echo "[2/11] Composer validate + audit"
 run_ci composer validate --no-interaction
 run_ci composer audit --locked --no-interaction
 
+echo "[2b/11] Baseline de versiones de seguridad"
+run_ci php -r '
+require "vendor/autoload.php";
+$requirements = [
+    "laravel/framework" => "13.30.0",
+    "league/flysystem" => "3.35.3",
+];
+foreach ($requirements as $package => $minimum) {
+    $version = \Composer\InstalledVersions::getVersion($package);
+    if ($version === null || version_compare($version, $minimum, "<")) {
+        fwrite(STDERR, sprintf("ERROR: %s %s; se requiere >= %s\n", $package, $version ?? "no instalado", $minimum));
+        exit(1);
+    }
+    printf("OK: %s %s >= %s\n", $package, $version, $minimum);
+}
+'
+
 echo "[3/11] Laravel Pint"
 run_ci vendor/bin/pint --test
 
