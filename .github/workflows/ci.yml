@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   lint:
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GITHUB_HOSTED_CI == 'true'
     runs-on: ubuntu-latest
 
     services:
