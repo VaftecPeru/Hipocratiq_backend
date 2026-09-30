@@ -7,6 +7,7 @@ RUN apt-get update \
 RUN install-php-extensions \
     pcntl \
     pdo_pgsql \
+    pdo_sqlite \
     redis \
     zip \
     bcmath \
