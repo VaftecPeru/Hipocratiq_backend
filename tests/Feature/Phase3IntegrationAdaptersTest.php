@@ -19,6 +19,7 @@ class Phase3IntegrationAdaptersTest extends TestCase
 {
     public function test_openai_epidemiology_adapter_uses_aggregate_snapshot_and_parses_json(): void
     {
+        config()->set('integrations.ai.enabled', true);
         config()->set('integrations.ai.api_key', 'test-key');
         config()->set('integrations.ai.model', 'test-model');
         config()->set('integrations.ai.base_url', 'https://api.openai.test/v1');

@@ -128,8 +128,11 @@ class DoctorWorkspaceTest extends TestCase
             ->getJson('/api/v1/auth/doctor/messages')
             ->assertJsonPath('meta.unread', 0);
 
+        $reportFrom = now()->startOfDay()->toDateString();
+        $reportTo = $scheduledAt->copy()->endOfDay()->toDateString();
+
         $this->withSpaOrigin()
-            ->getJson('/api/v1/auth/doctor/reports')
+            ->getJson('/api/v1/auth/doctor/reports?from='.$reportFrom.'&to='.$reportTo)
             ->assertOk()
             ->assertJsonPath('data.metrics.prescriptions', 1)
             ->assertJsonPath('data.metrics.laboratory_orders', 1)

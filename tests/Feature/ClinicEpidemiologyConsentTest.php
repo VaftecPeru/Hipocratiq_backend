@@ -12,6 +12,7 @@ use App\Models\PatientConsent;
 use App\Models\PatientProfile;
 use App\Models\User;
 use App\Services\Epidemiology\OpenAiEpidemiologyAnalyzer;
+use App\Support\Clinical\ActivePatientConsent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Tests\TestCase;
@@ -51,7 +52,7 @@ class ClinicEpidemiologyConsentTest extends TestCase
         ]);
 
         $analyzer = new RecordingAggregateAnalyzer;
-        $response = (new ClinicEpidemiologyController($analyzer))->show(
+        $response = (new ClinicEpidemiologyController($analyzer, app(ActivePatientConsent::class)))->show(
             $this->requestForClinic($clinic),
         );
         $payload = $response->getData(true);
@@ -98,7 +99,7 @@ class ClinicEpidemiologyConsentTest extends TestCase
         ]);
 
         $analyzer = new RecordingAggregateAnalyzer;
-        $response = (new ClinicEpidemiologyController($analyzer))->show(
+        $response = (new ClinicEpidemiologyController($analyzer, app(ActivePatientConsent::class)))->show(
             $this->requestForClinic($clinic),
         );
         $payload = $response->getData(true);
