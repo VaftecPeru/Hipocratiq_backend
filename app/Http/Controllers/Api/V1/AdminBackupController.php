@@ -85,8 +85,7 @@ class AdminBackupController extends Controller
         ?string $backupId,
         bool $critical,
         array $metadata,
-    ): void
-    {
+    ): void {
         $actor = $request->user();
 
         if ($actor === null) {
