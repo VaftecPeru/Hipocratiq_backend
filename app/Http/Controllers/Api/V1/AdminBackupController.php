@@ -18,7 +18,7 @@ class AdminBackupController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (!$this->backupManager->configured()) {
+        if (! $this->backupManager->configured()) {
             return response()->json([
                 'success' => false,
                 'message' => 'El servicio de respaldos no está configurado.',
@@ -77,7 +77,7 @@ class AdminBackupController extends Controller
     }
 
     /**
-     * @param array<string, mixed> $metadata
+     * @param  array<string, mixed>  $metadata
      */
     private function record(
         Request $request,
@@ -85,7 +85,8 @@ class AdminBackupController extends Controller
         ?string $backupId,
         bool $critical,
         array $metadata,
-    ): void {
+    ): void
+    {
         $actor = $request->user();
 
         if ($actor === null) {
