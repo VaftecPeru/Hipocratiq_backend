@@ -31,6 +31,8 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="SMS_DRIVER" value="array"/>
+        <env name="OTP_HASH_KEY" value="hipocratiq-test-otp-hash-key"/>
+        <env name="OTP_FIXED_CODE" value="123456"/>
         <env name="BILLING_DRIVER" value="simulated"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
