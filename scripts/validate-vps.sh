@@ -320,7 +320,7 @@ docker run --rm --network "$NETWORK" \
     }
   '
 
-echo "[7/12] UAT clínico explícito"
+echo "[8/12] UAT clínico explícito"
 docker run --rm \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
@@ -333,7 +333,7 @@ docker run --rm \
   -e DB_DATABASE=:memory: \
   "$IMAGE" php artisan test tests/Feature/Phase4ClinicalUatTest.php tests/Feature/DoctorWorkspaceTest.php tests/Feature/ClinicEpidemiologyConsentTest.php
 
-echo "[8/12] Performance smoke"
+echo "[9/12] Performance smoke"
 docker run -d --name "$APP" --network "$NETWORK" \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
@@ -365,16 +365,16 @@ docker run --rm --network "$NETWORK" \
   -e PERF_MAX_P95_SECONDS="${PERF_MAX_P95_SECONDS:-1.500}" \
   "$IMAGE" bash scripts/performance-smoke.sh "http://$APP:8000/api/v1/auth/register/clinic/plans"
 
-echo "[9/12] Compose + deploy script"
+echo "[10/12] Compose + deploy script"
 docker compose --env-file .env.example config --quiet
 bash -n scripts/deploy-production.sh
 
-echo "[10/12] Build imagen de producción"
+echo "[11/12] Build imagen de producción"
 docker build -t "$RELEASE_IMAGE" .
 docker run --rm "$RELEASE_IMAGE" pg_dump --version
 docker run --rm "$RELEASE_IMAGE" pg_restore --version
 
-echo "[11/12] Route list + readiness contract"
+echo "[12/12] Route list + readiness contract"
 run_ci php artisan route:list >/dev/null
 run_ci php artisan test tests/Feature/HealthEndpointTest.php
 
