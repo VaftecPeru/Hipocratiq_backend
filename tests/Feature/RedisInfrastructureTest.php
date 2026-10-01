@@ -14,11 +14,22 @@ class RedisInfrastructureTest extends TestCase
 {
     private static ?bool $redisAvailable = null;
 
+    private bool $redisRequired = false;
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        $this->redisRequired = filter_var(
+            (string) env('REDIS_INTEGRATION_REQUIRED', 'false'),
+            FILTER_VALIDATE_BOOL,
+        );
+
         if (self::$redisAvailable === false) {
+            if ($this->redisRequired) {
+                $this->fail('Redis integration is required for this gate but is not available.');
+            }
+
             $this->markTestSkipped('Redis integration is not available.');
         }
 
@@ -28,8 +39,16 @@ class RedisInfrastructureTest extends TestCase
             }
 
             self::$redisAvailable = true;
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
             self::$redisAvailable = false;
+
+            if ($this->redisRequired) {
+                $this->fail(
+                    'Redis integration is required for this gate but is not available: '
+                    .$exception->getMessage(),
+                );
+            }
+
             $this->markTestSkipped('Redis integration is not available.');
         }
     }
