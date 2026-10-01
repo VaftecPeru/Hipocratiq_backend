@@ -6,11 +6,8 @@ cd "$ROOT_DIR"
 
 echo "== HIPOCRATIQ Backend preflight =="
 
-if [[ ! -f vendor/autoload.php ]]; then
-  composer install --no-interaction --no-progress
-fi
-
-composer validate --no-interaction
+composer install --no-interaction --no-progress --prefer-dist
+composer validate --strict --no-interaction
 composer audit --locked --no-interaction
 vendor/bin/pint --test
 
