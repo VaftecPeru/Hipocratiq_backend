@@ -151,7 +151,7 @@ Estos puntos son obligatorios únicamente cuando iOS forme parte del paquete de 
 ## L. Evidencia de CI / VPS
 - [ ] Checkout Backend de validación separado de producción.
 - [ ] Checkout Frontend/Mobile de validación separado de producción.
-- [ ] Backend `scripts/validate-vps.sh` verde.
+- [ ] Backend `scripts/validate-vps.sh` verde, incluyendo `REDIS_INTEGRATION_REQUIRED=true`.
 - [ ] Frontend `scripts/validate-vps.sh` verde.
 - [ ] Android `scripts/validate-mobile-vps.sh` verde.
 - [ ] UAT clínico incluido en evidencia Backend.
