@@ -11,7 +11,7 @@
     "require": {
         "php": "^8.4",
         "ext-redis": "*",
-        "laravel/framework": "^13.8",
+        "laravel/framework": "^13.30",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
         "phpoffice/phpspreadsheet": "^5.1"
