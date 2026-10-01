@@ -10,12 +10,21 @@ samples="$(mktemp)"
 sorted="$(mktemp)"
 trap 'rm -f "$samples" "$sorted"' EXIT
 
-for _ in 1 2 3; do
-  curl --fail --silent --show-error --output /dev/null "$URL"
+for warmup in 1 2 3; do
+  body="$(mktemp)"
+  status="$(curl --silent --show-error --output "$body" --write-out '%{http_code}' -H 'Accept: application/json' "$URL")"
+  if [[ "$status" != "200" ]]; then
+    echo "Performance warmup failed: HTTP $status on request $warmup." >&2
+    echo "Response body:" >&2
+    cat "$body" >&2 || true
+    rm -f "$body"
+    exit 1
+  fi
+  rm -f "$body"
 done
 
 for ((i=1; i<=REQUESTS; i++)); do
-  result="$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}' "$URL")"
+  result="$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}' -H 'Accept: application/json' "$URL")"
   status="${result%% *}"
   elapsed="${result#* }"
 
