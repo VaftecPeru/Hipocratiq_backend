@@ -67,6 +67,9 @@ jobs:
       - name: Audit Composer dependencies
         run: composer audit --locked --no-interaction
 
+      - name: Validate minimum security versions
+        run: php scripts/check-security-baseline.php
+
       - name: Check code style
         run: vendor/bin/pint --test
 
