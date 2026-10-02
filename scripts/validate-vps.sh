@@ -59,6 +59,7 @@ run_ci() {
     -e SESSION_DRIVER=array \
     -e QUEUE_CONNECTION=sync \
     -e DB_CONNECTION=sqlite \
+    -e DB_URL= \
     -e DB_DATABASE=:memory: \
     "$IMAGE" "$@"
 }
@@ -83,6 +84,7 @@ docker run --rm \
   -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
   -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
   -e DB_DATABASE=:memory: \
   "$IMAGE" composer test
 
@@ -181,6 +183,7 @@ docker run --rm \
   -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
   -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
   -e DB_DATABASE=:memory: \
   "$IMAGE" php artisan test tests/Feature/Phase4ClinicalUatTest.php tests/Feature/DoctorWorkspaceTest.php tests/Feature/ClinicEpidemiologyConsentTest.php
 
