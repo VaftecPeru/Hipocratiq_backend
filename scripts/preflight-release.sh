@@ -9,6 +9,7 @@ echo "== HIPOCRATIQ Backend preflight =="
 composer install --no-interaction --no-progress --prefer-dist
 composer validate --strict --no-interaction
 composer audit --locked --no-interaction
+php scripts/check-security-baseline.php
 vendor/bin/pint --test
 
 export APP_ENV=testing

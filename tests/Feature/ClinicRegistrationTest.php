@@ -49,6 +49,36 @@ class ClinicRegistrationTest extends TestCase
         Plan::query()->create(['key' => 'professional', 'name' => 'Profesional', 'monthly_price_cents' => 9900, 'annual_price_cents' => 95000, 'currency' => 'USD', 'features' => [], 'publicly_selectable' => true, 'is_active' => true]);
     }
 
+    public function test_public_plan_catalog_returns_only_active_public_plans(): void
+    {
+        Plan::query()->create([
+            'key' => 'enterprise',
+            'name' => 'Enterprise',
+            'monthly_price_cents' => 0,
+            'annual_price_cents' => 0,
+            'currency' => 'USD',
+            'features' => [],
+            'publicly_selectable' => false,
+            'is_active' => true,
+        ]);
+        Plan::query()->create([
+            'key' => 'legacy',
+            'name' => 'Legacy',
+            'monthly_price_cents' => 1000,
+            'annual_price_cents' => 10000,
+            'currency' => 'USD',
+            'features' => [],
+            'publicly_selectable' => true,
+            'is_active' => false,
+        ]);
+
+        $this->getJson('/api/v1/auth/register/clinic/plans')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.key', 'basic')
+            ->assertJsonPath('data.1.key', 'professional');
+    }
+
     public function test_clinic_registration_creates_all_records_only_after_plan_and_otp(): void
     {
         $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/register/clinic/draft', $this->payload());
