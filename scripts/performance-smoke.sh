@@ -10,20 +10,35 @@ samples="$(mktemp)"
 sorted="$(mktemp)"
 trap 'rm -f "$samples" "$sorted"' EXIT
 
-for _ in 1 2 3; do
-  curl --fail --silent --show-error --output /dev/null "$URL"
+for warmup in 1 2 3; do
+  body="$(mktemp)"
+  result="$(curl --silent --show-error --output "$body" --write-out '%{http_code} %{time_total}' "$URL")"
+  status="${result%% *}"
+
+  if [[ "$status" != "200" ]]; then
+    echo "Performance warmup failed: HTTP $status on request $warmup." >&2
+    cat "$body" >&2 || true
+    rm -f "$body"
+    exit 1
+  fi
+
+  rm -f "$body"
 done
 
 for ((i=1; i<=REQUESTS; i++)); do
-  result="$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}' "$URL")"
+  body="$(mktemp)"
+  result="$(curl --silent --show-error --output "$body" --write-out '%{http_code} %{time_total}' "$URL")"
   status="${result%% *}"
   elapsed="${result#* }"
 
   if [[ "$status" != "200" ]]; then
     echo "Performance smoke failed: HTTP $status on request $i." >&2
+    cat "$body" >&2 || true
+    rm -f "$body"
     exit 1
   fi
 
+  rm -f "$body"
   printf '%s\n' "$elapsed" >> "$samples"
 done
 
