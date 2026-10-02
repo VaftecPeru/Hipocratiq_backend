@@ -5,10 +5,23 @@ URL="${1:-http://127.0.0.1:8000/api/v1/auth/register/clinic/plans}"
 REQUESTS="${PERF_REQUESTS:-25}"
 MAX_AVG="${PERF_MAX_AVG_SECONDS:-0.750}"
 MAX_P95="${PERF_MAX_P95_SECONDS:-1.500}"
+EXPECT_JSON_SUCCESS="${PERF_EXPECT_JSON_SUCCESS:-true}"
 
 samples="$(mktemp)"
 sorted="$(mktemp)"
-trap 'rm -f "$samples" "$sorted"' EXIT
+probe="$(mktemp)"
+trap 'rm -f "$samples" "$sorted" "$probe"' EXIT
+
+if [[ "$EXPECT_JSON_SUCCESS" == "true" ]]; then
+  probe_status="$(curl --silent --show-error --output "$probe" --write-out '%{http_code}' "$URL" || true)"
+
+  if [[ "$probe_status" != "200" ]] \
+    || ! grep -Eq '"success"[[:space:]]*:[[:space:]]*true' "$probe"; then
+    echo "Performance smoke failed: functional JSON probe was not successful (HTTP $probe_status)." >&2
+    cat "$probe" >&2
+    exit 1
+  fi
+fi
 
 for _ in 1 2 3; do
   curl --fail --silent --show-error --output /dev/null "$URL"
