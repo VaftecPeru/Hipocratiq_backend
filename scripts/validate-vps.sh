@@ -211,11 +211,15 @@ for attempt in {1..30}; do
   sleep 1
 done
 
-docker run --rm --network "$NETWORK" \
+if ! docker run --rm --network "$NETWORK" \
   -e PERF_REQUESTS="${PERF_REQUESTS:-25}" \
   -e PERF_MAX_AVG_SECONDS="${PERF_MAX_AVG_SECONDS:-0.750}" \
   -e PERF_MAX_P95_SECONDS="${PERF_MAX_P95_SECONDS:-1.500}" \
-  "$IMAGE" bash scripts/performance-smoke.sh "http://$APP:8000/api/v1/auth/register/clinic/plans"
+  "$IMAGE" bash scripts/performance-smoke.sh "http://$APP:8000/api/v1/auth/register/clinic/plans"; then
+  echo "ERROR: falló el performance smoke; logs del contenedor:"
+  docker logs "$APP" || true
+  exit 1
+fi
 
 echo "[9/11] Compose + deploy script"
 docker compose --env-file .env.example config --quiet
