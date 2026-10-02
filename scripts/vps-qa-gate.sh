@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Fail fast before spending time building images or running the full suite.
+bash -n "$0"
+
 IMAGE="${HIPOCRATIQ_QA_IMAGE:-hipocratiq-backend-ci:qa-gate}"
 RUN_ID="${HIPOCRATIQ_QA_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
 NETWORK="hipocratiq-qa-${RUN_ID}"
@@ -65,7 +68,21 @@ docker run -d --name "$REDIS" --network "$NETWORK" \
   redis:8.2.7-alpine >/dev/null
 
 for attempt in {1..30}; do
-  if docker exec "$REDIS" redis-cli ping 2>/dev/null | grep -q '^PONG
+  if docker exec "$REDIS" redis-cli ping 2>/dev/null | grep -q '^PONG$'; then
+    echo "Redis QA listo."
+    break
+  fi
+
+  if [[ "$attempt" -eq 30 ]]; then
+    echo "ERROR: Redis QA no quedó listo."
+    docker logs "$REDIS" || true
+    exit 1
+  fi
+
+  sleep 1
+done
+
+common_env=(
   -e APP_ENV=testing
   -e APP_DEBUG=false
   -e CACHE_STORE=redis
@@ -95,6 +112,11 @@ for attempt in {1..30}; do
   -e DB_USERNAME="$DB_USER"
   -e DB_PASSWORD="$DB_PASSWORD"
 )
+
+echo "== Redis integration tests =="
+docker run --rm --network "$NETWORK" \
+  "${common_env[@]}" \
+  "$IMAGE" php artisan test --filter=RedisInfrastructureTest
 
 echo "== Backup / verify / restore drill =="
 docker run --rm --network "$NETWORK" \
@@ -197,121 +219,6 @@ bash scripts/performance-smoke.sh \
 
 echo "== Final QA container status =="
 docker ps --filter "name=$APP" --filter "name=$POSTGRES" --filter "name=$REDIS" \
-  --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-echo "Backend QA gate OK"
-; then
-    echo "Redis QA listo."
-    break
-  fi
-
-  if [[ "$attempt" -eq 30 ]]; then
-    echo "ERROR: Redis QA no quedó listo."
-    docker logs "$REDIS" || true
-    exit 1
-  fi
-
-  sleep 1
-done
-
-common_env=(
-  -e APP_ENV=testing
-  -e APP_DEBUG=false
-  -e CACHE_STORE=array
-  -e CACHE_LIMITER_STORE=array
-  -e SESSION_DRIVER=array
-  -e QUEUE_CONNECTION=sync
-  -e DB_CONNECTION=pgsql
-  -e DB_URL=
-  -e DB_HOST="$POSTGRES"
-  -e DB_PORT=5432
-  -e DB_DATABASE="$DB_NAME"
-  -e DB_USERNAME="$DB_USER"
-  -e DB_PASSWORD="$DB_PASSWORD"
-)
-
-echo "== Backup / verify / restore drill =="
-docker run --rm --network "$NETWORK" \
-  "${common_env[@]}" \
-  -e BACKUP_SERVICE_ENABLED=true \
-  -e BACKUP_SERVICE_PROVIDER=postgresql \
-  -e BACKUP_STORAGE_DISK=local \
-  -e BACKUP_PREFIX=qa-restore \
-  "$IMAGE" bash -lc '
-    set -euo pipefail
-    export PGPASSWORD="$DB_PASSWORD"
-
-    php artisan migrate:fresh --force --no-interaction
-    php artisan db:seed --force --no-interaction
-
-    psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
-      -v ON_ERROR_STOP=1 \
-      -c "CREATE TABLE qa_restore_probe (id integer PRIMARY KEY, value text NOT NULL);" \
-      -c "INSERT INTO qa_restore_probe (id, value) VALUES (1, '\''before'\'');"
-
-    create_output="$(php artisan backups:create)"
-    printf "%s\n" "$create_output"
-    backup_id="$(printf "%s\n" "$create_output" | sed -n "s/^Respaldo creado: //p" | tail -n 1)"
-
-    if [[ -z "$backup_id" ]]; then
-      echo "ERROR: no se pudo obtener el identificador del respaldo."
-      exit 1
-    fi
-
-    php artisan backups:verify "$backup_id"
-
-    psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
-      -v ON_ERROR_STOP=1 \
-      -c "UPDATE qa_restore_probe SET value = '\''after'\'' WHERE id = 1;"
-
-    php artisan backups:restore "$backup_id" --confirm="$backup_id"
-
-    restored="$(psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" \
-      -Atqc "SELECT value FROM qa_restore_probe WHERE id = 1;")"
-
-    test "$restored" = "before"
-    echo "Restore drill OK: $backup_id"
-  '
-
-echo "== Start isolated backend QA on host port $APP_PORT =="
-docker run -d \
-  --name "$APP" \
-  --network "$NETWORK" \
-  -p "127.0.0.1:${APP_PORT}:8000" \
-  "${common_env[@]}" \
-  "$IMAGE" \
-  php artisan serve --host=0.0.0.0 --port=8000 >/dev/null
-
-echo "== Wait for backend QA =="
-for attempt in {1..40}; do
-  if curl --fail --silent --show-error "http://127.0.0.1:${APP_PORT}/api/health/live" >/dev/null 2>&1; then
-    echo "Backend QA listo."
-    break
-  fi
-
-  if [[ "$attempt" -eq 40 ]]; then
-    echo "ERROR: Backend QA no inició."
-    docker ps -a --filter "name=$APP"
-    docker logs "$APP" || true
-    exit 1
-  fi
-
-  sleep 1
-done
-
-echo "== Readiness QA =="
-curl --fail --silent --show-error "http://127.0.0.1:${APP_PORT}/api/health/ready"
-echo
-
-echo "== Performance smoke QA =="
-PERF_REQUESTS="${PERF_REQUESTS:-25}" \
-PERF_MAX_AVG_SECONDS="${PERF_MAX_AVG_SECONDS:-0.750}" \
-PERF_MAX_P95_SECONDS="${PERF_MAX_P95_SECONDS:-1.500}" \
-bash scripts/performance-smoke.sh \
-  "http://127.0.0.1:${APP_PORT}/api/v1/auth/register/clinic/plans"
-
-echo "== Final QA container status =="
-docker ps --filter "name=$APP" --filter "name=$POSTGRES" \
   --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 echo "Backend QA gate OK"
