@@ -19,13 +19,29 @@ TEST_APP_KEY="base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+dump_diagnostics() {
+  set +e
+  echo ""
+  echo "=== DIAGNÓSTICO AUTOMÁTICO DEL GATE ==="
+  if docker inspect "$APP" >/dev/null 2>&1; then
+    echo "--- readiness ---"
+    docker run --rm --network "$NETWORK" "$IMAGE"       curl --silent --show-error --include "http://$APP:8000/api/health/ready" || true
+    echo ""
+    echo "--- endpoint de planes ---"
+    docker run --rm --network "$NETWORK" "$IMAGE"       curl --silent --show-error --include "http://$APP:8000/api/v1/auth/register/clinic/plans" || true
+    echo ""
+    echo "--- logs app QA ---"
+    docker logs --tail 200 "$APP" || true
+  fi
+}
+
 cleanup() {
   set +e
   docker rm -f "$APP" "$REDIS" "$POSTGRES" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm -f "$IMAGE" "$RELEASE_IMAGE" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+trap 'status=$?; if [[ $status -ne 0 ]]; then dump_diagnostics; fi; cleanup; exit $status' EXIT
 
 for command in git docker curl; do
   command -v "$command" >/dev/null 2>&1 || {
