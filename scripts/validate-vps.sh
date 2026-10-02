@@ -70,7 +70,8 @@ run_ci composer validate --strict --no-interaction
 run_ci composer audit --locked --no-interaction
 
 echo "[2b/11] Baseline de versiones de seguridad"
-run_ci php scripts/check-security-baseline.php
+docker run --rm --entrypoint php "$IMAGE" -l scripts/check-security-baseline.php
+docker run --rm --entrypoint php "$IMAGE" scripts/check-security-baseline.php
 
 echo "[3/11] Laravel Pint"
 run_ci vendor/bin/pint --test
