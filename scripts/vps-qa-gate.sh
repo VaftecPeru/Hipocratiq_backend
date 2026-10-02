@@ -168,7 +168,7 @@ docker run -d \
   -p "127.0.0.1:${APP_PORT}:8000" \
   "${common_env[@]}" \
   "$IMAGE" \
-  php artisan serve --host=0.0.0.0 --port=8000 >/dev/null
+  php -S 0.0.0.0:8000 -t public vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php >/dev/null
 
 echo "== Wait for backend QA =="
 for attempt in {1..40}; do
@@ -200,6 +200,29 @@ if [[ "$READINESS_STATUS" != "200" ]]; then
   echo "ERROR: readiness respondió HTTP $READINESS_STATUS."
   echo "== Backend QA logs =="
   docker logs "$APP" || true
+
+  echo "== Backend QA effective network environment =="
+  docker exec "$APP" sh -lc '
+    printf "DB_HOST=%s DB_PORT=%s DB_DATABASE=%s DB_USERNAME=%s\n" "$DB_HOST" "$DB_PORT" "$DB_DATABASE" "$DB_USERNAME"
+    printf "REDIS_HOST=%s REDIS_PORT=%s\n" "$REDIS_HOST" "$REDIS_PORT"
+    printf "DB_DNS=%s\n" "$(getent hosts "$DB_HOST" | awk "NR==1 {print \$1}")"
+    printf "REDIS_DNS=%s\n" "$(getent hosts "$REDIS_HOST" | awk "NR==1 {print \$1}")"
+  ' || true
+
+  echo "== PostgreSQL connectivity from backend QA container =="
+  docker exec "$APP" sh -lc '
+    export PGPASSWORD="$DB_PASSWORD"
+    pg_isready --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE"
+    psql --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USERNAME" --dbname="$DB_DATABASE" -Atqc "select 1"
+  ' || true
+
+  echo "== Redis connectivity from backend QA container =="
+  docker exec "$APP" php -r '
+    $redis = new Redis();
+    $redis->connect(getenv("REDIS_HOST"), (int) getenv("REDIS_PORT"), 2.0);
+    echo $redis->ping(), PHP_EOL;
+  ' || true
+
   echo "== PostgreSQL QA status =="
   docker exec "$POSTGRES" pg_isready -U "$DB_USER" -d "$DB_NAME" || true
   echo "== Redis QA status =="
