@@ -168,17 +168,28 @@ docker run -d \
   -p "127.0.0.1:${APP_PORT}:8000" \
   "${common_env[@]}" \
   "$IMAGE" \
-  php -S 0.0.0.0:8000 -t public vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php >/dev/null
+  php artisan serve --host=0.0.0.0 --port=8000 >/dev/null
 
 echo "== Wait for backend QA =="
 for attempt in {1..40}; do
-  if curl --fail --silent --show-error "http://127.0.0.1:${APP_PORT}/api/health/live" >/dev/null 2>&1; then
+  LIVE_FILE="$(mktemp)"
+  LIVE_STATUS="$(curl --silent --show-error \
+    --output "$LIVE_FILE" \
+    --write-out "%{http_code}" \
+    "http://127.0.0.1:${APP_PORT}/api/health/live" || true)"
+
+  if [[ "$LIVE_STATUS" == "200" ]] \
+    && grep -Eq '"success"[[:space:]]*:[[:space:]]*true' "$LIVE_FILE" \
+    && grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' "$LIVE_FILE"; then
+    rm -f "$LIVE_FILE"
     echo "Backend QA listo."
     break
   fi
 
+  rm -f "$LIVE_FILE"
+
   if [[ "$attempt" -eq 40 ]]; then
-    echo "ERROR: Backend QA no inició."
+    echo "ERROR: Backend QA no inició con una respuesta JSON válida."
     docker ps -a --filter "name=$APP"
     docker logs "$APP" || true
     exit 1
@@ -196,7 +207,12 @@ READINESS_STATUS="$(curl --silent --show-error \
 cat "$READINESS_FILE"
 echo
 
-if [[ "$READINESS_STATUS" != "200" ]]; then
+if [[ "$READINESS_STATUS" != "200" ]] \
+  || ! grep -Eq '"success"[[:space:]]*:[[:space:]]*true' "$READINESS_FILE" \
+  || ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' "$READINESS_FILE" \
+  || ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' "$READINESS_FILE" \
+  || ! grep -Eq '"redis"[[:space:]]*:[[:space:]]*"ok"' "$READINESS_FILE" \
+  || ! grep -Eq '"storage"[[:space:]]*:[[:space:]]*"ok"' "$READINESS_FILE"; then
   echo "ERROR: readiness respondió HTTP $READINESS_STATUS."
   echo "== Backend QA logs =="
   docker logs "$APP" || true
@@ -232,6 +248,26 @@ if [[ "$READINESS_STATUS" != "200" ]]; then
 fi
 
 rm -f "$READINESS_FILE"
+
+echo "== Functional probe before performance smoke =="
+PLANS_FILE="$(mktemp)"
+PLANS_STATUS="$(curl --silent --show-error \
+  --output "$PLANS_FILE" \
+  --write-out "%{http_code}" \
+  "http://127.0.0.1:${APP_PORT}/api/v1/auth/register/clinic/plans" || true)"
+cat "$PLANS_FILE"
+echo
+
+if [[ "$PLANS_STATUS" != "200" ]] \
+  || ! grep -Eq '"success"[[:space:]]*:[[:space:]]*true' "$PLANS_FILE" \
+  || ! grep -Eq '"data"[[:space:]]*:[[:space:]]*\[' "$PLANS_FILE"; then
+  echo "ERROR: el endpoint de planes no respondió JSON funcional antes del benchmark."
+  docker logs "$APP" || true
+  rm -f "$PLANS_FILE"
+  exit 1
+fi
+
+rm -f "$PLANS_FILE"
 
 echo "== Performance smoke QA =="
 PERF_REQUESTS="${PERF_REQUESTS:-25}" \
