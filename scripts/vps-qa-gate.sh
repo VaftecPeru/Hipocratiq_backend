@@ -172,7 +172,7 @@ docker run -d \
   -p "127.0.0.1:${APP_PORT}:8000" \
   "${common_env[@]}" \
   "$IMAGE" \
-  php artisan serve --host=0.0.0.0 --port=8000 >/dev/null
+  php -S 0.0.0.0:8000 -t public public/index.php >/dev/null
 
 echo "== Wait for backend QA =="
 for attempt in {1..40}; do
