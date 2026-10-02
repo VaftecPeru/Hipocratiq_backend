@@ -198,7 +198,7 @@ docker run --rm \
   -e DB_DATABASE=:memory: \
   "$IMAGE" php artisan test tests/Feature/Phase4ClinicalUatTest.php tests/Feature/DoctorWorkspaceTest.php tests/Feature/ClinicEpidemiologyConsentTest.php
 
-echo "[8/11] Performance smoke"
+echo "[8/11] Performance smoke (PostgreSQL 17 aislado)"
 docker run -d --name "$APP" --network "$NETWORK" \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
@@ -207,10 +207,15 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e CACHE_STORE=array \
   -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
-  -e DB_CONNECTION=sqlite \
-  -e DB_DATABASE=/tmp/performance.sqlite \
+  -e DB_CONNECTION=pgsql \
+  -e DB_HOST="$POSTGRES" \
+  -e DB_PORT=5432 \
+  -e DB_DATABASE=back_api \
+  -e DB_USERNAME=root \
+  -e DB_PASSWORD=root \
+  -e DB_URL= \
   "$IMAGE" bash -lc \
-  'touch /tmp/performance.sqlite && php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
@@ -219,16 +224,22 @@ for attempt in {1..30}; do
   if [[ "$attempt" -eq 30 ]]; then
     echo "ERROR: servidor de performance no quedó listo." >&2
     docker logs "$APP" || true
+    docker exec "$APP" sh -lc 'test -f storage/logs/laravel.log && tail -n 120 storage/logs/laravel.log || true' || true
     exit 1
   fi
   sleep 1
 done
 
-docker run --rm --network "$NETWORK" \
+if ! docker run --rm --network "$NETWORK" \
   -e PERF_REQUESTS="${PERF_REQUESTS:-25}" \
   -e PERF_MAX_AVG_SECONDS="${PERF_MAX_AVG_SECONDS:-0.750}" \
   -e PERF_MAX_P95_SECONDS="${PERF_MAX_P95_SECONDS:-1.500}" \
-  "$IMAGE" bash scripts/performance-smoke.sh "http://$APP:8000/api/v1/auth/register/clinic/plans"
+  "$IMAGE" bash scripts/performance-smoke.sh "http://$APP:8000/api/v1/auth/register/clinic/plans"; then
+  echo "ERROR: performance smoke falló; diagnóstico del contenedor:" >&2
+  docker logs "$APP" || true
+  docker exec "$APP" sh -lc 'test -f storage/logs/laravel.log && tail -n 160 storage/logs/laravel.log || true' || true
+  exit 1
+fi
 
 echo "[9/11] Compose + deploy script"
 docker compose --env-file .env.example config --quiet
