@@ -9,6 +9,8 @@ IMAGE="hipocratiq-backend-ci:${RUN_ID}"
 RELEASE_IMAGE="hipocratiq-backend-releasecheck:${RUN_ID}"
 NETWORK="hipocratiq-ci-${RUN_ID}"
 POSTGRES="hipocratiq-ci-postgres-${RUN_ID}"
+REDIS="hipocratiq-ci-redis-${RUN_ID}"
+REDIS_PASSWORD="qa_redis_only_not_production"
 APP="hipocratiq-ci-app-${RUN_ID}"
 LOG_DIR="${VALIDATION_LOG_DIR:-/tmp/hipocratiq-validation}"
 LOG_FILE="${LOG_DIR}/backend-${RUN_ID}.log"
@@ -17,13 +19,29 @@ TEST_APP_KEY="base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+dump_diagnostics() {
+  set +e
+  echo ""
+  echo "=== DIAGNÓSTICO AUTOMÁTICO DEL GATE ==="
+  if docker inspect "$APP" >/dev/null 2>&1; then
+    echo "--- readiness ---"
+    docker run --rm --network "$NETWORK" "$IMAGE"       curl --silent --show-error --include "http://$APP:8000/api/health/ready" || true
+    echo ""
+    echo "--- endpoint de planes ---"
+    docker run --rm --network "$NETWORK" "$IMAGE"       curl --silent --show-error --include "http://$APP:8000/api/v1/auth/register/clinic/plans" || true
+    echo ""
+    echo "--- logs app QA ---"
+    docker logs --tail 200 "$APP" || true
+  fi
+}
+
 cleanup() {
   set +e
-  docker rm -f "$APP" "$POSTGRES" >/dev/null 2>&1 || true
+  docker rm -f "$APP" "$REDIS" "$POSTGRES" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm -f "$IMAGE" "$RELEASE_IMAGE" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT
+trap 'status=$?; if [[ $status -ne 0 ]]; then dump_diagnostics; fi; cleanup; exit $status' EXIT
 
 for command in git docker curl; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -68,21 +86,8 @@ run_ci composer validate --strict --no-interaction
 run_ci composer audit --locked --no-interaction
 
 echo "[2b/11] Baseline de versiones de seguridad"
-run_ci php -r '
-require "vendor/autoload.php";
-$requirements = [
-    "laravel/framework" => "13.30.0",
-    "league/flysystem" => "3.35.3",
-];
-foreach ($requirements as $package => $minimum) {
-    $version = \\Composer\\InstalledVersions::getVersion($package);
-    if ($version === null || version_compare($version, $minimum, "<")) {
-        fwrite(STDERR, sprintf("ERROR: %s %s; se requiere >= %s\\n", $package, $version ?? "no instalado", $minimum));
-        exit(1);
-    }
-    printf("OK: %s %s >= %s\\n", $package, $version, $minimum);
-}
-'
+docker run --rm --entrypoint php "$IMAGE" -l scripts/check-security-baseline.php
+docker run --rm --entrypoint php "$IMAGE" scripts/check-security-baseline.php
 
 echo "[3/11] Laravel Pint"
 run_ci vendor/bin/pint --test
@@ -119,6 +124,41 @@ for attempt in {1..30}; do
   fi
   sleep 1
 done
+
+echo "[5b/11] Redis aislado + integración"
+docker run -d --name "$REDIS" --network "$NETWORK" \
+  -e REDIS_PASSWORD="$REDIS_PASSWORD" \
+  redis:8.2.7-alpine \
+  sh -lc 'exec redis-server --appendonly no --requirepass "$REDIS_PASSWORD"' >/dev/null
+
+for attempt in {1..30}; do
+  if docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" "$REDIS" redis-cli ping 2>/dev/null | grep -qx PONG; then
+    break
+  fi
+  if [[ "$attempt" -eq 30 ]]; then
+    echo "ERROR: Redis CI no quedó listo." >&2
+    docker logs "$REDIS" || true
+    exit 1
+  fi
+  sleep 1
+done
+
+docker run --rm --network "$NETWORK" \
+  -e APP_ENV=testing \
+  -e APP_KEY="$TEST_APP_KEY" \
+  -e OTP_HASH_KEY=ci-test-hash-key \
+  -e OTP_FIXED_CODE=123456 \
+  -e DB_CONNECTION=sqlite \
+  -e DB_DATABASE=:memory: \
+  -e CACHE_STORE=redis \
+  -e CACHE_LIMITER_STORE=redis_limiter \
+  -e SESSION_DRIVER=redis \
+  -e SESSION_CONNECTION=session \
+  -e SESSION_STORE=redis_session \
+  -e REDIS_HOST="$REDIS" \
+  -e REDIS_PORT=6379 \
+  -e REDIS_PASSWORD="$REDIS_PASSWORD" \
+  "$IMAGE" php artisan test tests/Feature/RedisInfrastructureTest.php
 
 docker run --rm --network "$NETWORK" \
   -e APP_ENV=testing \
@@ -198,19 +238,30 @@ docker run --rm \
   -e DB_DATABASE=:memory: \
   "$IMAGE" php artisan test tests/Feature/Phase4ClinicalUatTest.php tests/Feature/DoctorWorkspaceTest.php tests/Feature/ClinicEpidemiologyConsentTest.php
 
-echo "[8/11] Performance smoke"
+echo "[8/11] Performance smoke (PostgreSQL 17 + Redis aislados)"
 docker run -d --name "$APP" --network "$NETWORK" \
   -e APP_ENV=testing \
   -e APP_KEY="$TEST_APP_KEY" \
   -e OTP_HASH_KEY=ci-test-hash-key \
   -e OTP_FIXED_CODE=123456 \
-  -e CACHE_STORE=array \
-  -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
-  -e DB_CONNECTION=sqlite \
-  -e DB_DATABASE=/tmp/performance.sqlite \
+  -e DB_CONNECTION=pgsql \
+  -e DB_HOST="$POSTGRES" \
+  -e DB_PORT=5432 \
+  -e DB_DATABASE=back_api \
+  -e DB_USERNAME=root \
+  -e DB_PASSWORD=root \
+  -e DB_URL= \
+  -e CACHE_STORE=redis \
+  -e CACHE_LIMITER_STORE=redis_limiter \
+  -e SESSION_DRIVER=redis \
+  -e SESSION_CONNECTION=session \
+  -e SESSION_STORE=redis_session \
+  -e REDIS_HOST="$REDIS" \
+  -e REDIS_PORT=6379 \
+  -e REDIS_PASSWORD="$REDIS_PASSWORD" \
   "$IMAGE" bash -lc \
-  'touch /tmp/performance.sqlite && php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
