@@ -29,7 +29,8 @@ RUN composer install --no-interaction --no-progress --no-scripts --prefer-dist
 
 COPY . .
 
-RUN cp .env.example .env \
+RUN rm -f bootstrap/cache/config.php bootstrap/cache/events.php bootstrap/cache/routes-*.php \
+    && cp .env.example .env \
     && php artisan key:generate --force \
     && mkdir -p storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
     && chmod -R a+rw storage bootstrap/cache \
