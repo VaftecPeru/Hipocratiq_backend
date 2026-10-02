@@ -97,6 +97,7 @@ docker run --rm \
   -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
   -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
   -e DB_DATABASE=:memory: \
   "$IMAGE" composer test
 
@@ -195,6 +196,7 @@ docker run --rm \
   -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
   -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
   -e DB_DATABASE=:memory: \
   "$IMAGE" php artisan test tests/Feature/Phase4ClinicalUatTest.php tests/Feature/DoctorWorkspaceTest.php tests/Feature/ClinicEpidemiologyConsentTest.php
 
@@ -208,9 +210,16 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e SESSION_DRIVER=array \
   -e QUEUE_CONNECTION=sync \
   -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
   -e DB_DATABASE=/tmp/performance.sqlite \
   "$IMAGE" bash -lc \
-  'touch /tmp/performance.sqlite && php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'set -Eeuo pipefail
+   rm -f bootstrap/cache/config.php bootstrap/cache/events.php bootstrap/cache/routes-*.php
+   php -r '\''require "vendor/autoload.php"; $app = require "bootstrap/app.php"; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); if (config("database.default") !== "sqlite" || config("database.connections.sqlite.database") !== "/tmp/performance.sqlite") { fwrite(STDERR, "ERROR: configuración DB de performance no aislada.\\n"); exit(1); }'\''
+   touch /tmp/performance.sqlite
+   php artisan migrate:fresh --force --no-interaction
+   php artisan db:seed --force --no-interaction
+   php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
