@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Composer\InstalledVersions;
+
 require dirname(__DIR__).'/vendor/autoload.php';
 
 $requirements = [
@@ -12,11 +14,12 @@ $requirements = [
 $failed = false;
 
 foreach ($requirements as $package => $minimum) {
-    $version = Composer\InstalledVersions::getVersion($package);
+    $version = InstalledVersions::getVersion($package);
 
     if ($version === null) {
         fwrite(STDERR, sprintf("ERROR: %s no está instalado.\n", $package));
         $failed = true;
+
         continue;
     }
 
@@ -26,6 +29,7 @@ foreach ($requirements as $package => $minimum) {
             sprintf("ERROR: %s %s; se requiere >= %s.\n", $package, $version, $minimum),
         );
         $failed = true;
+
         continue;
     }
 
