@@ -204,7 +204,13 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e DB_PASSWORD=root \
   -e DB_URL= \
   "$IMAGE" bash -lc \
-  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'set -Eeuo pipefail
+   php artisan config:clear --no-interaction
+   php artisan migrate:fresh --force --no-interaction
+   php artisan db:seed --force --no-interaction
+   echo "QA DB runtime: ${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
+   php -r '\''$app = require "bootstrap/app.php"; $app->make(Illuminate\\Contracts\\Console\\Kernel::class)->bootstrap(); $host = config("database.connections.pgsql.host"); $port = (string) config("database.connections.pgsql.port"); if ($host !== getenv("DB_HOST") || $port !== getenv("DB_PORT")) { fwrite(STDERR, "ERROR: runtime DB config mismatch: ".$host.":".$port.PHP_EOL); exit(1); }'\''
+   exec php -S 0.0.0.0:8000 -t public vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
