@@ -210,7 +210,11 @@ docker run -d --name "$APP" --network "$NETWORK" \
    php artisan db:seed --force --no-interaction
 
    echo "QA DB runtime: ${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
-   exec php -S 0.0.0.0:8000 vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php' >/dev/null
+   test -f public/index.php || {
+     echo "ERROR: public/index.php no existe dentro de la imagen QA." >&2
+     exit 1
+   }
+   exec php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
