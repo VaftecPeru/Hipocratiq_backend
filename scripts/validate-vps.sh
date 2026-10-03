@@ -204,7 +204,17 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e DB_PASSWORD=root \
   -e DB_URL= \
   "$IMAGE" bash -lc \
-  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'set -euo pipefail
+   php artisan optimize:clear
+   php artisan migrate:fresh --force --no-interaction
+   php artisan db:seed --force --no-interaction
+
+   echo "QA DB runtime: ${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
+   test -f public/index.php || {
+     echo "ERROR: public/index.php no existe dentro de la imagen QA." >&2
+     exit 1
+   }
+   exec php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
