@@ -27,7 +27,7 @@ foreach ($expected as $key => $value) {
         fwrite(
             STDERR,
             sprintf(
-                "ERROR: runtime DB config mismatch for %s: actual=%s expected=%s%s",
+                'ERROR: runtime DB config mismatch for %s: actual=%s expected=%s%s',
                 $key,
                 $actual[$key],
                 $value === '' ? '<empty>' : $value,
@@ -42,7 +42,7 @@ foreach ($expected as $key => $value) {
 fwrite(
     STDOUT,
     sprintf(
-        "Runtime DB config OK: %s:%s/%s%s",
+        'Runtime DB config OK: %s:%s/%s%s',
         $actual['host'],
         $actual['port'],
         $actual['database'],
