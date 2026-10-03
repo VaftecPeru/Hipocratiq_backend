@@ -204,7 +204,13 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e DB_PASSWORD=root \
   -e DB_URL= \
   "$IMAGE" bash -lc \
-  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'set -Eeuo pipefail
+   rm -f .env bootstrap/cache/config.php
+   php artisan config:clear >/dev/null
+   printf "QA PostgreSQL target: %s:%s/%s\n" "$DB_HOST" "$DB_PORT" "$DB_DATABASE"
+   php artisan migrate:fresh --force --no-interaction
+   php artisan db:seed --force --no-interaction
+   exec php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
