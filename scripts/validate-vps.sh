@@ -9,6 +9,7 @@ IMAGE="hipocratiq-backend-ci:${RUN_ID}"
 RELEASE_IMAGE="hipocratiq-backend-releasecheck:${RUN_ID}"
 NETWORK="hipocratiq-ci-${RUN_ID}"
 POSTGRES="hipocratiq-ci-postgres-${RUN_ID}"
+REDIS="hipocratiq-ci-redis-${RUN_ID}"
 APP="hipocratiq-ci-app-${RUN_ID}"
 LOG_DIR="${VALIDATION_LOG_DIR:-/tmp/hipocratiq-validation}"
 LOG_FILE="${LOG_DIR}/backend-${RUN_ID}.log"
@@ -19,7 +20,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 cleanup() {
   set +e
-  docker rm -f "$APP" "$POSTGRES" >/dev/null 2>&1 || true
+  docker rm -f "$APP" "$POSTGRES" "$REDIS" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm -f "$IMAGE" "$RELEASE_IMAGE" >/dev/null 2>&1 || true
 }
@@ -88,8 +89,40 @@ docker run --rm \
   -e DB_DATABASE=:memory: \
   "$IMAGE" composer test
 
-echo "[5/11] PostgreSQL 17 + migraciones limpias"
+echo "[4b/11] Redis 8.2 + integración distribuida"
 docker network create "$NETWORK" >/dev/null
+docker run -d --name "$REDIS" --network "$NETWORK" \
+  redis:8.2.7-alpine redis-server --requirepass ci-redis-password >/dev/null
+
+for attempt in {1..30}; do
+  if docker exec "$REDIS" redis-cli -a ci-redis-password ping 2>/dev/null | grep -q '^PONG$'; then
+    break
+  fi
+  if [[ "$attempt" -eq 30 ]]; then
+    echo "ERROR: Redis CI no quedó listo." >&2
+    docker logs "$REDIS" || true
+    exit 1
+  fi
+  sleep 1
+done
+
+docker run --rm --network "$NETWORK" \
+  -e APP_ENV=testing \
+  -e APP_KEY="$TEST_APP_KEY" \
+  -e OTP_HASH_KEY=ci-test-hash-key \
+  -e OTP_FIXED_CODE=123456 \
+  -e CACHE_STORE=array \
+  -e SESSION_DRIVER=array \
+  -e QUEUE_CONNECTION=sync \
+  -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
+  -e DB_DATABASE=:memory: \
+  -e REDIS_HOST="$REDIS" \
+  -e REDIS_PORT=6379 \
+  -e REDIS_PASSWORD=ci-redis-password \
+  "$IMAGE" php artisan test tests/Feature/RedisInfrastructureTest.php
+
+echo "[5/11] PostgreSQL 17 + migraciones limpias"
 docker run -d --name "$POSTGRES" --network "$NETWORK" \
   -e POSTGRES_DB=back_api \
   -e POSTGRES_USER=root \
@@ -204,7 +237,13 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e DB_PASSWORD=root \
   -e DB_URL= \
   "$IMAGE" bash -lc \
-  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'set -Eeuo pipefail
+   php artisan config:clear --no-interaction
+   php artisan migrate:fresh --force --no-interaction
+   php artisan db:seed --force --no-interaction
+   echo "QA DB runtime: ${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
+   php scripts/assert-runtime-db-config.php
+   exec php -S 0.0.0.0:8000 -t public vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
