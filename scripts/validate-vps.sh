@@ -9,6 +9,7 @@ IMAGE="hipocratiq-backend-ci:${RUN_ID}"
 RELEASE_IMAGE="hipocratiq-backend-releasecheck:${RUN_ID}"
 NETWORK="hipocratiq-ci-${RUN_ID}"
 POSTGRES="hipocratiq-ci-postgres-${RUN_ID}"
+REDIS="hipocratiq-ci-redis-${RUN_ID}"
 APP="hipocratiq-ci-app-${RUN_ID}"
 LOG_DIR="${VALIDATION_LOG_DIR:-/tmp/hipocratiq-validation}"
 LOG_FILE="${LOG_DIR}/backend-${RUN_ID}.log"
@@ -19,7 +20,7 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 cleanup() {
   set +e
-  docker rm -f "$APP" "$POSTGRES" >/dev/null 2>&1 || true
+  docker rm -f "$APP" "$REDIS" "$POSTGRES" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm -f "$IMAGE" "$RELEASE_IMAGE" >/dev/null 2>&1 || true
 }
@@ -125,6 +126,47 @@ docker run --rm --network "$NETWORK" \
   -e DB_URL= \
   "$IMAGE" php artisan migrate:fresh --force --no-interaction
 
+echo "[5b/11] Redis 8 aislado + infraestructura"
+REDIS_PASSWORD_QA="hipocratiq-qa-redis"
+docker run -d --name "$REDIS" --network "$NETWORK" \
+  redis:8.2.7-alpine redis-server --requirepass "$REDIS_PASSWORD_QA" >/dev/null
+
+for attempt in {1..30}; do
+  if docker exec "$REDIS" redis-cli -a "$REDIS_PASSWORD_QA" --no-auth-warning ping 2>/dev/null | grep -qx PONG; then
+    break
+  fi
+  if [[ "$attempt" -eq 30 ]]; then
+    echo "ERROR: Redis CI no quedó listo." >&2
+    docker logs "$REDIS" || true
+    exit 1
+  fi
+  sleep 1
+done
+
+docker run --rm --network "$NETWORK" \
+  -e APP_ENV=testing \
+  -e APP_KEY="$TEST_APP_KEY" \
+  -e OTP_HASH_KEY=ci-test-hash-key \
+  -e OTP_FIXED_CODE=123456 \
+  -e CACHE_STORE=redis \
+  -e CACHE_LIMITER_STORE=redis_limiter \
+  -e SESSION_DRIVER=redis \
+  -e SESSION_CONNECTION=session \
+  -e SESSION_STORE=redis_session \
+  -e QUEUE_CONNECTION=sync \
+  -e DB_CONNECTION=sqlite \
+  -e DB_URL= \
+  -e DB_DATABASE=:memory: \
+  -e REDIS_HOST="$REDIS" \
+  -e REDIS_PORT=6379 \
+  -e REDIS_PASSWORD="$REDIS_PASSWORD_QA" \
+  -e REDIS_DB=0 \
+  -e REDIS_CACHE_DB=1 \
+  -e REDIS_SESSION_DB=2 \
+  -e REDIS_LIMITER_DB=3 \
+  -e REDIS_LOCKS_DB=4 \
+  "$IMAGE" php artisan test tests/Feature/RedisInfrastructureTest.php
+
 echo "[6/11] Backup create/verify/restore aislado"
 docker run --rm --network "$NETWORK" \
   -e APP_ENV=testing \
@@ -204,7 +246,7 @@ docker run -d --name "$APP" --network "$NETWORK" \
   -e DB_PASSWORD=root \
   -e DB_URL= \
   "$IMAGE" bash -lc \
-  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
+  'php artisan migrate:fresh --force --no-interaction && php artisan db:seed --force --no-interaction && php artisan config:cache && php artisan serve --host=0.0.0.0 --port=8000' >/dev/null
 
 for attempt in {1..30}; do
   if docker run --rm --network "$NETWORK" "$IMAGE" curl --fail --silent "http://$APP:8000/api/health/live" >/dev/null 2>&1; then
