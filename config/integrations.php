@@ -9,6 +9,12 @@ return [
         'model' => env('EPIDEMIOLOGICAL_AI_MODEL'),
         'timeout_seconds' => (int) env('EPIDEMIOLOGICAL_AI_TIMEOUT_SECONDS', 20),
         'max_output_tokens' => (int) env('EPIDEMIOLOGICAL_AI_MAX_OUTPUT_TOKENS', 1200),
+        'structured_output' => (bool) env('EPIDEMIOLOGICAL_AI_STRUCTURED_OUTPUT', true),
+    ],
+    'imaging' => [
+        'provider' => env('IMAGING_PROVIDER', 'unavailable'),
+        'dicomweb_base_url' => env('IMAGING_DICOMWEB_BASE_URL'),
+        'viewer_base_url' => env('IMAGING_VIEWER_BASE_URL'),
     ],
     'telemedicine' => [
         'provider' => env('TELEMEDICINE_PROVIDER', 'unavailable'),

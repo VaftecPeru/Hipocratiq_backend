@@ -10,7 +10,7 @@ class CreateDatabaseBackup extends Command
 {
     protected $signature = 'backups:create';
 
-    protected $description = 'Crea un respaldo PostgreSQL cifrado por el almacenamiento configurado y emite un manifiesto de integridad.';
+    protected $description = 'Crea un respaldo PostgreSQL en el almacenamiento privado configurado y emite un manifiesto SHA-256 de integridad.';
 
     public function handle(DatabaseBackupManager $manager): int
     {

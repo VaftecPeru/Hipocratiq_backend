@@ -147,23 +147,31 @@ class AdminBillingController extends Controller
         AdminManualPaymentRefundRequest $request,
         RecordAdminAuditEvent $audit,
     ): JsonResponse {
-        if ($payment->provider !== 'admin_manual' || $payment->status !== 'succeeded') {
-            throw ValidationException::withMessages([
-                'payment' => ['Solo se pueden reembolsar pagos manuales confirmados.'],
-            ]);
-        }
-
         $data = $request->validated();
-        $payment->update([
-            'status' => 'refunded',
-            'refund_reference' => trim($data['reference']),
-            'reconciliation_note' => trim(implode("\n\n", array_filter([
-                $payment->reconciliation_note,
-                'Motivo del reembolso: '.trim($data['reason']),
-            ]))),
-            'refunded_at' => now(),
-        ]);
-        $payment->load(['subscription.clinic', 'subscription.plan']);
+        $payment = DB::transaction(function () use ($payment, $data): SubscriptionPayment {
+            $lockedPayment = SubscriptionPayment::query()
+                ->whereKey($payment->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedPayment->provider !== 'admin_manual' || $lockedPayment->status !== 'succeeded') {
+                throw ValidationException::withMessages([
+                    'payment' => ['Solo se pueden reembolsar pagos manuales confirmados.'],
+                ]);
+            }
+
+            $lockedPayment->update([
+                'status' => 'refunded',
+                'refund_reference' => trim($data['reference']),
+                'reconciliation_note' => trim(implode("\n\n", array_filter([
+                    $lockedPayment->reconciliation_note,
+                    'Motivo del reembolso: '.trim($data['reason']),
+                ]))),
+                'refunded_at' => now(),
+            ]);
+
+            return $lockedPayment->fresh(['subscription.clinic', 'subscription.plan']);
+        });
 
         $audit->handle(
             $request->user(),

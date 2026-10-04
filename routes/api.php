@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AdminAccessControlController;
 use App\Http\Controllers\Api\V1\AdminAuditController;
+use App\Http\Controllers\Api\V1\AdminBackupController;
 use App\Http\Controllers\Api\V1\AdminBillingController;
 use App\Http\Controllers\Api\V1\AdminClinicController;
 use App\Http\Controllers\Api\V1\AdminDashboardController;
@@ -35,11 +36,14 @@ use App\Http\Controllers\Api\V1\DoctorAppointmentController;
 use App\Http\Controllers\Api\V1\DoctorAvailabilityController;
 use App\Http\Controllers\Api\V1\DoctorConsultationController;
 use App\Http\Controllers\Api\V1\DoctorDashboardController;
+use App\Http\Controllers\Api\V1\DoctorImagingController;
 use App\Http\Controllers\Api\V1\DoctorPatientController;
 use App\Http\Controllers\Api\V1\DoctorPreferencesController;
 use App\Http\Controllers\Api\V1\DoctorProfileController;
 use App\Http\Controllers\Api\V1\DoctorWorkspaceController;
+use App\Http\Controllers\Api\V1\FhirReadController;
 use App\Http\Controllers\Api\V1\HealthController;
+use App\Http\Controllers\Api\V1\PatientConsentController;
 use App\Http\Controllers\Api\V1\PatientPortalController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
@@ -58,6 +62,24 @@ Route::get('/', function (): JsonResponse {
 Route::get('/health', [HealthController::class, 'ready'])->name('api.health');
 Route::get('/health/live', [HealthController::class, 'live'])->name('api.health.live');
 Route::get('/health/ready', [HealthController::class, 'ready'])->name('api.health.ready');
+
+Route::prefix('v1/fhir')->name('api.v1.fhir.')->group(function (): void {
+    Route::get('/metadata', [FhirReadController::class, 'metadata'])->name('metadata');
+
+    Route::middleware(['auth:sanctum', 'auth.session'])->group(function (): void {
+        Route::get('/Patient/{patient}', [FhirReadController::class, 'patient'])->name('patient.read');
+        Route::get('/Practitioner/{practitioner}', [FhirReadController::class, 'practitioner'])->name('practitioner.read');
+        Route::get('/Organization/{organization}', [FhirReadController::class, 'organization'])->name('organization.read');
+        Route::get('/Appointment/{appointment}', [FhirReadController::class, 'appointment'])->name('appointment.read');
+        Route::get('/Encounter/{encounter}', [FhirReadController::class, 'encounter'])->name('encounter.read');
+        Route::get('/Condition/{condition}', [FhirReadController::class, 'condition'])->name('condition.read');
+        Route::get('/MedicationRequest/{medicationRequest}', [FhirReadController::class, 'medicationRequest'])->name('medication-request.read');
+        Route::get('/ServiceRequest/{serviceRequest}', [FhirReadController::class, 'serviceRequest'])->name('service-request.read');
+        Route::get('/DiagnosticReport/{diagnosticReport}', [FhirReadController::class, 'diagnosticReport'])->name('diagnostic-report.read');
+        Route::get('/ImagingStudy/{imagingStudy}', [FhirReadController::class, 'imagingStudy'])->name('imaging-study.read');
+        Route::get('/Consent/{consent}', [FhirReadController::class, 'consent'])->name('consent.read');
+    });
+});
 
 Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
     Route::prefix('register/clinic')->name('register.clinic.')->group(function (): void {
@@ -114,6 +136,9 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/logout-all', [SessionController::class, 'destroyAll'])->name('logout-all');
         Route::prefix('patient')->name('patient.')->middleware('actor.context:patient')->group(function (): void {
             Route::get('/profile', [PatientPortalController::class, 'profile'])->name('profile.show');
+            Route::get('/consents', [PatientConsentController::class, 'index'])->name('consents.index');
+            Route::post('/consents', [PatientConsentController::class, 'store'])->name('consents.store');
+            Route::post('/consents/{consent}/revoke', [PatientConsentController::class, 'revoke'])->name('consents.revoke');
             Route::patch('/profile', [PatientPortalController::class, 'updateProfile'])->name('profile.update');
             Route::get('/appointments', [PatientPortalController::class, 'appointments'])->name('appointments.index');
             Route::get('/history', [PatientPortalController::class, 'history'])->name('history.index');
@@ -213,6 +238,15 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::patch('/doctor/laboratory/{order}/status', [DoctorWorkspaceController::class, 'updateLaboratoryOrderStatus'])
             ->middleware('actor.context:doctor')
             ->name('doctor.laboratory.status.update');
+        Route::get('/doctor/imaging', [DoctorImagingController::class, 'index'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.imaging.index');
+        Route::post('/doctor/imaging', [DoctorImagingController::class, 'store'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.imaging.store');
+        Route::patch('/doctor/imaging/{study}/status', [DoctorImagingController::class, 'updateStatus'])
+            ->middleware('actor.context:doctor')
+            ->name('doctor.imaging.status.update');
         Route::get('/doctor/teleconsultations', [DoctorWorkspaceController::class, 'teleconsultations'])
             ->middleware('actor.context:doctor')
             ->name('doctor.teleconsultations.index');
@@ -440,6 +474,13 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::get('/admin/infrastructure', [AdminInfrastructureController::class, 'show'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.infrastructure.show');
+        Route::post('/admin/backups', [AdminBackupController::class, 'store'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->name('admin.backups.store');
+        Route::post('/admin/backups/{backup}/verify', [AdminBackupController::class, 'verify'])
+            ->middleware(['actor.context:staff', 'can:manage-platform'])
+            ->where('backup', '[A-Za-z0-9_-]+')
+            ->name('admin.backups.verify');
         Route::get('/admin/support-tickets', [AdminSupportTicketController::class, 'index'])
             ->middleware(['actor.context:staff', 'can:manage-platform'])
             ->name('admin.support-tickets.index');

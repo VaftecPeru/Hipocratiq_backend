@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
+use App\Actions\Clinical\RecordClinicalAuditEvent;
+use App\Enums\AppointmentStatus;
 use App\Enums\ConsultationStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\DoctorConsultationStoreRequest;
@@ -35,15 +38,15 @@ class DoctorConsultationController extends Controller
 
         $data = $request->validated();
 
-        if (isset($data['appointment_id'])) {
-            $this->assertAppointmentOwned($doctor, $clinic, $patient, (int) $data['appointment_id']);
-        }
-
         $objective = $this->resolveObjective($data['objective'] ?? null, $clinic, $patient);
         $status = ConsultationStatus::from($data['status'] ?? ConsultationStatus::InProgress->value);
         $scheduling->assertConsultationStatusTransition(ConsultationStatus::Draft, $status);
 
-        $consultation = DB::transaction(function () use ($doctor, $clinic, $patient, $data, $objective, $status): Consultation {
+        $consultation = DB::transaction(function () use ($doctor, $clinic, $patient, $data, $objective, $status, $request): Consultation {
+            $appointment = isset($data['appointment_id'])
+                ? $this->lockAppointment($doctor, $clinic, $patient, (int) $data['appointment_id'])
+                : null;
+            $this->syncAppointmentStatus($appointment, $status);
             $record = ClinicalHistoryRecord::query()->create([
                 'clinic_id' => $clinic?->id,
                 'patient_profile_id' => $patient->id,
@@ -56,7 +59,7 @@ class DoctorConsultationController extends Controller
 
             $this->syncSections($record, $data['sections'] ?? []);
 
-            return Consultation::query()->create([
+            $created = Consultation::query()->create([
                 'clinic_id' => $clinic?->id,
                 'doctor_user_id' => $doctor->id,
                 'patient_profile_id' => $patient->id,
@@ -68,10 +71,14 @@ class DoctorConsultationController extends Controller
                 'objective' => $objective,
                 'completed_at' => $status === ConsultationStatus::Completed ? now() : null,
             ]);
+            $this->syncCodings($created, $data['codings'] ?? [], $doctor);
+            $this->recordAudit($request, $clinic, $created, null);
+
+            return $created;
         });
 
         return (new ConsultationResource($consultation->fresh([
-            'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
+            'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'codings', 'signedBy',
         ])))->response()->setStatusCode(201);
     }
 
@@ -82,7 +89,7 @@ class DoctorConsultationController extends Controller
 
         $query = Consultation::query()
             ->where('doctor_user_id', $doctor->id)
-            ->with(['clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy'])
+            ->with(['clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'codings', 'signedBy'])
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -120,23 +127,31 @@ class DoctorConsultationController extends Controller
         $this->assertConsultationAccessible($doctor, $clinic, $consultation);
 
         $data = $request->validated();
-        $consultation = DB::transaction(function () use ($data, $doctor, $clinic, $consultation, $scheduling): Consultation {
+        $consultation = DB::transaction(function () use ($data, $doctor, $clinic, $consultation, $scheduling, $request): Consultation {
             $lockedConsultation = Consultation::query()
                 ->whereKey($consultation->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->assertConsultationAccessible($doctor, $clinic, $lockedConsultation);
-            $lockedConsultation->loadMissing(['patientProfile', 'clinicalHistoryRecord']);
+            $lockedConsultation->loadMissing(['patientProfile', 'clinicalHistoryRecord.entries.section']);
+            $beforeAudit = $this->auditSnapshot($lockedConsultation);
 
-            if ($lockedConsultation->status === ConsultationStatus::Signed) {
+            if (in_array($lockedConsultation->status, [ConsultationStatus::Signed, ConsultationStatus::Canceled], true)) {
                 throw ValidationException::withMessages([
-                    'status' => ['Una consulta firmada no se puede modificar.'],
+                    'status' => ['Una consulta firmada o cancelada no se puede modificar.'],
                 ]);
             }
 
-            if (isset($data['appointment_id'])) {
-                $this->assertAppointmentOwned($doctor, $clinic, $lockedConsultation->patientProfile, (int) $data['appointment_id']);
+            // The encounter link is immutable, including consultations without an appointment.
+            if (array_key_exists('appointment_id', $data)
+                && ($data['appointment_id'] === null ? null : (int) $data['appointment_id']) !== $lockedConsultation->appointment_id) {
+                throw ValidationException::withMessages([
+                    'appointment_id' => ['No se puede cambiar la cita de una consulta registrada.'],
+                ]);
             }
+            $previousStatus = $lockedConsultation->status;
+            $appointment = $lockedConsultation->appointment_id === null ? null
+                : $this->lockAppointment($doctor, $clinic, $lockedConsultation->patientProfile, $lockedConsultation->appointment_id, $lockedConsultation->id);
 
             $objective = $lockedConsultation->objective;
             if (array_key_exists('objective', $data)) {
@@ -186,13 +201,18 @@ class DoctorConsultationController extends Controller
                 $updates['completed_at'] ??= $lockedConsultation->completed_at ?? $signedAt;
             }
 
+            $this->syncAppointmentStatus($appointment, $nextStatus);
             $lockedConsultation->fill($updates)->save();
 
             if ($lockedConsultation->clinicalHistoryRecord !== null) {
                 $lockedConsultation->clinicalHistoryRecord->fill(['objective' => $objective])->save();
                 if (array_key_exists('sections', $data)) {
-                    $this->syncSections($lockedConsultation->clinicalHistoryRecord, $data['sections'], true);
+                    $this->syncSections($lockedConsultation->clinicalHistoryRecord, $data['sections'] ?? []);
                 }
+            }
+
+            if (array_key_exists('codings', $data)) {
+                $this->syncCodings($lockedConsultation, $data['codings'] ?? [], $doctor);
             }
 
             if ($nextStatus === ConsultationStatus::Signed) {
@@ -208,7 +228,7 @@ class DoctorConsultationController extends Controller
                     ]);
                 }
 
-                $lockedConsultation->refresh()->loadMissing('clinicalHistoryRecord.entries.section');
+                $lockedConsultation->refresh()->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
                 $lockedConsultation->forceFill([
                     'signature_digest' => hash('sha256', json_encode([
                         'consultation_id' => $lockedConsultation->id,
@@ -220,6 +240,21 @@ class DoctorConsultationController extends Controller
                             ->sortBy(fn ($entry) => (string) $entry->section?->key)
                             ->mapWithKeys(fn ($entry): array => [(string) $entry->section?->key => $entry->values])
                             ->all(),
+                        'codings' => $lockedConsultation->codings
+                            ->sortBy(fn ($coding) => implode('|', [
+                                $coding->category->value,
+                                $coding->system,
+                                $coding->code,
+                            ]))
+                            ->map(fn ($coding): array => [
+                                'category' => $coding->category->value,
+                                'system' => $coding->system,
+                                'code' => $coding->code,
+                                'display' => $coding->display,
+                                'status' => $coding->status,
+                            ])
+                            ->values()
+                            ->all(),
                         'signed_doctor_name' => $lockedConsultation->signed_doctor_name,
                         'signed_doctor_medical_license' => $lockedConsultation->signed_doctor_medical_license,
                         'signed_doctor_license_country_code' => $lockedConsultation->signed_doctor_license_country_code,
@@ -230,15 +265,43 @@ class DoctorConsultationController extends Controller
                 ])->save();
             }
 
+            $this->recordAudit($request, $clinic, $lockedConsultation, $previousStatus, $beforeAudit);
+
             return $lockedConsultation->fresh([
-                'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'signedBy',
+                'clinic', 'doctor', 'patientProfile.user', 'appointment', 'clinicalHistoryRecord.entries.section', 'codings', 'signedBy',
             ]);
         });
 
         return new ConsultationResource($consultation);
     }
 
-    private function syncSections(ClinicalHistoryRecord $record, array $sections, bool $replace = false): void
+    private function syncCodings(Consultation $consultation, array $codings, User $doctor): void
+    {
+        $consultation->codings()->delete();
+
+        $unique = [];
+        foreach ($codings as $coding) {
+            $key = implode('|', [$coding['category'], $coding['system'], $coding['code']]);
+            $unique[$key] = $coding;
+        }
+
+        foreach ($unique as $coding) {
+            $consultation->codings()->create([
+                'patient_profile_id' => $consultation->patient_profile_id,
+                'recorded_by_user_id' => $doctor->id,
+                'category' => $coding['category'],
+                'system' => $coding['system'],
+                'code' => $coding['code'],
+                'display' => $coding['display'],
+                'status' => $coding['status'] ?? null,
+                'recorded_at' => now(),
+            ]);
+        }
+
+        $consultation->unsetRelation('codings');
+    }
+
+    private function syncSections(ClinicalHistoryRecord $record, array $sections): void
     {
         if ($sections === []) {
             return;
@@ -248,22 +311,15 @@ class DoctorConsultationController extends Controller
             ->whereIn('key', array_keys($sections))
             ->pluck('id', 'key');
 
-        if ($replace) {
-            $record->entries()
-                ->whereNotIn('clinical_history_section_id', $sectionIds->values())
-                ->delete();
-        }
-
         foreach ($sections as $key => $values) {
             $sectionId = $sectionIds[$key] ?? null;
             if ($sectionId === null) {
                 continue;
             }
 
-            $record->entries()->updateOrCreate(
-                ['clinical_history_section_id' => $sectionId],
-                ['values' => is_array($values) ? $values : ['value' => $values]],
-            );
+            $entry = $record->entries()->firstOrNew(['clinical_history_section_id' => $sectionId]);
+            $entry->values = array_replace($entry->values ?? [], $values);
+            $entry->save();
         }
     }
 
@@ -311,12 +367,12 @@ class DoctorConsultationController extends Controller
                 ->where('requested_doctor_user_id', $doctor->id)
                 ->exists();
 
-        if (! $connected) {
+        if ($connected === false) {
             abort(403, 'No tienes un vínculo clínico con este paciente.');
         }
     }
 
-    private function assertAppointmentOwned(User $doctor, ?Clinic $clinic, PatientProfile $patient, int $appointmentId): void
+    private function lockAppointment(User $doctor, ?Clinic $clinic, PatientProfile $patient, int $appointmentId, ?int $consultationId = null): Appointment
     {
         $query = Appointment::query()
             ->whereKey($appointmentId)
@@ -329,11 +385,120 @@ class DoctorConsultationController extends Controller
             $query->whereNull('clinic_id');
         }
 
-        $owned = $query->exists();
+        $appointment = $query->lockForUpdate()->first();
 
-        if (! $owned) {
+        if ($appointment === null) {
             abort(403, 'La cita no pertenece a este paciente en tu clínica.');
         }
+
+        if (Consultation::query()->where('appointment_id', $appointmentId)
+            ->when($consultationId !== null, fn ($query) => $query->where('id', '!=', $consultationId))->exists()) {
+            throw ValidationException::withMessages([
+                'appointment_id' => ['Esta cita ya tiene una consulta. Abre el registro existente.'],
+            ]);
+        }
+
+        if (in_array($appointment->status, [AppointmentStatus::Canceled, AppointmentStatus::NoShow], true)
+            || ($consultationId === null && $appointment->status === AppointmentStatus::Completed)) {
+            throw ValidationException::withMessages([
+                'appointment_id' => ['La cita está cerrada y no admite una nueva atención.'],
+            ]);
+        }
+
+        return $appointment;
+    }
+
+    private function syncAppointmentStatus(?Appointment $appointment, ConsultationStatus $status): void
+    {
+        if ($appointment === null || $status === ConsultationStatus::Draft) {
+            return;
+        }
+
+        $next = match ($status) {
+            ConsultationStatus::Completed, ConsultationStatus::Signed => AppointmentStatus::Completed,
+            ConsultationStatus::Canceled => AppointmentStatus::Canceled,
+            default => AppointmentStatus::InConsultation,
+        };
+
+        if ($appointment->status === AppointmentStatus::Completed && $next !== AppointmentStatus::Completed) {
+            throw ValidationException::withMessages(['appointment_id' => ['La cita ya está completada.']]);
+        }
+
+        $appointment->fill(['status' => $next])->save();
+    }
+
+    private function recordAudit(
+        Request $request,
+        ?Clinic $clinic,
+        Consultation $consultation,
+        ?ConsultationStatus $previous,
+        ?array $before = null,
+    ): void {
+        $consultation->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
+
+        $action = match (true) {
+            $previous === null => 'consultation.created',
+            $consultation->status === ConsultationStatus::Signed => 'consultation.signed',
+            $consultation->status === ConsultationStatus::Canceled => 'consultation.canceled',
+            default => 'consultation.updated',
+        };
+
+        app(RecordAdminAuditEvent::class)->handle(
+            actor: $request->user(),
+            request: $request,
+            module: 'clinical',
+            action: $action,
+            resourceType: 'consultation',
+            resourceId: $consultation->id,
+            clinic: $clinic,
+            metadata: ['previous_status' => $previous?->value, 'status' => $consultation->status->value],
+        );
+
+        app(RecordClinicalAuditEvent::class)->handle(
+            actor: $request->user(),
+            request: $request,
+            consultation: $consultation,
+            action: $action,
+            before: $before,
+            after: $this->auditSnapshot($consultation),
+        );
+    }
+
+    private function auditSnapshot(Consultation $consultation): array
+    {
+        $consultation->loadMissing(['clinicalHistoryRecord.entries.section', 'codings']);
+
+        return [
+            'consultation_id' => $consultation->id,
+            'patient_profile_id' => $consultation->patient_profile_id,
+            'appointment_id' => $consultation->appointment_id,
+            'status' => $consultation->status->value,
+            'chief_complaint' => $consultation->chief_complaint,
+            'objective' => $consultation->objective,
+            'sections' => $consultation->clinicalHistoryRecord?->entries
+                ->sortBy(fn ($entry) => (string) $entry->section?->key)
+                ->mapWithKeys(fn ($entry): array => [(string) $entry->section?->key => $entry->values])
+                ->all() ?? [],
+            'codings' => $consultation->codings
+                ->sortBy(fn ($coding) => implode('|', [
+                    $coding->category->value,
+                    $coding->system,
+                    $coding->code,
+                ]))
+                ->map(fn ($coding): array => [
+                    'category' => $coding->category->value,
+                    'system' => $coding->system,
+                    'code' => $coding->code,
+                    'display' => $coding->display,
+                    'status' => $coding->status,
+                ])
+                ->values()
+                ->all(),
+            'signed_by_user_id' => $consultation->signed_by_user_id,
+            'signed_at' => $consultation->signed_at?->toIso8601String(),
+            'signature_digest' => $consultation->signature_digest,
+            'completed_at' => $consultation->completed_at?->toIso8601String(),
+        ];
     }
 
     private function assertConsultationAccessible(User $doctor, ?Clinic $clinic, Consultation $consultation): void
@@ -342,7 +507,7 @@ class DoctorConsultationController extends Controller
             ? $consultation->clinic_id === null
             : $consultation->clinic_id === $clinic->id;
 
-        if (! $sameClinic || $consultation->doctor_user_id !== $doctor->id) {
+        if ($sameClinic === false || $consultation->doctor_user_id !== $doctor->id) {
             abort(404, 'Consulta no encontrada.');
         }
     }

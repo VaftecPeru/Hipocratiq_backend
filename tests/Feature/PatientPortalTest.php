@@ -49,6 +49,21 @@ class PatientPortalTest extends TestCase
         $this->authenticatePatient($this->patientUser);
     }
 
+    public function test_patient_history_excludes_drafts_in_progress_and_canceled_consultations(): void
+    {
+        $doctor = User::factory()->create();
+        foreach (ConsultationStatus::cases() as $status) {
+            Consultation::query()->create([
+                'clinic_id' => $this->clinic->id, 'patient_profile_id' => $this->patient->id,
+                'doctor_user_id' => $doctor->id, 'status' => $status,
+                'chief_complaint' => 'Registro de prueba '.$status->value,
+            ]);
+        }
+        $response = $this->withSpaOrigin()->getJson('/api/v1/auth/patient/history')->assertOk()->assertJsonCount(2, 'data');
+        $statuses = collect($response->json('data'))->pluck('status')->sort()->values()->all();
+        $this->assertSame(['completed', 'signed'], $statuses);
+    }
+
     public function test_patient_reads_only_own_profile_and_clinical_records(): void
     {
         $doctor = User::factory()->create(['name' => 'Médico vinculado']);

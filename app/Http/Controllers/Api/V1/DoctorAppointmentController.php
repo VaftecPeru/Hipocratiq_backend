@@ -111,6 +111,7 @@ class DoctorAppointmentController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->assertAppointmentOwned($doctor, $clinic, $lockedAppointment);
+            $scheduling->assertAppointmentEditable($lockedAppointment);
 
             if (array_key_exists('scheduled_at', $data)) {
                 $scheduling->assertBookable(
@@ -146,6 +147,7 @@ class DoctorAppointmentController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->assertAppointmentOwned($doctor, $clinic, $lockedAppointment);
+            $scheduling->assertAppointmentEditable($lockedAppointment);
 
             if (in_array($lockedAppointment->status, [AppointmentStatus::Completed, AppointmentStatus::NoShow], true)) {
                 throw ValidationException::withMessages([
@@ -184,6 +186,7 @@ class DoctorAppointmentController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
             $this->assertAppointmentOwned($doctor, $clinic, $lockedAppointment);
+            $scheduling->assertAppointmentEditable($lockedAppointment, $nextStatus);
             $scheduling->assertAppointmentStatusTransition($lockedAppointment->status, $nextStatus);
             $lockedAppointment->update(['status' => $nextStatus]);
 

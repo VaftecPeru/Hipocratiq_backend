@@ -1,6 +1,7 @@
 .git
 .env
 .env.*
+!.env.example
 .auth-cookies.txt
 .codebase-memory
 .phpunit.result.cache
@@ -9,3 +10,4 @@ node_modules
 vendor
 storage/framework
 storage/logs
+bootstrap/cache/*.php

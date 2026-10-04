@@ -1,0 +1,40 @@
+FROM dunglas/frankenphp:1-php8.4
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bash \
+        curl \
+        git \
+        postgresql-client \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN install-php-extensions \
+    pcntl \
+    pdo_pgsql \
+    pdo_sqlite \
+    redis \
+    zip \
+    bcmath \
+    intl \
+    gd \
+    mbstring
+
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
+WORKDIR /app
+
+COPY composer.json composer.lock ./
+RUN composer install --no-interaction --no-progress --no-scripts --prefer-dist
+
+COPY . .
+
+RUN mkdir -p bootstrap/cache \
+    && rm -f bootstrap/cache/*.php \
+    && cp .env.example .env \
+    && php artisan key:generate --force \
+    && mkdir -p storage/app/private storage/app/public storage/framework/{sessions,views,cache,testing} storage/logs bootstrap/cache \
+    && chmod -R a+rw storage bootstrap/cache \
+    && composer dump-autoload --optimize
+
+CMD ["php", "-v"]

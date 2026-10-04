@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Contracts\EpidemiologyAnalyzer;
 use App\Contracts\VideoMeetingProvider;
 use App\Enums\LaboratoryOrderStatus;
+use App\Enums\PatientConsentScope;
 use App\Enums\PrescriptionStatus;
 use App\Enums\TeleconsultationStatus;
 use App\Http\Controllers\Controller;
@@ -24,6 +26,7 @@ use App\Models\LaboratoryOrder;
 use App\Models\PatientProfile;
 use App\Models\Teleconsultation;
 use App\Models\User;
+use App\Support\Clinical\ActivePatientConsent;
 use App\Support\Clinical\DoctorClinicScope;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -39,6 +42,7 @@ class DoctorWorkspaceController extends Controller
     public function __construct(
         private VideoMeetingProvider $videoProvider,
         private EpidemiologyAnalyzer $epidemiologyAnalyzer,
+        private ActivePatientConsent $activePatientConsent,
     ) {}
 
     public function prescriptions(Request $request): JsonResponse
@@ -273,6 +277,7 @@ class DoctorWorkspaceController extends Controller
         $data = $request->validated();
         $patient = PatientProfile::query()->findOrFail($data['patient_profile_id']);
         $this->assertPatientAccessible($doctor, $clinic, $patient);
+        $this->assertActiveConsent($patient, PatientConsentScope::Telemedicine);
         $appointment = isset($data['appointment_id'])
             ? $this->resolveOwnedAppointment($doctor, $clinic, (int) $data['appointment_id'], $patient->id)
             : null;
@@ -314,6 +319,14 @@ class DoctorWorkspaceController extends Controller
 
             $nextStatus = TeleconsultationStatus::from($request->validated('status'));
             $this->assertTeleconsultationStatusTransition($lockedTeleconsultation->status, $nextStatus);
+
+            if (in_array($nextStatus, [
+                TeleconsultationStatus::Waiting,
+                TeleconsultationStatus::InProgress,
+            ], true)) {
+                $patient = PatientProfile::query()->findOrFail($lockedTeleconsultation->patient_profile_id);
+                $this->assertActiveConsent($patient, PatientConsentScope::Telemedicine);
+            }
             $updates = ['status' => $nextStatus];
 
             if ($nextStatus === TeleconsultationStatus::InProgress && $lockedTeleconsultation->started_at === null) {
@@ -468,6 +481,26 @@ class DoctorWorkspaceController extends Controller
             })
             ->count();
 
+        $policyVersion = (string) config('clinical.consent_policy_version');
+        $minimumCohortSize = max(1, (int) config('clinical.epidemiology.minimum_external_cohort_size', 10));
+        $connectedPatientIds = $this->connectedPatientsQuery($doctor, $clinic)
+            ->pluck('id')
+            ->filter()
+            ->unique()
+            ->values();
+        $consentedPatientIds = $this->activePatientConsent->patientIds(
+            patientIds: $connectedPatientIds,
+            scope: PatientConsentScope::EpidemiologyAnonymized,
+            clinicId: $clinic?->id,
+        );
+        $analysisMonitoredPatientIds = collect([
+            (clone $consultations)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+            (clone $laboratoryOrders)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+            (clone $teleconsultations)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+            (clone $prescriptions)->whereIn('patient_profile_id', $consentedPatientIds)->pluck('patient_profile_id'),
+        ])->flatten()->filter()->unique()->values();
+        $analysisMonitoredPatients = $analysisMonitoredPatientIds->count();
+
         $analysis = [
             'trend' => 'not_configured',
             'alerts' => [],
@@ -477,24 +510,57 @@ class DoctorWorkspaceController extends Controller
         $analysisAvailable = false;
         $message = 'No hay un motor epidemiológico configurado. Se muestran únicamente fuentes clínicas disponibles.';
 
+        $cohortStatus = 'not_used';
+
         if ($this->epidemiologyAnalyzer->configured()) {
-            try {
-                $analysis = $this->epidemiologyAnalyzer->analyze([
-                    'period_days' => 90,
-                    'metrics' => [
-                        'monitored_patients' => $monitoredPatients,
-                        'consultations' => $consultations->count(),
-                        'laboratory_orders' => $laboratoryOrders->count(),
-                        'teleconsultations' => $teleconsultations->count(),
-                        'prescriptions' => $prescriptions->count(),
-                    ],
-                ]);
-                $analysisAvailable = true;
-                $message = is_string($analysis['summary'] ?? null)
-                    ? $analysis['summary']
-                    : 'Análisis epidemiológico agregado disponible para revisión humana.';
-            } catch (Throwable) {
-                $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+            if ($analysisMonitoredPatients < $minimumCohortSize) {
+                $cohortStatus = 'insufficient';
+                $message = sprintf(
+                    'La IA epidemiológica está configurada, pero la cohorte con consentimiento activo no alcanza el mínimo de privacidad (%d pacientes).',
+                    $minimumCohortSize,
+                );
+            } else {
+                $cohortStatus = 'eligible';
+
+                try {
+                    $analysis = $this->epidemiologyAnalyzer->analyze([
+                        'period_days' => 90,
+                        'metrics' => [
+                            'monitored_patients' => $analysisMonitoredPatients,
+                            'consultations' => (clone $consultations)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'laboratory_orders' => (clone $laboratoryOrders)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'teleconsultations' => (clone $teleconsultations)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                            'prescriptions' => (clone $prescriptions)->whereIn('patient_profile_id', $consentedPatientIds)->count(),
+                        ],
+                    ]);
+                    $analysisAvailable = true;
+                    $message = is_string($analysis['summary'] ?? null)
+                        ? $analysis['summary']
+                        : 'Análisis epidemiológico agregado disponible para revisión humana.';
+
+                    $this->recordDoctorExternalAnalysisAudit(
+                        request: $request,
+                        doctor: $doctor,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.completed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients,
+                        minimumCohortSize: $minimumCohortSize,
+                    );
+                } catch (Throwable) {
+                    $message = 'El motor epidemiológico está configurado, pero no respondió. Se muestran fuentes clínicas internas.';
+
+                    $this->recordDoctorExternalAnalysisAudit(
+                        request: $request,
+                        doctor: $doctor,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.failed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients,
+                        minimumCohortSize: $minimumCohortSize,
+                        critical: true,
+                    );
+                }
             }
         }
 
@@ -506,6 +572,13 @@ class DoctorWorkspaceController extends Controller
                 'analysis_available' => $analysisAvailable,
                 'provider' => $this->epidemiologyAnalyzer->provider(),
                 'message' => $message,
+                'analysis_cohort' => [
+                    'status' => $cohortStatus,
+                    'policy_version' => $policyVersion,
+                    'consented_patients' => $consentedPatientIds->count(),
+                    'monitored_patients' => $analysisMonitoredPatients,
+                    'minimum_required' => $minimumCohortSize,
+                ],
                 'metrics' => [
                     'monitored_patients' => $monitoredPatients,
                     'active_alerts' => count($analysis['alerts'] ?? []),
@@ -518,6 +591,7 @@ class DoctorWorkspaceController extends Controller
                 ],
                 'cohorts' => [],
                 'alerts' => $analysis['alerts'] ?? [],
+                'recommendations' => $analysis['recommendations'] ?? [],
                 'sources' => [
                     'clinical_history' => ['status' => $consultations->count() > 0 ? 'available' : 'no_data', 'label' => 'Historia clínica interna'],
                     'laboratory' => ['status' => $laboratoryOrders->count() > 0 ? 'available' : 'no_data', 'label' => 'Resultados de laboratorio internos'],
@@ -526,6 +600,36 @@ class DoctorWorkspaceController extends Controller
                 ],
             ],
         ]);
+    }
+
+    private function recordDoctorExternalAnalysisAudit(
+        Request $request,
+        User $doctor,
+        ?Clinic $clinic,
+        string $action,
+        string $policyVersion,
+        int $cohortSize,
+        int $minimumCohortSize,
+        bool $critical = false,
+    ): void {
+        app(RecordAdminAuditEvent::class)->handle(
+            actor: $doctor,
+            request: $request,
+            module: 'epidemiology',
+            action: $action,
+            resourceType: 'doctor',
+            resourceId: $doctor->id,
+            resourceLabel: $doctor->name,
+            clinic: $clinic,
+            metadata: [
+                'provider' => $this->epidemiologyAnalyzer->provider(),
+                'policy_version' => $policyVersion,
+                'cohort_size' => $cohortSize,
+                'minimum_cohort_size' => $minimumCohortSize,
+                'payload_classification' => 'aggregate_only',
+            ],
+            critical: $critical,
+        );
     }
 
     /** @param Builder<DoctorPrescription|LaboratoryOrder|Teleconsultation|Consultation|Appointment> $query */
@@ -645,6 +749,17 @@ class DoctorWorkspaceController extends Controller
     {
         if (! $this->scopedMessagesQuery($doctor, $clinic)->whereKey($message->id)->exists()) {
             abort(404, 'Mensaje no encontrado.');
+        }
+    }
+
+    private function assertActiveConsent(PatientProfile $patient, PatientConsentScope $scope): void
+    {
+        if (! $this->activePatientConsent->allows($patient, $scope)) {
+            throw ValidationException::withMessages([
+                'patient_profile_id' => [
+                    'El paciente debe otorgar un consentimiento clínico activo para '.$scope->value.' antes de continuar.',
+                ],
+            ]);
         }
     }
 

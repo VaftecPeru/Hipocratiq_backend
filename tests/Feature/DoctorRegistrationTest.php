@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\RegistrationOtpSender;
 use App\Enums\RoleKey;
 use App\Enums\RoleScope;
 use App\Models\Clinic;
@@ -23,11 +24,28 @@ class DoctorRegistrationTest extends TestCase
 
     private Plan $plan;
 
+    private object $registrationOtpSender;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->app->instance(OtpCodeGenerator::class, new FixedOtpCodeGenerator);
         $this->app->make(ArraySmsSender::class)->clear();
+        $this->registrationOtpSender = new class implements RegistrationOtpSender
+        {
+            /** @var list<array{email: string, recipient_name: string, code: string}> */
+            public array $deliveries = [];
+
+            public function send(string $email, string $recipientName, string $code): void
+            {
+                $this->deliveries[] = [
+                    'email' => $email,
+                    'recipient_name' => $recipientName,
+                    'code' => $code,
+                ];
+            }
+        };
+        $this->app->instance(RegistrationOtpSender::class, $this->registrationOtpSender);
         Role::query()->create(['key' => RoleKey::Doctor->value, 'name' => 'Médico', 'scope' => RoleScope::Organization, 'is_system' => true]);
         $this->plan = Plan::query()->create(['key' => 'basic', 'name' => 'Básico', 'monthly_price_cents' => 4900, 'annual_price_cents' => 47000, 'currency' => 'USD', 'features' => [], 'publicly_selectable' => true, 'is_active' => true]);
     }
@@ -124,7 +142,7 @@ class DoctorRegistrationTest extends TestCase
         ]))->assertUnprocessable()->assertJsonValidationErrors('clinic_id');
 
         $this->assertDatabaseCount('users', 0);
-        $this->assertSame([], $this->app->make(ArraySmsSender::class)->messages());
+        $this->assertSame([], $this->registrationOtpSender->deliveries);
     }
 
     public function test_doctor_registration_excludes_future_clinic_subscriptions(): void
@@ -312,7 +330,7 @@ class DoctorRegistrationTest extends TestCase
             ->postJson('/api/v1/auth/register/doctor/resend-otp')
             ->assertUnprocessable()
             ->assertJsonValidationErrors('otp');
-        $this->assertCount(6, $this->app->make(ArraySmsSender::class)->messages());
+        $this->assertCount(6, $this->registrationOtpSender->deliveries);
     }
 
     private function payload(array $overrides = []): array

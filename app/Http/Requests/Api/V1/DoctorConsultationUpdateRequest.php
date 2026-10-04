@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\V1;
 
+use App\Enums\ClinicalCodingCategory;
 use App\Enums\ConsultationStatus;
 use App\Models\ClinicalHistorySection;
 use Illuminate\Foundation\Http\FormRequest;
@@ -27,6 +28,12 @@ class DoctorConsultationUpdateRequest extends FormRequest
             'status' => ['sometimes', Rule::in(array_map(fn ($case) => $case->value, ConsultationStatus::cases()))],
             'sections' => ['sometimes', 'nullable', 'array'],
             'sections.*' => ['array'],
+            'codings' => ['sometimes', 'array', 'max:100'],
+            'codings.*.category' => ['required', Rule::enum(ClinicalCodingCategory::class)],
+            'codings.*.system' => ['required', 'string', 'max:255'],
+            'codings.*.code' => ['required', 'string', 'max:120'],
+            'codings.*.display' => ['required', 'string', 'max:255'],
+            'codings.*.status' => ['nullable', 'string', 'max:40'],
             'signature' => ['prohibited'],
         ];
     }

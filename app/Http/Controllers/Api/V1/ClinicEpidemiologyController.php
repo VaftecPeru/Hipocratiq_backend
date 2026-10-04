@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Admin\RecordAdminAuditEvent;
 use App\Contracts\EpidemiologyAnalyzer;
+use App\Enums\PatientConsentScope;
 use App\Http\Controllers\Controller;
 use App\Models\Clinic;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
 use App\Models\Teleconsultation;
+use App\Support\Clinical\ActivePatientConsent;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,13 +19,17 @@ use Throwable;
 
 class ClinicEpidemiologyController extends Controller
 {
-    public function __construct(private EpidemiologyAnalyzer $analyzer) {}
+    public function __construct(
+        private EpidemiologyAnalyzer $analyzer,
+        private ActivePatientConsent $activePatientConsent,
+    ) {}
 
     public function show(Request $request): JsonResponse
     {
         $clinic = $this->clinic($request);
         $now = CarbonImmutable::now();
         $from = $now->subDays(90)->startOfDay();
+
         $appointments = $clinic->appointments()
             ->whereBetween('scheduled_at', [$from, $now])
             ->get(['scheduled_at', 'patient_profile_id']);
@@ -41,20 +48,52 @@ class ClinicEpidemiologyController extends Controller
             ->where('clinic_id', $clinic->id)
             ->whereBetween('issued_at', [$from, $now])
             ->get(['issued_at', 'patient_profile_id']);
-        $highRiskCases = $clinic->patientIntakes()
+        $highRiskPatientIds = $clinic->patientIntakes()
             ->whereBetween('created_at', [$from, $now])
             ->whereIn('triage_priority', ['urgent', 'emergency'])
             ->pluck('patient_profile_id')
+            ->filter()
             ->unique()
-            ->count();
-        $monitoredPatients = collect([
-            $appointments->pluck('patient_profile_id'),
-            $consultations->pluck('patient_profile_id'),
-            $laboratoryOrders->pluck('patient_profile_id'),
-            $teleconsultations->pluck('patient_profile_id'),
-            $prescriptions->pluck('patient_profile_id'),
-        ])->flatten()->filter()->unique()->count();
+            ->values();
+
+        $monitoredPatients = $this->monitoredPatientIds(
+            $appointments,
+            $consultations,
+            $laboratoryOrders,
+            $teleconsultations,
+            $prescriptions,
+        );
         $trend = $this->trend($now, $appointments, $consultations, $laboratoryOrders);
+
+        $policyVersion = (string) config('clinical.consent_policy_version');
+        $minimumCohortSize = max(1, (int) config('clinical.epidemiology.minimum_external_cohort_size', 10));
+        $consentedPatientIds = $this->activePatientConsent->patientIds(
+            patientIds: $clinic->patientProfiles()->pluck('id'),
+            scope: PatientConsentScope::EpidemiologyAnonymized,
+            clinicId: $clinic->id,
+            at: $now,
+        );
+
+        $analysisAppointments = $this->forPatients($appointments, $consentedPatientIds);
+        $analysisConsultations = $this->forPatients($consultations, $consentedPatientIds);
+        $analysisLaboratoryOrders = $this->forPatients($laboratoryOrders, $consentedPatientIds);
+        $analysisTeleconsultations = $this->forPatients($teleconsultations, $consentedPatientIds);
+        $analysisPrescriptions = $this->forPatients($prescriptions, $consentedPatientIds);
+        $analysisMonitoredPatients = $this->monitoredPatientIds(
+            $analysisAppointments,
+            $analysisConsultations,
+            $analysisLaboratoryOrders,
+            $analysisTeleconsultations,
+            $analysisPrescriptions,
+        );
+        $analysisHighRiskCases = $highRiskPatientIds->intersect($consentedPatientIds)->count();
+        $analysisTrend = $this->trend(
+            $now,
+            $analysisAppointments,
+            $analysisConsultations,
+            $analysisLaboratoryOrders,
+        );
+
         $analysis = [
             'trend' => 'not_configured',
             'forecasts' => [],
@@ -64,32 +103,64 @@ class ClinicEpidemiologyController extends Controller
         ];
         $analysisAvailable = false;
         $analysisMessage = 'No hay un motor epidemiológico configurado. Se muestran únicamente eventos clínicos internos.';
+        $cohortStatus = 'not_used';
 
         if ($this->analyzer->configured()) {
-            try {
-                $analysis = $this->analyzer->analyze([
-                    'period' => [
-                        'from' => $from->toDateString(),
-                        'to' => $now->toDateString(),
-                        'days' => 90,
-                    ],
-                    'metrics' => [
-                        'monitored_patients' => $monitoredPatients,
-                        'high_risk_cases' => $highRiskCases,
-                        'appointments' => $appointments->count(),
-                        'consultations' => $consultations->count(),
-                        'laboratory_orders' => $laboratoryOrders->count(),
-                        'teleconsultations' => $teleconsultations->count(),
-                        'prescriptions' => $prescriptions->count(),
-                    ],
-                    'monthly_trend' => $trend,
-                ]);
-                $analysisAvailable = true;
-                $analysisMessage = is_string($analysis['summary'] ?? null)
-                    ? $analysis['summary']
-                    : 'Análisis epidemiológico agregado disponible para revisión humana.';
-            } catch (Throwable) {
-                $analysisMessage = 'El motor epidemiológico está configurado, pero no respondió. Se muestran datos internos sin predicción.';
+            if ($analysisMonitoredPatients->count() < $minimumCohortSize) {
+                $cohortStatus = 'insufficient';
+                $analysisMessage = sprintf(
+                    'El motor epidemiológico está configurado, pero la cohorte con consentimiento activo no alcanza el mínimo de privacidad (%d pacientes).',
+                    $minimumCohortSize,
+                );
+            } else {
+                $cohortStatus = 'eligible';
+
+                try {
+                    $analysis = $this->analyzer->analyze([
+                        'period' => [
+                            'from' => $from->toDateString(),
+                            'to' => $now->toDateString(),
+                            'days' => 90,
+                        ],
+                        'metrics' => [
+                            'monitored_patients' => $analysisMonitoredPatients->count(),
+                            'high_risk_cases' => $analysisHighRiskCases,
+                            'appointments' => $analysisAppointments->count(),
+                            'consultations' => $analysisConsultations->count(),
+                            'laboratory_orders' => $analysisLaboratoryOrders->count(),
+                            'teleconsultations' => $analysisTeleconsultations->count(),
+                            'prescriptions' => $analysisPrescriptions->count(),
+                        ],
+                        'monthly_trend' => $analysisTrend,
+                    ]);
+                    $analysisAvailable = true;
+                    $analysisMessage = is_string($analysis['summary'] ?? null)
+                        ? $analysis['summary']
+                        : 'Análisis epidemiológico agregado disponible para revisión humana.';
+
+                    $this->recordExternalAnalysisAudit(
+                        request: $request,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.completed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients->count(),
+                        minimumCohortSize: $minimumCohortSize,
+                        provider: $this->analyzer->provider(),
+                    );
+                } catch (Throwable) {
+                    $analysisMessage = 'El motor epidemiológico está configurado, pero no respondió. Se muestran datos internos sin predicción.';
+
+                    $this->recordExternalAnalysisAudit(
+                        request: $request,
+                        clinic: $clinic,
+                        action: 'epidemiology.analysis.failed',
+                        policyVersion: $policyVersion,
+                        cohortSize: $analysisMonitoredPatients->count(),
+                        minimumCohortSize: $minimumCohortSize,
+                        provider: $this->analyzer->provider(),
+                        critical: true,
+                    );
+                }
             }
         }
 
@@ -105,10 +176,17 @@ class ClinicEpidemiologyController extends Controller
                 'analysis_available' => $analysisAvailable,
                 'provider' => $this->analyzer->provider(),
                 'message' => $analysisMessage,
+                'analysis_cohort' => [
+                    'status' => $cohortStatus,
+                    'policy_version' => $policyVersion,
+                    'consented_patients' => $consentedPatientIds->count(),
+                    'monitored_patients' => $analysisMonitoredPatients->count(),
+                    'minimum_required' => $minimumCohortSize,
+                ],
                 'metrics' => [
-                    'monitored_patients' => $monitoredPatients,
+                    'monitored_patients' => $monitoredPatients->count(),
                     'active_alerts' => count($analysis['alerts'] ?? []),
-                    'high_risk_cases' => $highRiskCases,
+                    'high_risk_cases' => $highRiskPatientIds->count(),
                     'trend' => $analysis['trend'] ?? 'not_configured',
                     'appointments' => $appointments->count(),
                     'consultations' => $consultations->count(),
@@ -134,13 +212,37 @@ class ClinicEpidemiologyController extends Controller
         ]);
     }
 
-    /** @param Collection<int, mixed> $appointments
-     * @param  Collection<int, mixed>  $consultations
-     * @param  Collection<int, mixed>  $laboratoryOrders
-     * @return array<int, array<string, int|string>>
-     */
-    private function trend(CarbonImmutable $now, Collection $appointments, Collection $consultations, Collection $laboratoryOrders): array
+    private function forPatients(Collection $rows, Collection $patientIds): Collection
     {
+        if ($patientIds->isEmpty()) {
+            return collect();
+        }
+
+        $lookup = array_fill_keys(
+            $patientIds->map(static fn ($id): string => (string) $id)->all(),
+            true,
+        );
+
+        return $rows
+            ->filter(static fn ($row): bool => isset($lookup[(string) $row->patient_profile_id]))
+            ->values();
+    }
+
+    private function monitoredPatientIds(Collection ...$collections): Collection
+    {
+        return collect($collections)
+            ->flatMap(static fn (Collection $items): Collection => $items->pluck('patient_profile_id'))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    private function trend(
+        CarbonImmutable $now,
+        Collection $appointments,
+        Collection $consultations,
+        Collection $laboratoryOrders,
+    ): array {
         $trend = [];
         $month = $now->startOfMonth()->subMonths(2);
 
@@ -159,7 +261,42 @@ class ClinicEpidemiologyController extends Controller
         return $trend;
     }
 
-    /** @return array{status: string, label: string, count: int} */
+    private function recordExternalAnalysisAudit(
+        Request $request,
+        Clinic $clinic,
+        string $action,
+        string $policyVersion,
+        int $cohortSize,
+        int $minimumCohortSize,
+        string $provider,
+        bool $critical = false,
+    ): void {
+        $actor = $request->user();
+
+        if ($actor === null) {
+            return;
+        }
+
+        app(RecordAdminAuditEvent::class)->handle(
+            actor: $actor,
+            request: $request,
+            module: 'epidemiology',
+            action: $action,
+            resourceType: 'clinic',
+            resourceId: $clinic->id,
+            resourceLabel: $clinic->name,
+            clinic: $clinic,
+            metadata: [
+                'provider' => $provider,
+                'policy_version' => $policyVersion,
+                'cohort_size' => $cohortSize,
+                'minimum_cohort_size' => $minimumCohortSize,
+                'payload_classification' => 'aggregate_only',
+            ],
+            critical: $critical,
+        );
+    }
+
     private function source(int $count, string $label): array
     {
         return [
