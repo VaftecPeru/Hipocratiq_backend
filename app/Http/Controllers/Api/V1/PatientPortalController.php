@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Clinic\UpdateClinicPatient;
 use App\Enums\ConsultationStatus;
 use App\Enums\LaboratoryOrderStatus;
-use App\Enums\PrescriptionStatus;
 use App\Enums\PatientConsentScope;
 use App\Enums\PatientConsentStatus;
+use App\Enums\PrescriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\PatientIntakeDraftStoreRequest;
 use App\Http\Requests\Api\V1\PatientProfileUpdateRequest;
@@ -27,10 +27,10 @@ use App\Models\LaboratoryOrder;
 use App\Models\PatientIntake;
 use App\Models\PatientIntakeDraft;
 use App\Models\PatientProfile;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 class PatientPortalController extends Controller
@@ -80,7 +80,7 @@ class PatientPortalController extends Controller
             'data' => PatientAppointmentResource::collection($appointments),
             'meta' => [
                 'total' => $appointments->count(),
-                'upcoming' => $appointments->filter(fn (Appointment $appointment): bool => $appointment->scheduled_at?->isFuture() && ! in_array($appointment->status->value, ['canceled', 'no_show'], true))->count(),
+                'upcoming' => $appointments->filter(fn (Appointment $appointment): bool => $appointment->scheduled_at?->isFuture() && !in_array($appointment->status->value, ['canceled', 'no_show'], true))->count(),
             ],
         ]);
     }
