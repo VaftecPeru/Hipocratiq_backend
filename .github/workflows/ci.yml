@@ -3,7 +3,7 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main, develop]
+    branches: [main, develop, qa/patient-pint-diagnostic-20261005]
   pull_request:
     branches: [main, develop]
 
@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   lint:
-    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_GITHUB_HOSTED_CI == 'true'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/qa/patient-pint-diagnostic-20261005' || vars.ENABLE_GITHUB_HOSTED_CI == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -71,7 +71,10 @@ jobs:
         run: php scripts/check-security-baseline.php
 
       - name: Check code style
-        run: vendor/bin/pint --test
+        run: |
+          vendor/bin/pint
+          git diff -- app/Http/Controllers/Api/V1/PatientPortalController.php tests/Feature/PatientPortalTest.php
+          git diff --exit-code
 
       - name: Run tests
         run: composer test
