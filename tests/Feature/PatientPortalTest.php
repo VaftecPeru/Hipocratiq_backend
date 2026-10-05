@@ -247,6 +247,12 @@ class PatientPortalTest extends TestCase
             ->assertJsonPath('meta.next_step', 'draft_saved');
 
         $triageId = $draft->json('data.id');
+        self::assertNull($this->patient->fresh()->latestIntake);
+        $this->assertDatabaseHas('patient_intakes', [
+            'id' => $triageId,
+            'triage_status' => 'draft',
+            'triage_priority' => null,
+        ]);
 
         $this->withSpaOrigin()->postJson('/api/v1/auth/patient/triage', [
             'reason' => 'Malestar general con evolución de dos días.',
@@ -266,6 +272,7 @@ class PatientPortalTest extends TestCase
             ->assertJsonPath('meta.next_step', 'submitted');
 
         $this->assertDatabaseCount('patient_intakes', 1);
+        self::assertSame($triageId, $this->patient->fresh()->latestIntake?->id);
         $this->assertDatabaseHas('patient_intakes', [
             'id' => $triageId,
             'triage_level' => 'III',
