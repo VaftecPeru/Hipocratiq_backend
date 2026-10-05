@@ -250,7 +250,7 @@ class PatientPortalController extends Controller
             'meta' => [
                 'next_step' => $status === 'submitted' ? 'submitted' : 'draft_saved',
             ],
-        ], $triage->wasRecentlyCreated ? 201 : 200);
+        ]);
     }
 
     public function membership(Request $request): JsonResponse
