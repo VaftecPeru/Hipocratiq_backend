@@ -204,11 +204,13 @@ class PatientPortalController extends Controller
         $data = $request->validated();
         $status = $data['triage_status'];
         $level = $data['triage_level'];
-        $priority = match ($level) {
-            'I', 'II' => 'emergency',
-            'III' => 'urgent',
-            'IV', 'V' => 'routine',
-        };
+        $priority = $status === 'submitted'
+            ? match ($level) {
+                'I', 'II' => 'emergency',
+                'III' => 'urgent',
+                'IV', 'V' => 'routine',
+            }
+            : null;
 
         $triage = DB::transaction(function () use ($data, $level, $patient, $priority, $request, $status): PatientIntake {
             $triage = PatientIntake::query()
