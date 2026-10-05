@@ -24,6 +24,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'respiratory_rate',
     'oxygen_saturation',
     'triage_priority',
+    'triage_level',
+    'triage_status',
+    'submitted_at',
     'triage_notes',
 ])]
 class PatientIntake extends Model
@@ -34,6 +37,7 @@ class PatientIntake extends Model
     {
         return [
             'temperature_c' => 'float',
+            'submitted_at' => 'datetime',
         ];
     }
 
