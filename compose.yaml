@@ -41,7 +41,7 @@ services:
       REDIS_PORT: "6379"
     command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=3", "--timeout=90", "--max-time=3600"]
     healthcheck:
-      test: ["CMD-SHELL", "php -r '$cmd=file_get_contents(\"/proc/1/cmdline\"); exit(str_contains($cmd, \"queue:work\") ? 0 : 1);'"]
+      test: ["CMD-SHELL", "php -r '$$cmd=file_get_contents(\"/proc/1/cmdline\"); exit(str_contains($$cmd, \"queue:work\") ? 0 : 1);'"]
       interval: 15s
       timeout: 5s
       retries: 4
@@ -67,7 +67,7 @@ services:
       REDIS_PORT: "6379"
     command: ["php", "artisan", "schedule:work"]
     healthcheck:
-      test: ["CMD-SHELL", "php -r '$cmd=file_get_contents(\"/proc/1/cmdline\"); exit(str_contains($cmd, \"schedule:work\") ? 0 : 1);'"]
+      test: ["CMD-SHELL", "php -r '$$cmd=file_get_contents(\"/proc/1/cmdline\"); exit(str_contains($$cmd, \"schedule:work\") ? 0 : 1);'"]
       interval: 15s
       timeout: 5s
       retries: 4
