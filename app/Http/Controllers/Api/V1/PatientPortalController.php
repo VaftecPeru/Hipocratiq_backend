@@ -80,7 +80,7 @@ class PatientPortalController extends Controller
             'data' => PatientAppointmentResource::collection($appointments),
             'meta' => [
                 'total' => $appointments->count(),
-                'upcoming' => $appointments->filter(fn (Appointment $appointment): bool => $appointment->scheduled_at?->isFuture() && !in_array($appointment->status->value, ['canceled', 'no_show'], true))->count(),
+                'upcoming' => $appointments->filter(fn (Appointment $appointment): bool => $appointment->scheduled_at?->isFuture() && ! in_array($appointment->status->value, ['canceled', 'no_show'], true))->count(),
             ],
         ]);
     }
