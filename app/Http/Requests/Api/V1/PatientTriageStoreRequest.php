@@ -25,7 +25,9 @@ class PatientTriageStoreRequest extends FormRequest
             'heart_rate' => ['nullable', 'integer', 'between:30,220'],
             'respiratory_rate' => ['nullable', 'integer', 'between:5,60'],
             'oxygen_saturation' => ['nullable', 'integer', 'between:70,100'],
-            'triage_priority' => ['nullable', 'string', Rule::in(['routine', 'urgent', 'emergency'])],
+            'triage_priority' => ['prohibited'],
+            'triage_level' => ['required', 'string', Rule::in(['I', 'II', 'III', 'IV', 'V'])],
+            'triage_status' => ['required', 'string', Rule::in(['draft', 'submitted'])],
             'triage_notes' => ['nullable', 'string', 'max:2000'],
         ];
     }

@@ -50,6 +50,7 @@ class ClinicEpidemiologyController extends Controller
             ->get(['issued_at', 'patient_profile_id']);
         $highRiskPatientIds = $clinic->patientIntakes()
             ->whereBetween('created_at', [$from, $now])
+            ->where('triage_status', 'submitted')
             ->whereIn('triage_priority', ['urgent', 'emergency'])
             ->pluck('patient_profile_id')
             ->filter()

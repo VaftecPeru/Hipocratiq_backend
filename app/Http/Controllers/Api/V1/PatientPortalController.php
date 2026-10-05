@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Actions\Clinic\UpdateClinicPatient;
 use App\Enums\ConsultationStatus;
 use App\Enums\LaboratoryOrderStatus;
+use App\Enums\PatientConsentScope;
+use App\Enums\PatientConsentStatus;
 use App\Enums\PrescriptionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\PatientIntakeDraftStoreRequest;
@@ -18,12 +20,14 @@ use App\Http\Resources\Api\V1\PatientPrescriptionResource;
 use App\Http\Resources\Api\V1\PatientProfileResource;
 use App\Http\Resources\Api\V1\PatientTriageResource;
 use App\Models\Appointment;
+use App\Models\ClinicSubscription;
 use App\Models\Consultation;
 use App\Models\DoctorPrescription;
 use App\Models\LaboratoryOrder;
 use App\Models\PatientIntake;
 use App\Models\PatientIntakeDraft;
 use App\Models\PatientProfile;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -198,51 +202,183 @@ class PatientPortalController extends Controller
         }
 
         $data = $request->validated();
-        $triage = DB::transaction(fn (): PatientIntake => PatientIntake::query()->create([
-            'clinic_id' => $patient->clinic_id,
-            'patient_profile_id' => $patient->id,
-            'registered_by_user_id' => $request->user()->id,
-            'objective' => trim($data['reason']),
-            'temperature_c' => $data['temperature_c'] ?? null,
-            'systolic_bp' => $data['systolic_bp'] ?? null,
-            'diastolic_bp' => $data['diastolic_bp'] ?? null,
-            'heart_rate' => $data['heart_rate'] ?? null,
-            'respiratory_rate' => $data['respiratory_rate'] ?? null,
-            'oxygen_saturation' => $data['oxygen_saturation'] ?? null,
-            'triage_priority' => $data['triage_priority'] ?? null,
-            'triage_notes' => $data['triage_notes'] ?? null,
-        ]));
+        $status = $data['triage_status'];
+        $level = $data['triage_level'];
+
+        $triage = DB::transaction(function () use ($data, $level, $patient, $request, $status): PatientIntake {
+            $triage = PatientIntake::query()
+                ->where('patient_profile_id', $patient->id)
+                ->where('clinic_id', $patient->clinic_id)
+                ->where('triage_status', 'draft')
+                ->lockForUpdate()
+                ->latest('id')
+                ->first();
+
+            $triage ??= new PatientIntake([
+                'clinic_id' => $patient->clinic_id,
+                'patient_profile_id' => $patient->id,
+                'registered_by_user_id' => $request->user()->id,
+            ]);
+
+            $triage->fill([
+                'objective' => trim($data['reason']),
+                'temperature_c' => $data['temperature_c'] ?? null,
+                'systolic_bp' => $data['systolic_bp'] ?? null,
+                'diastolic_bp' => $data['diastolic_bp'] ?? null,
+                'heart_rate' => $data['heart_rate'] ?? null,
+                'respiratory_rate' => $data['respiratory_rate'] ?? null,
+                'oxygen_saturation' => $data['oxygen_saturation'] ?? null,
+                // El nivel I-V es autorreportado por el paciente. La prioridad clínica
+                // permanece sin clasificar hasta la valoración de personal clínico.
+                'triage_priority' => null,
+                'triage_level' => $level,
+                'triage_status' => $status,
+                'submitted_at' => $status === 'submitted' ? now() : null,
+                'triage_notes' => $data['triage_notes'] ?? null,
+            ]);
+            $triage->save();
+
+            return $triage->fresh(['clinic', 'registrar']) ?? $triage;
+        });
 
         return response()->json([
             'success' => true,
-            'data' => new PatientTriageResource($triage->load(['clinic', 'registrar'])),
-        ], 201);
+            'data' => new PatientTriageResource($triage),
+            'meta' => [
+                'next_step' => $status === 'submitted' ? 'submitted' : 'draft_saved',
+            ],
+        ]);
     }
 
     public function membership(Request $request): JsonResponse
     {
-        $this->patient($request);
+        $patient = $this->patient($request);
+
+        if ($patient->clinic_id === null) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'available' => false,
+                    'source' => 'clinic',
+                    'message' => 'Tu perfil todavía no está vinculado a una clínica con cobertura HIPOCRATIQ.',
+                ],
+            ]);
+        }
+
+        $subscription = ClinicSubscription::query()
+            ->currentlyActive()
+            ->where('clinic_id', $patient->clinic_id)
+            ->with('plan')
+            ->latest('starts_at')
+            ->first();
+
+        if ($subscription === null || $subscription->plan === null) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'available' => false,
+                    'source' => 'clinic',
+                    'message' => 'La clínica vinculada no tiene una membresía activa disponible para tu cuenta.',
+                ],
+            ]);
+        }
 
         return response()->json([
             'success' => true,
-            'data' => null,
-            'meta' => [
-                'available' => false,
-                'message' => 'No existe una membresía individual persistida para este paciente.',
+            'data' => [
+                'available' => true,
+                'source' => 'clinic',
+                'clinic' => $patient->clinic?->only(['id', 'name']),
+                'plan' => [
+                    'id' => $subscription->plan->id,
+                    'key' => $subscription->plan->key,
+                    'name' => $subscription->plan->name,
+                    'description' => $subscription->plan->description,
+                    'features' => $subscription->plan->features ?? [],
+                ],
+                'coverage' => [
+                    'status' => $subscription->status->value,
+                    'starts_at' => $subscription->starts_at?->toIso8601String(),
+                    'ends_at' => $subscription->ends_at?->toIso8601String(),
+                ],
+                'message' => 'Tu acceso está cubierto por la membresía activa de tu clínica.',
             ],
         ]);
     }
 
     public function epidemiology(Request $request): JsonResponse
     {
-        $this->patient($request);
+        $patient = $this->patient($request);
+        $now = CarbonImmutable::now();
+        $from = $now->subDays(90)->startOfDay();
+
+        $appointments = $this->patientQuery(Appointment::query(), $patient)
+            ->whereBetween('scheduled_at', [$from, $now])
+            ->get(['scheduled_at']);
+        $consultations = $this->patientQuery(Consultation::query(), $patient)
+            ->whereBetween('created_at', [$from, $now])
+            ->get(['created_at']);
+        $laboratoryOrders = $this->patientQuery(LaboratoryOrder::query(), $patient)
+            ->whereBetween('ordered_at', [$from, $now])
+            ->get(['ordered_at', 'status']);
+        $prescriptions = $this->patientQuery(DoctorPrescription::query(), $patient)
+            ->whereBetween('issued_at', [$from, $now])
+            ->get(['issued_at', 'status']);
+
+        $consent = $patient->consents()
+            ->where('scope', PatientConsentScope::EpidemiologyAnonymized->value)
+            ->where('status', PatientConsentStatus::Granted->value)
+            ->where('effective_from', '<=', $now)
+            ->where(function (Builder $query) use ($now): void {
+                $query->whereNull('effective_until')->orWhere('effective_until', '>', $now);
+            })
+            ->latest('effective_from')
+            ->first();
+
+        $trend = [];
+        $month = $now->startOfMonth()->subMonths(2);
+        for ($index = 0; $index < 3; $index++) {
+            $key = $month->format('Y-m');
+            $trend[] = [
+                'month' => $key,
+                'label' => $month->format('m/Y'),
+                'appointments' => $appointments->filter(fn ($row): bool => $row->scheduled_at?->format('Y-m') === $key)->count(),
+                'consultations' => $consultations->filter(fn ($row): bool => $row->created_at?->format('Y-m') === $key)->count(),
+                'laboratory_orders' => $laboratoryOrders->filter(fn ($row): bool => $row->ordered_at?->format('Y-m') === $key)->count(),
+            ];
+            $month = $month->addMonth();
+        }
 
         return response()->json([
             'success' => true,
-            'data' => null,
-            'meta' => [
-                'available' => false,
-                'message' => 'No hay una fuente epidemiológica vinculada a este paciente.',
+            'data' => [
+                'available' => true,
+                'generated_at' => $now->toIso8601String(),
+                'period' => [
+                    'from' => $from->toDateString(),
+                    'to' => $now->toDateString(),
+                    'days' => 90,
+                ],
+                'participation' => [
+                    'consent_active' => $consent !== null,
+                    'policy_version' => $consent?->policy_version,
+                    'scope' => PatientConsentScope::EpidemiologyAnonymized->value,
+                ],
+                'metrics' => [
+                    'appointments' => $appointments->count(),
+                    'consultations' => $consultations->count(),
+                    'laboratory_orders' => $laboratoryOrders->count(),
+                    'available_results' => $laboratoryOrders
+                        ->whereIn('status', [LaboratoryOrderStatus::Ready, LaboratoryOrderStatus::Reviewed])
+                        ->count(),
+                    'prescriptions' => $prescriptions->count(),
+                    'active_prescriptions' => $prescriptions->where('status', PrescriptionStatus::Active)->count(),
+                ],
+                'trend' => $trend,
+                'message' => $consent === null
+                    ? 'Tu actividad clínica se muestra de forma privada. Puedes autorizar el uso anonimizado desde Mi perfil.'
+                    : 'Tu consentimiento epidemiológico anonimizado está activo. No se muestran diagnósticos ni predicciones individuales.',
+                'disclaimer' => 'Esta vista resume tu actividad registrada y tu participación de consentimiento. No sustituye una evaluación médica.',
             ],
         ]);
     }

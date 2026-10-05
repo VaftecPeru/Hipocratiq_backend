@@ -144,6 +144,7 @@ class DoctorPatientController extends Controller
         $intakeIds = PatientIntake::query()
             ->where('clinic_id', $clinic->id)
             ->where('requested_doctor_user_id', $doctor->id)
+            ->where('triage_status', 'submitted')
             ->pluck('patient_profile_id');
 
         $linkedIds = DB::table('doctor_patient_links')
@@ -169,6 +170,7 @@ class DoctorPatientController extends Controller
                 ->where('clinic_id', $clinic->id)
                 ->where('patient_profile_id', $patient->id)
                 ->where('requested_doctor_user_id', $doctor->id)
+                ->where('triage_status', 'submitted')
                 ->exists()
             || DB::table('doctor_patient_links')
                 ->where('clinic_id', $clinic->id)

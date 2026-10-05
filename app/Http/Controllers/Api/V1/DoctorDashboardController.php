@@ -159,7 +159,10 @@ class DoctorDashboardController extends Controller
                         $appointmentQuery->where('doctor_user_id', $doctor->id)->where('clinic_id', $clinic->id);
                     })
                     ->orWhereHas('intakes', function (Builder $intakeQuery) use ($doctor, $clinic): void {
-                        $intakeQuery->where('requested_doctor_user_id', $doctor->id)->where('clinic_id', $clinic->id);
+                        $intakeQuery
+                            ->where('requested_doctor_user_id', $doctor->id)
+                            ->where('clinic_id', $clinic->id)
+                            ->where('triage_status', 'submitted');
                     });
             });
     }
