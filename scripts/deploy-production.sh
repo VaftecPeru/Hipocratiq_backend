@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PRODUCTION_DIR="\${PRODUCTION_DIR:-/srv/hipocratiq/backend}"
-COMPOSE_PROJECT="\${COMPOSE_PROJECT:-}"
-HEALTH_URL="\${HEALTH_URL:-https://hipocratiq.com/backend/api/health/ready}"
-LOCK_FILE="\${LOCK_FILE:-/tmp/hipocratiq-backend-deploy.lock}"
-BACKUP_ROOT="\${BACKUP_ROOT:-/srv/hipocratiq/backups/predeploy}"
+PRODUCTION_DIR="${PRODUCTION_DIR:-/srv/hipocratiq/backend}"
+COMPOSE_PROJECT="${COMPOSE_PROJECT:-}"
+HEALTH_URL="${HEALTH_URL:-https://hipocratiq.com/backend/api/health/ready}"
+LOCK_FILE="${LOCK_FILE:-/tmp/hipocratiq-backend-deploy.lock}"
+BACKUP_ROOT="${BACKUP_ROOT:-/srv/hipocratiq/backups/predeploy}"
 TARGET_BRANCH="main"
 
 for command in git docker curl flock awk mkdir sha256sum; do
@@ -83,7 +83,7 @@ rollback_code() {
     git reset --hard "$OLD_SHA"
 
     mapfile -t rollback_services < <(runtime_services)
-    compose up -d --build --no-deps "\${rollback_services[@]}"
+    compose up -d --build --no-deps "${rollback_services[@]}"
     compose exec -T app php artisan optimize:clear || true
   fi
 
@@ -138,7 +138,7 @@ echo "Destino: $TARGET_SHA"
 
 echo "Creando respaldo PostgreSQL previo independiente de Laravel..."
 mkdir -p "$BACKUP_ROOT"
-BACKUP_ID="$(date -u +%Y%m%dT%H%M%SZ)-\${OLD_SHA:0:12}"
+BACKUP_ID="$(date -u +%Y%m%dT%H%M%SZ)-${OLD_SHA:0:12}"
 BACKUP_PATH="$BACKUP_ROOT/$BACKUP_ID.dump"
 
 compose exec -T postgres sh -lc \
@@ -163,18 +163,18 @@ fi
 
 mapfile -t services < <(runtime_services)
 
-echo "Construyendo imágenes Backend: \${services[*]}"
-compose build "\${services[@]}"
+echo "Construyendo imágenes Backend: ${services[*]}"
+compose build "${services[@]}"
 
 echo "Aplicando migraciones con la nueva imagen..."
 compose run --rm --no-deps app php artisan migrate --force --no-interaction
 
 echo "Actualizando servicios..."
-compose up -d --no-deps "\${services[@]}"
+compose up -d --no-deps "${services[@]}"
 compose exec -T app php artisan optimize:clear
 compose exec -T app php artisan migrate:status --no-interaction >/dev/null
 
-for service in "\${services[@]}"; do
+for service in "${services[@]}"; do
   container_id="$(compose ps -q "$service")"
   if [[ -z "$container_id" ]] || [[ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != "true" ]]; then
     echo "ERROR: el servicio $service no quedó en ejecución." >&2
