@@ -205,7 +205,6 @@ class PatientPortalTest extends TestCase
             'heart_rate' => 82,
             'respiratory_rate' => 16,
             'oxygen_saturation' => 97,
-            'triage_priority' => 'routine',
             'triage_level' => 'IV',
             'triage_status' => 'submitted',
             'triage_notes' => 'Información registrada por el paciente.',
@@ -220,7 +219,7 @@ class PatientPortalTest extends TestCase
             'patient_profile_id' => $this->patient->id,
             'registered_by_user_id' => $this->patientUser->id,
             'clinic_id' => $this->clinic->id,
-            'triage_priority' => 'routine',
+            'triage_priority' => null,
             'triage_level' => 'IV',
             'triage_status' => 'submitted',
             'oxygen_saturation' => 97,
@@ -267,7 +266,7 @@ class PatientPortalTest extends TestCase
             'triage_notes' => 'Formulario completado por el paciente.',
         ])->assertOk()
             ->assertJsonPath('data.id', $triageId)
-            ->assertJsonPath('data.triage_priority', 'urgent')
+            ->assertJsonPath('data.triage_priority', null)
             ->assertJsonPath('data.triage_status', 'submitted')
             ->assertJsonPath('meta.next_step', 'submitted');
 
@@ -277,7 +276,7 @@ class PatientPortalTest extends TestCase
             'id' => $triageId,
             'triage_level' => 'III',
             'triage_status' => 'submitted',
-            'triage_priority' => 'urgent',
+            'triage_priority' => null,
         ]);
     }
 
@@ -381,9 +380,10 @@ class PatientPortalTest extends TestCase
             'reason' => 'Corto',
             'systolic_bp' => 120,
             'diastolic_bp' => 120,
+            'triage_priority' => 'emergency',
             'triage_level' => 'VI',
             'triage_status' => 'submitted',
-        ])->assertUnprocessable()->assertJsonValidationErrors(['reason', 'diastolic_bp', 'triage_level']);
+        ])->assertUnprocessable()->assertJsonValidationErrors(['reason', 'diastolic_bp', 'triage_priority', 'triage_level']);
 
         $this->assertDatabaseCount('patient_intakes', 0);
     }
@@ -408,7 +408,11 @@ class PatientPortalTest extends TestCase
             ->assertJsonPath('data.available', true)
             ->assertJsonPath('data.source', 'clinic')
             ->assertJsonPath('data.plan.name', 'Professional')
-            ->assertJsonPath('data.subscription.status', 'active');
+            ->assertJsonPath('data.coverage.status', 'active')
+            ->assertJsonMissingPath('data.plan.monthly_price_cents')
+            ->assertJsonMissingPath('data.plan.annual_price_cents')
+            ->assertJsonMissingPath('data.latest_payment')
+            ->assertJsonMissingPath('data.subscription');
 
         $this->withSpaOrigin()->getJson('/api/v1/auth/patient/epidemiology')
             ->assertOk()
