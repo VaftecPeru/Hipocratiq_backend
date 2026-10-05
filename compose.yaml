@@ -6,7 +6,7 @@ services:
     container_name: back-api-app
     restart: unless-stopped
     env_file:
-      - .env
+      - ${APP_ENV_FILE:-.env}
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -33,7 +33,7 @@ services:
     container_name: back-api-queue
     restart: unless-stopped
     env_file:
-      - .env
+      - ${APP_ENV_FILE:-.env}
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -59,7 +59,7 @@ services:
     container_name: back-api-scheduler
     restart: unless-stopped
     env_file:
-      - .env
+      - ${APP_ENV_FILE:-.env}
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
