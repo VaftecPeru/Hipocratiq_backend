@@ -59,7 +59,9 @@ class PatientProfile extends Model
 
     public function latestIntake(): HasOne
     {
-        return $this->hasOne(PatientIntake::class)->latestOfMany();
+        return $this->hasOne(PatientIntake::class)
+            ->where('triage_status', 'submitted')
+            ->latestOfMany();
     }
 
     public function lastAppointment(): HasOne
