@@ -82,6 +82,14 @@ rollback_code() {
     echo "ROLLBACK: restaurando código a $OLD_SHA"
     git reset --hard "$OLD_SHA"
 
+    for container in back-api-queue back-api-scheduler; do
+      service_label="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$container" 2>/dev/null || true)"
+      if [[ -n "$service_label" ]] && ! has_service "$service_label"; then
+        echo "ROLLBACK: eliminando contenedor huérfano $container"
+        docker rm -f "$container" >/dev/null 2>&1 || true
+      fi
+    done
+
     mapfile -t rollback_services < <(runtime_services)
     compose up -d --build --no-deps "${rollback_services[@]}"
     compose exec -T app php artisan optimize:clear || true
@@ -141,9 +149,25 @@ mkdir -p "$BACKUP_ROOT"
 BACKUP_ID="$(date -u +%Y%m%dT%H%M%SZ)-${OLD_SHA:0:12}"
 BACKUP_PATH="$BACKUP_ROOT/$BACKUP_ID.dump"
 
-compose exec -T postgres sh -lc \
-  'export PGPASSWORD="$POSTGRES_PASSWORD"; exec pg_dump --format=custom --no-owner --no-privileges --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
+DB_USER_RUNTIME="$(docker exec "$APP_CONTAINER" sh -lc 'printf %s "$DB_USERNAME"')"
+DB_NAME_RUNTIME="$(docker exec "$APP_CONTAINER" sh -lc 'printf %s "$DB_DATABASE"')"
+DB_PASSWORD_RUNTIME="$(docker exec "$APP_CONTAINER" sh -lc 'printf %s "$DB_PASSWORD"')"
+
+if [[ -z "$DB_USER_RUNTIME" || -z "$DB_NAME_RUNTIME" ]]; then
+  echo "ERROR: no se pudieron resolver las credenciales de base de datos desde el contenedor app." >&2
+  exit 1
+fi
+
+docker exec -e PGPASSWORD="$DB_PASSWORD_RUNTIME" "$POSTGRES_CONTAINER" \
+  psql --username="$DB_USER_RUNTIME" --dbname="$DB_NAME_RUNTIME" --tuples-only --no-align --command='select 1' \
+  | grep -qx '1'
+
+docker exec -e PGPASSWORD="$DB_PASSWORD_RUNTIME" "$POSTGRES_CONTAINER" \
+  pg_dump --format=custom --no-owner --no-privileges \
+  --username="$DB_USER_RUNTIME" --dbname="$DB_NAME_RUNTIME" \
   > "$BACKUP_PATH"
+
+unset DB_PASSWORD_RUNTIME
 
 if [[ ! -s "$BACKUP_PATH" ]]; then
   echo "ERROR: el respaldo PostgreSQL quedó vacío." >&2
@@ -200,7 +224,21 @@ if [[ "$READY" -ne 1 ]]; then
 fi
 
 if [[ -n "$HEALTH_URL" ]]; then
-  curl --fail --silent --show-error "$HEALTH_URL" >/dev/null
+  echo "Esperando readiness público..."
+  PUBLIC_READY=0
+  for attempt in {1..30}; do
+    if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
+      PUBLIC_READY=1
+      break
+    fi
+    sleep 2
+  done
+
+  if [[ "$PUBLIC_READY" -ne 1 ]]; then
+    echo "ERROR: readiness público no quedó disponible." >&2
+    compose logs --tail=120 app || true
+    exit 1
+  fi
 fi
 
 trap - ERR
