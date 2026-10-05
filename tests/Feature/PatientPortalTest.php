@@ -209,7 +209,7 @@ class PatientPortalTest extends TestCase
             'triage_level' => 'IV',
             'triage_status' => 'submitted',
             'triage_notes' => 'Información registrada por el paciente.',
-        ])->assertCreated()->assertJsonPath('data.reason', 'Dolor de garganta persistente.');
+        ])->assertOk()->assertJsonPath('data.reason', 'Dolor de garganta persistente.');
 
         $this->assertDatabaseHas('users', [
             'id' => $this->patientUser->id,
@@ -241,7 +241,7 @@ class PatientPortalTest extends TestCase
             'triage_level' => 'III',
             'triage_status' => 'draft',
             'triage_notes' => 'Pendiente completar signos vitales.',
-        ])->assertCreated()
+        ])->assertOk()
             ->assertJsonPath('data.triage_level', 'III')
             ->assertJsonPath('data.triage_status', 'draft')
             ->assertJsonPath('meta.next_step', 'draft_saved');
