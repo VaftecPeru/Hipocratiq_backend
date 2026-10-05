@@ -119,7 +119,13 @@ jobs:
           bash scripts/performance-smoke.sh
 
       - name: Validate production deploy script
-        run: bash -n scripts/deploy-production.sh
+        shell: bash
+        run: |
+          bash -n scripts/deploy-production.sh
+          if grep -nF '\${' scripts/deploy-production.sh; then
+            echo "::error::El script contiene expansiones Bash escapadas (\\\${...})."
+            exit 1
+          fi
 
       - name: Validate Docker Compose runtime
         run: docker compose config --quiet
