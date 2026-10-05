@@ -8,6 +8,8 @@ use App\Enums\LaboratoryOrderStatus;
 use App\Enums\PrescriptionStatus;
 use App\Models\Appointment;
 use App\Models\Clinic;
+use App\Models\ClinicSubscription;
+use App\Models\Plan;
 use App\Models\ClinicalHistoryRecord;
 use App\Models\Consultation;
 use App\Models\DoctorPrescription;
@@ -204,6 +206,8 @@ class PatientPortalTest extends TestCase
             'respiratory_rate' => 16,
             'oxygen_saturation' => 97,
             'triage_priority' => 'routine',
+            'triage_level' => 'IV',
+            'triage_status' => 'submitted',
             'triage_notes' => 'Información registrada por el paciente.',
         ])->assertCreated()->assertJsonPath('data.reason', 'Dolor de garganta persistente.');
 
@@ -217,12 +221,57 @@ class PatientPortalTest extends TestCase
             'registered_by_user_id' => $this->patientUser->id,
             'clinic_id' => $this->clinic->id,
             'triage_priority' => 'routine',
+            'triage_level' => 'IV',
+            'triage_status' => 'submitted',
             'oxygen_saturation' => 97,
         ]);
         $this->withSpaOrigin()->getJson('/api/v1/auth/patient/triage')
             ->assertOk()
             ->assertJsonPath('data.reason', 'Dolor de garganta persistente.')
+            ->assertJsonPath('data.triage_level', 'IV')
+            ->assertJsonPath('data.triage_status', 'submitted')
             ->assertJsonPath('data.recorded_by.id', $this->patientUser->id);
+    }
+
+    public function test_patient_can_save_triage_draft_and_submit_the_same_record(): void
+    {
+        $draft = $this->withSpaOrigin()->postJson('/api/v1/auth/patient/triage', [
+            'reason' => 'Malestar general con evolución de dos días.',
+            'temperature_c' => 37.1,
+            'triage_level' => 'III',
+            'triage_status' => 'draft',
+            'triage_notes' => 'Pendiente completar signos vitales.',
+        ])->assertCreated()
+            ->assertJsonPath('data.triage_level', 'III')
+            ->assertJsonPath('data.triage_status', 'draft')
+            ->assertJsonPath('meta.next_step', 'draft_saved');
+
+        $triageId = $draft->json('data.id');
+
+        $this->withSpaOrigin()->postJson('/api/v1/auth/patient/triage', [
+            'reason' => 'Malestar general con evolución de dos días.',
+            'temperature_c' => 37.3,
+            'systolic_bp' => 118,
+            'diastolic_bp' => 76,
+            'heart_rate' => 84,
+            'respiratory_rate' => 18,
+            'oxygen_saturation' => 98,
+            'triage_level' => 'III',
+            'triage_status' => 'submitted',
+            'triage_notes' => 'Formulario completado por el paciente.',
+        ])->assertOk()
+            ->assertJsonPath('data.id', $triageId)
+            ->assertJsonPath('data.triage_priority', 'urgent')
+            ->assertJsonPath('data.triage_status', 'submitted')
+            ->assertJsonPath('meta.next_step', 'submitted');
+
+        $this->assertDatabaseCount('patient_intakes', 1);
+        $this->assertDatabaseHas('patient_intakes', [
+            'id' => $triageId,
+            'triage_level' => 'III',
+            'triage_status' => 'submitted',
+            'triage_priority' => 'urgent',
+        ]);
     }
 
     public function test_patient_can_save_and_reload_only_their_current_clinic_intake_draft(): void
@@ -325,21 +374,45 @@ class PatientPortalTest extends TestCase
             'reason' => 'Corto',
             'systolic_bp' => 120,
             'diastolic_bp' => 120,
-        ])->assertUnprocessable()->assertJsonValidationErrors(['reason', 'diastolic_bp']);
+            'triage_level' => 'VI',
+            'triage_status' => 'submitted',
+        ])->assertUnprocessable()->assertJsonValidationErrors(['reason', 'diastolic_bp', 'triage_level']);
 
         $this->assertDatabaseCount('patient_intakes', 0);
     }
 
-    public function test_patient_routes_require_authentication_and_report_unavailable_sources_honestly(): void
+    public function test_patient_membership_and_epidemiology_return_real_safe_data(): void
     {
+        $plan = Plan::factory()->create([
+            'key' => 'professional',
+            'name' => 'Professional',
+            'features' => ['Agenda', 'Expediente clínico', 'Resultados'],
+        ]);
+        ClinicSubscription::factory()->create([
+            'clinic_id' => $this->clinic->id,
+            'plan_id' => $plan->id,
+            'status' => 'active',
+            'starts_at' => now()->subDay(),
+            'ends_at' => now()->addMonth(),
+        ]);
+
         $this->withSpaOrigin()->getJson('/api/v1/auth/patient/membership')
             ->assertOk()
-            ->assertJsonPath('data', null)
-            ->assertJsonPath('meta.available', false);
+            ->assertJsonPath('data.available', true)
+            ->assertJsonPath('data.source', 'clinic')
+            ->assertJsonPath('data.plan.name', 'Professional')
+            ->assertJsonPath('data.subscription.status', 'active');
+
         $this->withSpaOrigin()->getJson('/api/v1/auth/patient/epidemiology')
             ->assertOk()
-            ->assertJsonPath('data', null)
-            ->assertJsonPath('meta.available', false);
+            ->assertJsonPath('data.available', true)
+            ->assertJsonPath('data.participation.consent_active', false)
+            ->assertJsonPath('data.metrics.appointments', 0)
+            ->assertJsonCount(3, 'data.trend');
+    }
+
+    public function test_patient_routes_require_authentication(): void
+    {
         $this->withCookie((string) config('session.cookie'), '')->withSpaOrigin()
             ->getJson('/api/v1/auth/patient/profile')
             ->assertUnauthorized();
