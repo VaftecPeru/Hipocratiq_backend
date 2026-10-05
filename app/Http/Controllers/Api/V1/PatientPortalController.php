@@ -204,17 +204,8 @@ class PatientPortalController extends Controller
         $data = $request->validated();
         $status = $data['triage_status'];
         $level = $data['triage_level'];
-        $priority = null;
 
-        if ($status === 'submitted') {
-            $priority = match ($level) {
-                'I', 'II' => 'emergency',
-                'III' => 'urgent',
-                'IV', 'V' => 'routine',
-            };
-        }
-
-        $triage = DB::transaction(function () use ($data, $level, $patient, $priority, $request, $status): PatientIntake {
+        $triage = DB::transaction(function () use ($data, $level, $patient, $request, $status): PatientIntake {
             $triage = PatientIntake::query()
                 ->where('patient_profile_id', $patient->id)
                 ->where('clinic_id', $patient->clinic_id)
@@ -237,7 +228,9 @@ class PatientPortalController extends Controller
                 'heart_rate' => $data['heart_rate'] ?? null,
                 'respiratory_rate' => $data['respiratory_rate'] ?? null,
                 'oxygen_saturation' => $data['oxygen_saturation'] ?? null,
-                'triage_priority' => $priority,
+                // El nivel I-V es autorreportado por el paciente. La prioridad clínica
+                // permanece sin clasificar hasta la valoración de personal clínico.
+                'triage_priority' => null,
                 'triage_level' => $level,
                 'triage_status' => $status,
                 'submitted_at' => $status === 'submitted' ? now() : null,
@@ -275,7 +268,7 @@ class PatientPortalController extends Controller
         $subscription = ClinicSubscription::query()
             ->currentlyActive()
             ->where('clinic_id', $patient->clinic_id)
-            ->with(['plan', 'latestSuccessfulPayment'])
+            ->with('plan')
             ->latest('starts_at')
             ->first();
 
@@ -290,8 +283,6 @@ class PatientPortalController extends Controller
             ]);
         }
 
-        $payment = $subscription->latestSuccessfulPayment;
-
         return response()->json([
             'success' => true,
             'data' => [
@@ -303,22 +294,12 @@ class PatientPortalController extends Controller
                     'key' => $subscription->plan->key,
                     'name' => $subscription->plan->name,
                     'description' => $subscription->plan->description,
-                    'currency' => $subscription->plan->currency,
-                    'monthly_price_cents' => $subscription->plan->monthly_price_cents,
-                    'annual_price_cents' => $subscription->plan->annual_price_cents,
                     'features' => $subscription->plan->features ?? [],
                 ],
-                'subscription' => [
+                'coverage' => [
                     'status' => $subscription->status->value,
-                    'billing_cycle' => $subscription->billing_cycle->value,
-                    'auto_renew' => $subscription->auto_renew,
                     'starts_at' => $subscription->starts_at?->toIso8601String(),
                     'ends_at' => $subscription->ends_at?->toIso8601String(),
-                ],
-                'latest_payment' => $payment === null ? null : [
-                    'amount_cents' => $payment->amount_cents,
-                    'currency' => $payment->currency,
-                    'paid_at' => $payment->paid_at?->toIso8601String(),
                 ],
                 'message' => 'Tu acceso está cubierto por la membresía activa de tu clínica.',
             ],
