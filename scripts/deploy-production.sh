@@ -106,13 +106,49 @@ compose up -d --no-deps app queue-worker scheduler
 compose exec -T app php artisan optimize:clear
 compose exec -T app php artisan migrate:status --no-interaction >/dev/null
 
-for service in app queue-worker scheduler; do
+wait_for_service_health() {
+  local service="$1"
+  local container_id
+  local status=""
+
   container_id="$(compose ps -q "$service")"
-  if [[ -z "$container_id" ]] || [[ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != "true" ]]; then
-    echo "ERROR: el servicio $service no quedó en ejecución." >&2
-    compose ps
-    exit 1
+  if [[ -z "$container_id" ]]; then
+    echo "ERROR: no se encontró contenedor para $service." >&2
+    return 1
   fi
+
+  for attempt in {1..30}; do
+    if [[ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != "true" ]]; then
+      echo "ERROR: el servicio $service dejó de ejecutarse." >&2
+      docker logs --tail 120 "$container_id" || true
+      return 1
+    fi
+
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container_id")"
+
+    if [[ "$status" == "healthy" ]]; then
+      return 0
+    fi
+
+    if [[ "$status" == "unhealthy" ]]; then
+      echo "ERROR: el servicio $service quedó unhealthy." >&2
+      docker inspect --format '{{json .State.Health}}' "$container_id" || true
+      docker logs --tail 120 "$container_id" || true
+      return 1
+    fi
+
+    sleep 2
+  done
+
+  echo "ERROR: el servicio $service no alcanzó estado healthy; estado final: $status." >&2
+  docker inspect --format '{{json .State.Health}}' "$container_id" || true
+  docker logs --tail 120 "$container_id" || true
+  return 1
+}
+
+echo "Validando salud de app, queue y scheduler..."
+for service in app queue-worker scheduler; do
+  wait_for_service_health "$service"
 done
 
 echo "Esperando readiness interno..."

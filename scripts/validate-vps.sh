@@ -273,7 +273,7 @@ if ! docker run --rm --network "$NETWORK" \
 fi
 
 echo "[9/11] Compose + deploy script"
-docker compose --env-file .env.example config --quiet
+APP_ENV_FILE=.env.example docker compose --env-file .env.example config --quiet
 bash -n scripts/deploy-production.sh
 
 echo "[10/11] Build imagen de producción"
