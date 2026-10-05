@@ -1100,6 +1100,7 @@ class ClinicDashboardController extends Controller
                 'respiratory_rate' => $intake->respiratory_rate,
                 'oxygen_saturation' => $intake->oxygen_saturation,
                 'priority' => $intake->triage_priority,
+                'patient_reported_level' => $intake->triage_level,
                 'recorded_at' => $intake->created_at?->toIso8601String(),
             ],
         ];
@@ -1179,6 +1180,7 @@ class ClinicDashboardController extends Controller
             'respiratory_rate' => $intake->respiratory_rate,
             'oxygen_saturation' => $intake->oxygen_saturation,
             'priority' => $intake->triage_priority,
+            'patient_reported_level' => $intake->triage_level,
             'notes' => $intake->triage_notes,
             'recorded_at' => $intake->created_at?->toIso8601String(),
             'registrar_name' => $intake->registrar?->name,
