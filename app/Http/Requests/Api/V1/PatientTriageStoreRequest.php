@@ -32,7 +32,6 @@ class PatientTriageStoreRequest extends FormRequest
         ];
     }
 
-
     /** @return array<string, string> */
     public function messages(): array
     {
