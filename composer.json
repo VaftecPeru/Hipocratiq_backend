@@ -9,11 +9,12 @@
     ],
     "license": "MIT",
     "require": {
-        "php": "^8.4",
+        "aws/aws-sdk-php": "^3.399.0",
         "ext-redis": "*",
         "laravel/framework": "^13.30",
         "laravel/sanctum": "^4.3",
         "laravel/tinker": "^3.0",
+        "php": "^8.4",
         "phpoffice/phpspreadsheet": "^5.1"
     },
     "require-dev": {
