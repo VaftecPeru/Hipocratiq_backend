@@ -55,6 +55,10 @@ class AwsNotifyOtpFlowTest extends TestCase
 
         $request = $this->postJson('/api/v1/auth/otp/request', [
             'purpose' => 'registration',
+            'client_type' => 'mobile',
+            'requested_role' => 'patient',
+            'device_name' => 'HIPOCRATIQ UAT',
+            'device_id' => 'hipocratiq-b109-device-001',
             'name' => 'Paciente AWS',
             'phone_number' => '+51900112844',
             'clinic_id' => $clinic->id,
@@ -73,6 +77,9 @@ class AwsNotifyOtpFlowTest extends TestCase
 
         $verification = $this->postJson('/api/v1/auth/otp/verify', [
             'purpose' => 'registration',
+            'client_type' => 'mobile',
+            'device_name' => 'HIPOCRATIQ UAT',
+            'device_id' => 'hipocratiq-b109-device-001',
             'challenge_id' => $challenge->id,
             'code' => '654321',
         ]);
