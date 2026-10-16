@@ -377,14 +377,15 @@ class RunAwsOtpUatGate extends Command
         $notifyResult = $smsClient->describeNotifyConfigurations(['MaxResults' => 100]);
         $notifyConfigurations = array_values(array_filter(
             $notifyResult['NotifyConfigurations'] ?? [],
-            static fn (array $item): bool =>
-                ($item['Status'] ?? null) === 'ACTIVE'
-                && ($item['UseCase'] ?? null) === 'CODE_VERIFICATION'
-                && in_array('SMS', $item['EnabledChannels'] ?? [], true)
-                && (
-                    ($item['EnabledCountries'] ?? []) === []
-                    || in_array($countryCode, $item['EnabledCountries'] ?? [], true)
-                ),
+            static function (array $item) use ($countryCode): bool {
+                return ($item['Status'] ?? null) === 'ACTIVE'
+                    && ($item['UseCase'] ?? null) === 'CODE_VERIFICATION'
+                    && in_array('SMS', $item['EnabledChannels'] ?? [], true)
+                    && (
+                        ($item['EnabledCountries'] ?? []) === []
+                        || in_array($countryCode, $item['EnabledCountries'] ?? [], true)
+                    );
+            },
         ));
 
         if ($notifyConfigurations === []) {
