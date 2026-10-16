@@ -34,8 +34,11 @@ El comando tiene guardas obligatorias:
 - Exige por defecto que la base conectada sea exactamente `hipocratiq_b109_uat`.
 - Usa `APP_PRIMARY_COUNTRY=MX` como país objetivo por defecto y exige que el teléfono UAT coincida con ese país.
 - Verifica por STS que el SDK esté usando el rol `HIPOCRATIQ-EC2-Notify-UAT`.
+- Verifica mediante `ListNotifyCountries` que el país objetivo esté disponible para `SMS / CODE_VERIFICATION / BASIC`.
+- Para México, la evidencia UAT confirmó soporte `SMS,VOICE`, tiers `BASIC,ADVANCED` y `CustomerOwnedIdentityRequired=NO`.
 - Descubre una Notify Configuration `ACTIVE / CODE_VERIFICATION / SMS` habilitada para México por defecto.
-- Si no existe una configuración compatible, imprime un inventario sanitizado de IDs, estado, canales, países habilitados y presencia de pool, sin exponer credenciales.
+- Si no existe una configuración ACTIVE, imprime un inventario sanitizado con ID, estado, `RejectionReason`, tier, canales, países y presencia de pool.
+- `ACCESS_DENIED_CONTACT_SUPPORT` se trata como bloqueo de cuenta/configuración AWS que debe resolverse con AWS Support, no como país no soportado ni error Laravel.
 - Descubre una Notify Code Configuration `NUMERIC / 6 dígitos / 5 minutos / 5 intentos`.
 - Si hay varias configuraciones válidas, solicita seleccionar una.
 - Activa `aws_notify` sólo en memoria durante esa ejecución; no escribe secretos ni configuración AWS en Git o `.env`.
@@ -55,11 +58,12 @@ php artisan otp:aws-uat-gate --target-country=PE
 
 La prueba principal de aceptación B-109 debe realizarse con un número mexicano válido en formato E.164 (`+52` seguido de 10 dígitos), porque México es el mercado objetivo del cliente.
 
-Si la Notify Configuration no tiene un pool asociado, ejecutar con una identidad de origen válida:
+México no requiere una identidad de origen propiedad del cliente para el modo Notify administrado por AWS. Por ello, no se debe aprovisionar un número o pool dedicado sólo para cerrar B-109. Si una configuración ACTIVE no tiene `PoolId`, primero validar desde AWS Console en **Notify > Testing > Send code > Use Notify Configuration** y revisar el **API preview**. El flujo `SendNotifyCodeVerification` exige un `originationIdentity` a nivel de API; ese valor debe definirse a partir de la ruta que AWS exponga para la configuración activa, no por suposición.
+
+Sólo si AWS o el país objetivo exige una identidad propia debe usarse:
 
 ```bash
 php artisan otp:aws-uat-gate \
-  --phone=+<E164> \
   --origination-identity=<PhoneNumberId|SenderId|PoolId|ARN>
 ```
 
