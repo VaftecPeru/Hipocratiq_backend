@@ -45,7 +45,7 @@ class RunAwsOtpUatGate extends Command
 
     public function handle(HttpKernel $kernel, AwsOtpReadiness $readiness): int
     {
-        if (! $this->guardEnvironment()) {
+        if ($this->guardEnvironment() === false) {
             return self::FAILURE;
         }
 
@@ -131,7 +131,7 @@ class RunAwsOtpUatGate extends Command
             }
 
             $challengeId = data_get($requestBody, 'data.challenge_id');
-            if (! is_string($challengeId) || $challengeId === '') {
+            if (is_string($challengeId) === false || $challengeId === '') {
                 throw new RuntimeException('La respuesta OTP no devolvió challenge_id.');
             }
 
@@ -159,7 +159,7 @@ class RunAwsOtpUatGate extends Command
             $this->line('Verification ID: '.($challenge->provider_verification_id ? 'registrado' : 'no devuelto'));
 
             $code = trim((string) $this->secret('Ingresa el OTP de 6 dígitos recibido por SMS'));
-            if (! preg_match('/^\d{6}$/', $code)) {
+            if (preg_match('/^\d{6}$/', $code) !== 1) {
                 throw new RuntimeException('El OTP ingresado debe contener exactamente 6 dígitos.');
             }
 
@@ -218,7 +218,7 @@ class RunAwsOtpUatGate extends Command
 
             $token = data_get($verifyBody, 'data.access_token');
             if (
-                ! is_string($token)
+                is_string($token) === false
                 || $token === ''
                 || data_get($verifyBody, 'data.token_type') !== 'Bearer'
                 || data_get($verifyBody, 'data.actor_context') !== AuthenticationContext::Patient->value
@@ -307,7 +307,7 @@ class RunAwsOtpUatGate extends Command
 
             return self::FAILURE;
         } finally {
-            if (! $this->option('keep-data')) {
+            if ($this->option('keep-data') === false) {
                 $this->cleanupUatData();
             }
         }
@@ -316,7 +316,7 @@ class RunAwsOtpUatGate extends Command
     private function guardEnvironment(): bool
     {
         $environment = (string) config('app.env');
-        if (! in_array($environment, ['testing', 'uat', 'local'], true)) {
+        if (in_array($environment, ['testing', 'uat', 'local'], true) === false) {
             $this->error("Entorno no permitido [{$environment}]. Este comando es exclusivo para UAT.");
             return false;
         }
@@ -359,7 +359,7 @@ class RunAwsOtpUatGate extends Command
         $identity = $sts->getCallerIdentity();
         $arn = (string) ($identity['Arn'] ?? '');
 
-        if (! str_contains($arn, 'assumed-role/HIPOCRATIQ-EC2-Notify-UAT/')) {
+        if (str_contains($arn, 'assumed-role/HIPOCRATIQ-EC2-Notify-UAT/') === false) {
             throw new RuntimeException('El SDK no está usando el rol IAM UAT esperado.');
         }
 
