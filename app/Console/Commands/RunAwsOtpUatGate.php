@@ -404,7 +404,6 @@ class RunAwsOtpUatGate extends Command
     /**
      * @return array{origination_identity:string,code_configuration_id:string}
      */
-
     private function discoverAwsConfiguration(string $region, string $countryCode): array
     {
         if ($region === '') {
