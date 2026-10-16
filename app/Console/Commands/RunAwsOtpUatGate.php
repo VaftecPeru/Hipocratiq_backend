@@ -355,9 +355,30 @@ class RunAwsOtpUatGate extends Command
         return true;
     }
 
-    private function resolvePhone(): ?string
+    private function resolveTargetCountry(): ?string
     {
-        $raw = trim((string) ($this->option('phone') ?: $this->secret('Número E.164 para SMS UAT')));
+        $country = strtoupper(trim((string) ($this->option('target-country') ?: config('app.primary_country', 'MX'))));
+
+        if (in_array($country, ['MX', 'PE', 'US'], true) === false) {
+            $this->error("País objetivo [{$country}] no soportado por HIPOCRATIQ.");
+
+            return null;
+        }
+
+        return $country;
+    }
+
+    private function resolvePhone(string $targetCountry): ?string
+    {
+        $dialingCode = match ($targetCountry) {
+            'MX' => '+52',
+            'PE' => '+51',
+            'US' => '+1',
+        };
+
+        $raw = trim((string) ($this->option('phone') ?: $this->secret(
+            "Número E.164 para SMS UAT ({$targetCountry}, prefijo {$dialingCode})",
+        )));
 
         try {
 
