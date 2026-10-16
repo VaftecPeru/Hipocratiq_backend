@@ -336,7 +336,7 @@ class RunAwsOtpUatGate extends Command
 
     private function resolvePhone(): ?string
     {
-        $raw = trim((string) ($this->option('phone') ?: $this->ask('Número E.164 para SMS UAT')));
+        $raw = trim((string) ($this->option('phone') ?: $this->secret('Número E.164 para SMS UAT')));
 
         try {
             return PhoneNumber::fromE164($raw)->value;
