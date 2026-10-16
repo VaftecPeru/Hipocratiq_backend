@@ -38,11 +38,12 @@ El comando tiene guardas obligatorias:
 - Verifica mediante `ListNotifyCountries` que el país objetivo esté disponible para `SMS / CODE_VERIFICATION / BASIC`.
 - México es el mercado principal y la prueba de aceptación se ejecuta con un número `+52`.
 - No consulta ni depende de una `Notify Configuration ACTIVE`.
-- Resuelve `originationIdentity` en este orden: opción explícita, `AWS_NOTIFY_ORIGINATION_IDENTITY`, pool transaccional activo, Sender ID transaccional del país o número SMS activo/internacional del account.
-- Descubre una Notify Code Configuration `NUMERIC / 6 dígitos / 5 minutos / 5 intentos`.
-- Si hay varias configuraciones de código válidas, solicita seleccionar una.
+- Resuelve `originationIdentity` automáticamente y de forma determinista: valida primero pools transaccionales que realmente contengan una identidad `SMS` del país objetivo; luego Sender IDs registrados/transaccionales; finalmente números activos `SMS` locales o con envío internacional.
+- Si `AWS_NOTIFY_ORIGINATION_IDENTITY` está definido, el gate ya no lo acepta a ciegas: debe coincidir con una identidad AWS realmente utilizable para el país objetivo.
+- Descubre una Notify Code Configuration `NUMERIC / 6 dígitos / 5 minutos / 5 intentos`; si no existe, el gate UAT crea automáticamente `HIPOCRATIQ-<PAIS>-OTP` con esa política y tags de proyecto/entorno.
+- Si existen varias configuraciones de código válidas, la selección es determinista y prioriza `HIPOCRATIQ-<PAIS>-OTP`; no requiere elección manual.
 - `SendNotifyCodeVerification` genera y entrega el OTP; `ValidateNotifyCodeVerification` confirma el código usando el mismo `referenceId`.
-- La ausencia de `Notify Configuration ACTIVE` deja de ser un bloqueo. Sólo son bloqueos reales: permisos IAM, ausencia de identidad de origen utilizable, ausencia de Code Configuration válida o rechazo de la llamada directa de AWS.
+- La ausencia de `Notify Configuration ACTIVE` deja de ser un bloqueo. La Code Configuration deja de ser un bloqueo manual porque el gate puede crearla en UAT. Los bloqueos reales quedan reducidos a permisos IAM, ausencia de una identidad de origen utilizable/registrada o rechazo de la llamada directa de AWS.
 - Activa `aws_notify` sólo en memoria durante esa ejecución; no escribe secretos ni configuración AWS en Git o `.env`.
 - Ejecuta internamente `otp:aws-check` antes de enviar.
 - Crea una clínica y un paciente temporales únicamente en la base B-109 UAT.
