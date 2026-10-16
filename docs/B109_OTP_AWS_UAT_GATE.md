@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Validar de extremo a extremo la integración de OTP telefónico con AWS End User Messaging Notify sobre la versión estable de `develop`, sin modificar `main` ni producción.
+Validar de extremo a extremo la integración de OTP telefónico con AWS End User Messaging Notify sobre la versión estable de `develop`, sin modificar `main` ni producción. HIPOCRATIQ adopta México (`MX`, `+52`) como mercado principal; Perú (`PE`) y Estados Unidos (`US`) continúan soportados como mercados secundarios.
 
 Base de trabajo:
 
@@ -25,15 +25,17 @@ Base de trabajo:
 Después de completar dependencias, migraciones e IAM/Instance Profile, el gate funcional se ejecuta con:
 
 ```bash
-php artisan otp:aws-uat-gate --phone=+<E164>
+php artisan otp:aws-uat-gate
 ```
 
 El comando tiene guardas obligatorias:
 
 - Sólo permite `APP_ENV=testing|uat|local`.
 - Exige por defecto que la base conectada sea exactamente `hipocratiq_b109_uat`.
+- Usa `APP_PRIMARY_COUNTRY=MX` como país objetivo por defecto y exige que el teléfono UAT coincida con ese país.
 - Verifica por STS que el SDK esté usando el rol `HIPOCRATIQ-EC2-Notify-UAT`.
-- Descubre una Notify Configuration `ACTIVE / CODE_VERIFICATION / SMS` habilitada para el país del teléfono.
+- Descubre una Notify Configuration `ACTIVE / CODE_VERIFICATION / SMS` habilitada para México por defecto.
+- Si no existe una configuración compatible, imprime un inventario sanitizado de IDs, estado, canales, países habilitados y presencia de pool, sin exponer credenciales.
 - Descubre una Notify Code Configuration `NUMERIC / 6 dígitos / 5 minutos / 5 intentos`.
 - Si hay varias configuraciones válidas, solicita seleccionar una.
 - Activa `aws_notify` sólo en memoria durante esa ejecución; no escribe secretos ni configuración AWS en Git o `.env`.
@@ -44,6 +46,14 @@ El comando tiene guardas obligatorias:
 - Valida dispositivo incorrecto, código incorrecto, expiración y reutilización del challenge.
 - Valida OTP correcto por AWS, emisión Bearer Sanctum, `/api/v1/auth/me`, logout y revocación.
 - Elimina los datos temporales al finalizar, salvo uso explícito de `--keep-data`.
+
+Para probar explícitamente un mercado secundario, debe declararse de forma intencional:
+
+```bash
+php artisan otp:aws-uat-gate --target-country=PE
+```
+
+La prueba principal de aceptación B-109 debe realizarse con un número mexicano válido en formato E.164 (`+52` seguido de 10 dígitos), porque México es el mercado objetivo del cliente.
 
 Si la Notify Configuration no tiene un pool asociado, ejecutar con una identidad de origen válida:
 
@@ -76,6 +86,7 @@ Resultado esperado:
 Configurar en el entorno UAT, nunca en Git:
 
 ```dotenv
+APP_PRIMARY_COUNTRY=MX
 OTP_PHONE_PROVIDER=aws_notify
 OTP_TTL_MINUTES=5
 OTP_MAX_ATTEMPTS=5
@@ -112,7 +123,7 @@ Verificar además que el OTP por correo y el provider local no tengan regresione
 
 Flujo mínimo:
 
-1. Solicitar OTP con un teléfono UAT válido en formato E.164.
+1. Solicitar OTP con un teléfono mexicano UAT válido en formato E.164 (`+52` + 10 dígitos).
 2. Confirmar que AWS entrega el SMS.
 3. Confirmar que la respuesta de HIPOCRATIQ devuelve `challenge_id`, nunca el OTP.
 4. Ingresar el código recibido.
