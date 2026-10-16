@@ -512,8 +512,10 @@ class RunAwsOtpUatGate extends Command
                 'Owner' => 'SELF',
                 'MaxResults' => 100,
             ])['Pools'] ?? [],
-            static fn (array $pool): bool => ($pool['Status'] ?? null) === 'ACTIVE'
-                && ($pool['MessageType'] ?? null) === 'TRANSACTIONAL',
+            static function (array $pool): bool {
+                return ($pool['Status'] ?? null) === 'ACTIVE'
+                    && ($pool['MessageType'] ?? null) === 'TRANSACTIONAL';
+            },
         ));
 
         if (count($pools) === 1) {
@@ -526,8 +528,10 @@ class RunAwsOtpUatGate extends Command
                 'Owner' => 'SELF',
                 'MaxResults' => 100,
             ])['SenderIds'] ?? [],
-            static fn (array $sender): bool => ($sender['IsoCountryCode'] ?? null) === $countryCode
-                && in_array('TRANSACTIONAL', $sender['MessageTypes'] ?? [], true),
+            static function (array $sender) use ($countryCode): bool {
+                return ($sender['IsoCountryCode'] ?? null) === $countryCode
+                    && in_array('TRANSACTIONAL', $sender['MessageTypes'] ?? [], true);
+            },
         ));
 
         if (count($senderIds) === 1) {
