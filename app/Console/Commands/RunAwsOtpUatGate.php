@@ -92,6 +92,24 @@ class RunAwsOtpUatGate extends Command
             $this->newLine();
             $this->components->info('4/7 Enviar SMS OTP real por el flujo HTTP de Laravel');
 
+            [$invalidPhoneStatus] = $this->jsonRequest($kernel, 'POST', '/api/v1/auth/otp/request', [
+                'purpose' => OtpPurpose::Registration->value,
+                'client_type' => AuthenticationClient::Mobile->value,
+                'actor_context' => AuthenticationContext::Patient->value,
+                'requested_role' => 'patient',
+                'name' => 'B-109 Invalid Phone',
+                'phone_number' => '123',
+                'clinic_id' => $clinic->id,
+                'device_name' => $deviceName,
+                'device_id' => $deviceId,
+                'terms_accepted' => true,
+            ]);
+
+            if ($invalidPhoneStatus !== 422) {
+                throw new RuntimeException('Un teléfono inválido superó la validación HTTP.');
+            }
+            $this->line('OK: teléfono inválido rechazado antes de AWS.');
+
             [$requestStatus, $requestBody] = $this->jsonRequest($kernel, 'POST', '/api/v1/auth/otp/request', [
                 'purpose' => OtpPurpose::Registration->value,
                 'client_type' => AuthenticationClient::Mobile->value,
@@ -116,6 +134,13 @@ class RunAwsOtpUatGate extends Command
             if (! is_string($challengeId) || $challengeId === '') {
                 throw new RuntimeException('La respuesta OTP no devolvió challenge_id.');
             }
+
+            foreach (['code', 'provider_message_id', 'provider_verification_id', 'access_token'] as $forbiddenKey) {
+                if (data_get($requestBody, 'data.'.$forbiddenKey) !== null) {
+                    throw new RuntimeException("La respuesta pública expuso [{$forbiddenKey}].");
+                }
+            }
+            $this->line('OK: respuesta pública sin OTP ni metadata interna de AWS.');
 
             $challenge = OtpChallenge::query()->findOrFail($challengeId);
             $this->uatUserId = (int) $challenge->user_id;
@@ -258,7 +283,10 @@ class RunAwsOtpUatGate extends Command
                     ['Origination identity', $aws['origination_identity']],
                     ['Code configuration', $aws['code_configuration_id']],
                     ['otp:aws-check', 'PASS'],
+                    ['Política 6 dígitos / 5 min / 5 intentos', 'PASS'],
+                    ['Teléfono inválido', 'PASS'],
                     ['SMS real', 'PASS'],
+                    ['No exposición OTP/metadata', 'PASS'],
                     ['Device mismatch', 'PASS'],
                     ['Código incorrecto', 'PASS'],
                     ['OTP válido', 'PASS'],
@@ -438,7 +466,7 @@ class RunAwsOtpUatGate extends Command
                 }
             }
 
-            throw new RuntimeException("Notify Configuration [{$requested}] no está ACTIVE o no soporta TEXT.");
+            throw new RuntimeException("Notify Configuration [{$requested}] no está ACTIVE o no soporta SMS.");
         }
 
         if (count($items) === 1) {
