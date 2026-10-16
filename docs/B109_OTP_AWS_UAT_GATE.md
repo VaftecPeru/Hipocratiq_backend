@@ -155,6 +155,30 @@ Validar como mínimo:
 - challenge consumido o invalidado;
 - no exposición de IDs/ARN/OTP/credenciales en respuestas públicas.
 
+## Release gate integral en una sola acción
+
+Con México como mercado principal de HIPOCRATIQ, el flujo operativo oficial queda consolidado en:
+
+```bash
+HIPOCRATIQ_UAT_BACKEND_URL=https://<backend-uat> \
+bash scripts/run-hipocratiq-uat-release-gate.sh
+```
+
+El orquestador:
+
+1. actualiza la rama B-109 sin merge;
+2. valida PostgreSQL UAT;
+3. ejecuta PHP syntax, Pint y las suites críticas Auth/OTP;
+4. ejecuta `otp:aws-uat-gate --target-country=MX` para AWS Notify, SMS real +52, negativos y Sanctum;
+5. actualiza la rama B-108 sin merge;
+6. ejecuta QA Web;
+7. ejecuta QA Flutter/Android y genera APK/AAB apuntando exclusivamente al backend UAT HTTPS indicado;
+8. emite hashes SHA-256 y estado `READY_FOR_USER_TESTS_AND_DEVELOP_AUTHORIZATION`.
+
+El script rechaza `https://hipocratiq.com/backend` como backend del APK integral para impedir que una build UAT termine probando contra producción.
+
+Este gate no realiza merge a `develop` ni `main`. Esos pasos requieren autorización explícita posterior a las pruebas del usuario.
+
 ## Definition of Done
 
 B-109 puede marcarse Completado sólo cuando:
