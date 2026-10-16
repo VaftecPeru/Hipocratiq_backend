@@ -309,7 +309,9 @@ class RunAwsOtpUatGate extends Command
                 [
                     ['IAM role / STS', 'PASS'],
                     ['Origination identity', $aws['origination_identity']],
+                    ['Origination source', $aws['origination_source']],
                     ['Code configuration', $aws['code_configuration_id']],
+                    ['Code configuration source', $aws['code_configuration_source']],
                     ['otp:aws-check', 'PASS'],
                     ['Política 6 dígitos / 5 min / 5 intentos', 'PASS'],
                     ['Teléfono inválido', 'PASS'],
@@ -402,6 +404,7 @@ class RunAwsOtpUatGate extends Command
     /**
      * @return array{origination_identity:string,code_configuration_id:string}
      */
+
     private function discoverAwsConfiguration(string $region, string $countryCode): array
     {
         if ($region === '') {
@@ -442,81 +445,44 @@ class RunAwsOtpUatGate extends Command
             );
         }
 
+        $customerOwnedIdentityRequired = (bool) ($country['CustomerOwnedIdentityRequired'] ?? false);
+
         $this->table(
-            ['País', 'Canales', 'Use cases', 'Tiers'],
+            ['País', 'Canales', 'Use cases', 'Tiers', 'Identidad propia obligatoria'],
             [[
                 (string) ($country['CountryName'] ?? $countryCode),
                 implode(',', $country['SupportedChannels'] ?? []),
                 implode(',', $country['SupportedUseCases'] ?? []),
                 implode(',', $country['SupportedTiers'] ?? []),
+                $customerOwnedIdentityRequired ? 'Sí' : 'No',
             ]],
         );
 
-        $originationIdentity = $this->resolveOriginationIdentity($smsClient, $countryCode);
-
-        $codeResult = $notifyClient->listNotifyCodeConfigurations(['maxResults' => 100]);
-        $allCodeConfigurations = $codeResult['notifyCodeConfigurations'] ?? [];
-        $codeConfigurations = array_values(array_filter(
-            $allCodeConfigurations,
-            static function (array $item): bool {
-                $policy = $item['codeConfigurationParameters'] ?? [];
-
-                return ($policy['codeType'] ?? null) === 'NUMERIC'
-                    && (int) ($policy['codeLength'] ?? 0) === 6
-                    && (int) ($policy['validityPeriodMinutes'] ?? 0) === 5
-                    && (int) ($policy['maxAttempts'] ?? 0) === 5;
-            },
-        ));
-
-        if ($codeConfigurations === []) {
-            $rows = array_map(static function (array $item): array {
-                $policy = $item['codeConfigurationParameters'] ?? [];
-
-                return [
-                    (string) ($item['notifyCodeConfigurationId'] ?? ''),
-                    (string) ($item['notifyCodeConfigurationName'] ?? ''),
-                    (string) ($policy['codeType'] ?? ''),
-                    (string) ($policy['codeLength'] ?? ''),
-                    (string) ($policy['validityPeriodMinutes'] ?? ''),
-                    (string) ($policy['maxAttempts'] ?? ''),
-                ];
-            }, $allCodeConfigurations);
-
-            if ($rows !== []) {
-                $this->table(
-                    ['ID', 'Nombre', 'Tipo', 'Longitud', 'Validez min', 'Intentos'],
-                    $rows,
-                );
-            }
-
-            throw new RuntimeException(
-                'No existe una Notify Code Configuration NUMERIC/6 dígitos/5 minutos/5 intentos.',
-            );
-        }
-
-        $codeConfiguration = $this->selectCodeConfiguration($codeConfigurations);
+        [$originationIdentity, $originationSource] = $this->resolveOriginationIdentity(
+            $smsClient,
+            $countryCode,
+            $customerOwnedIdentityRequired,
+        );
+        [$codeConfiguration, $codeConfigurationSource] = $this->resolveCodeConfiguration(
+            $notifyClient,
+            $countryCode,
+        );
 
         return [
             'origination_identity' => $originationIdentity,
+            'origination_source' => $originationSource,
             'code_configuration_id' => (string) $codeConfiguration['notifyCodeConfigurationId'],
+            'code_configuration_source' => $codeConfigurationSource,
         ];
     }
+
 
     private function resolveOriginationIdentity(
         PinpointSMSVoiceV2Client $smsClient,
         string $countryCode,
-    ): string {
-        $explicit = trim((string) $this->option('origination-identity'));
-        if ($explicit !== '') {
-
-            return $explicit;
-        }
-
-        $configured = trim((string) config('authentication.otp.aws_notify.origination_identity'));
-        if ($configured !== '') {
-
-            return $configured;
-        }
+        bool $customerOwnedIdentityRequired,
+    ): array {
+        $candidates = [];
 
         $pools = array_values(array_filter(
             $smsClient->describePools([
@@ -529,109 +495,252 @@ class RunAwsOtpUatGate extends Command
             },
         ));
 
-        if (count($pools) === 1) {
-
-            return (string) $pools[0]['PoolId'];
-        }
-
-        $senderIds = array_values(array_filter(
-            $smsClient->describeSenderIds([
-                'Owner' => 'SELF',
-                'MaxResults' => 100,
-            ])['SenderIds'] ?? [],
-            static function (array $sender) use ($countryCode): bool {
-                return ($sender['IsoCountryCode'] ?? null) === $countryCode
-                    && in_array('TRANSACTIONAL', $sender['MessageTypes'] ?? [], true);
-            },
-        ));
-
-        if (count($senderIds) === 1) {
-
-            return (string) $senderIds[0]['SenderId'];
-        }
-
-        $phoneNumbers = array_values(array_filter(
-            $smsClient->describePhoneNumbers([
-                'Owner' => 'SELF',
-                'MaxResults' => 100,
-            ])['PhoneNumbers'] ?? [],
-            static function (array $phone) use ($countryCode): bool {
-                return ($phone['Status'] ?? null) === 'ACTIVE'
-                    && in_array('SMS', $phone['NumberCapabilities'] ?? [], true)
-                    && (
-                        ($phone['IsoCountryCode'] ?? null) === $countryCode
-                        || ($phone['InternationalSendingEnabled'] ?? false) === true
-                    );
-            },
-        ));
-
-        $choices = [];
-
         foreach ($pools as $pool) {
-            $choices['POOL '.$pool['PoolId']] = (string) $pool['PoolId'];
+            $poolId = (string) ($pool['PoolId'] ?? '');
+            if ($poolId === '') {
+                continue;
+            }
+
+            $originators = $smsClient->listPoolOriginationIdentities([
+                'PoolId' => $poolId,
+                'Filters' => [
+                    [
+                        'Name' => 'iso-country-code',
+                        'Values' => [$countryCode],
+                    ],
+                    [
+                        'Name' => 'number-capability',
+                        'Values' => ['SMS'],
+                    ],
+                ],
+                'MaxResults' => 100,
+            ])['OriginationIdentities'] ?? [];
+
+            if ($originators === []) {
+                continue;
+            }
+
+            $candidates[] = [
+                'priority' => 10,
+                'source' => 'pool',
+                'identity' => $poolId,
+                'aliases' => array_values(array_filter([
+                    $poolId,
+                    (string) ($pool['PoolArn'] ?? ''),
+                ])),
+            ];
         }
+
+        $senderIds = $smsClient->describeSenderIds([
+            'Owner' => 'SELF',
+            'MaxResults' => 100,
+        ])['SenderIds'] ?? [];
 
         foreach ($senderIds as $sender) {
-            $choices['SENDER '.$sender['SenderId'].' '.$countryCode] = (string) $sender['SenderId'];
+            if (
+                ($sender['IsoCountryCode'] ?? null) !== $countryCode
+                || ($sender['Registered'] ?? false) !== true
+                || in_array('TRANSACTIONAL', $sender['MessageTypes'] ?? [], true) === false
+            ) {
+                continue;
+            }
+
+            $senderId = (string) ($sender['SenderId'] ?? '');
+            $senderArn = (string) ($sender['SenderIdArn'] ?? '');
+            if ($senderId === '' && $senderArn === '') {
+                continue;
+            }
+
+            $candidates[] = [
+                'priority' => 20,
+                'source' => 'sender_id',
+                'identity' => $senderArn !== '' ? $senderArn : $senderId,
+                'aliases' => array_values(array_filter([$senderId, $senderArn])),
+            ];
         }
+
+        $phoneNumbers = $smsClient->describePhoneNumbers([
+            'Owner' => 'SELF',
+            'MaxResults' => 100,
+        ])['PhoneNumbers'] ?? [];
 
         foreach ($phoneNumbers as $phone) {
-            $choices['PHONE '.$phone['PhoneNumber'].' '.$phone['IsoCountryCode']] = (string) $phone['PhoneNumberId'];
+            if (
+                ($phone['Status'] ?? null) !== 'ACTIVE'
+                || ($phone['MessageType'] ?? null) !== 'TRANSACTIONAL'
+                || in_array('SMS', $phone['NumberCapabilities'] ?? [], true) === false
+            ) {
+                continue;
+            }
+
+            $isLocal = ($phone['IsoCountryCode'] ?? null) === $countryCode;
+            $isInternational = ($phone['InternationalSendingEnabled'] ?? false) === true;
+
+            if ($isLocal === false && $isInternational === false) {
+                continue;
+            }
+
+            $phoneId = (string) ($phone['PhoneNumberId'] ?? '');
+            $phoneArn = (string) ($phone['PhoneNumberArn'] ?? '');
+            $phoneNumber = (string) ($phone['PhoneNumber'] ?? '');
+
+            if ($phoneId === '' && $phoneArn === '' && $phoneNumber === '') {
+                continue;
+            }
+
+            $candidates[] = [
+                'priority' => $isLocal ? 30 : 40,
+                'source' => $isLocal ? 'phone_local' : 'phone_international',
+                'identity' => $phoneArn !== '' ? $phoneArn : ($phoneId !== '' ? $phoneId : $phoneNumber),
+                'aliases' => array_values(array_filter([$phoneId, $phoneArn, $phoneNumber])),
+            ];
         }
 
-        if ($choices === []) {
-            throw new RuntimeException(
-                'AWS exige originationIdentity para SendNotifyCodeVerification y la cuenta no tiene una '
-                ."identidad SMS utilizable para {$countryCode}. Configura AWS_NOTIFY_ORIGINATION_IDENTITY "
-                .'o registra/provisiona una identidad de origen. No se requiere una Notify Configuration ACTIVE.',
-            );
-        }
+        usort(
+            $candidates,
+            static function (array $left, array $right): int {
+                $priorityComparison = $left['priority'] <=> $right['priority'];
+                if ($priorityComparison !== 0) {
 
-        if (count($choices) === 1) {
+                    return $priorityComparison;
+                }
 
-            return (string) array_values($choices)[0];
-        }
-
-        $selected = (string) $this->choice(
-            'Selecciona la identidad AWS para enviar el OTP',
-            array_keys($choices),
+                return strcmp((string) $left['identity'], (string) $right['identity']);
+            },
         );
 
-        return (string) $choices[$selected];
-    }
+        $requested = trim((string) ($this->option('origination-identity')
+            ?: config('authentication.otp.aws_notify.origination_identity')));
 
-    private function selectCodeConfiguration(array $items): array
-    {
-        $requested = trim((string) $this->option('code-configuration'));
         if ($requested !== '') {
-            foreach ($items as $item) {
-                if (($item['notifyCodeConfigurationId'] ?? null) === $requested) {
+            foreach ($candidates as $candidate) {
+                if (in_array($requested, $candidate['aliases'], true)) {
+                    $this->line('Origination identity configurada validada: '.$candidate['source']);
 
-                    return $item;
+                    return [(string) $candidate['identity'], (string) $candidate['source']];
                 }
             }
 
-            throw new RuntimeException("Notify Code Configuration [{$requested}] no cumple la política B-109.");
+            throw new RuntimeException(
+                'AWS_NOTIFY_ORIGINATION_IDENTITY está configurada, pero no corresponde a una identidad '
+                ."SMS activa/transaccional utilizable para {$countryCode}.",
+            );
         }
 
-        if (count($items) === 1) {
+        if ($candidates !== []) {
+            $selected = $candidates[0];
+            $this->line('Origination identity resuelta automáticamente: '.$selected['source']);
 
-            return $items[0];
+            return [(string) $selected['identity'], (string) $selected['source']];
         }
 
-        $labels = array_map(
-            static fn (array $item): string => sprintf(
-                '%s | %s',
-                (string) ($item['notifyCodeConfigurationId'] ?? ''),
-                (string) ($item['notifyCodeConfigurationName'] ?? ''),
-            ),
-            $items,
+        $managedIdentityNote = $customerOwnedIdentityRequired
+            ? 'AWS exige una identidad propia para este país.'
+            : 'Notify puede usar identidades administradas por AWS, pero SendNotifyCodeVerification exige '
+                .'una originationIdentity propiedad de la cuenta.';
+
+        throw new RuntimeException(
+            "No existe una originationIdentity SMS activa/transaccional para {$countryCode}. "
+            .$managedIdentityNote
+            .' Registra/provisiona un Sender ID, número o pool antes de repetir el gate.',
         );
+    }
 
-        $selected = (string) $this->choice('Selecciona Notify Code Configuration UAT', $labels);
-        $index = array_search($selected, $labels, true);
 
-        return $items[$index === false ? 0 : $index];
+    private function resolveCodeConfiguration(
+        EndUserMessagingClient $notifyClient,
+        string $countryCode,
+    ): array {
+        $result = $notifyClient->listNotifyCodeConfigurations(['maxResults' => 100]);
+        $all = $result['notifyCodeConfigurations'] ?? [];
+
+        $valid = array_values(array_filter(
+            $all,
+            static function (array $item): bool {
+                $policy = $item['codeConfigurationParameters'] ?? [];
+
+                return ($policy['codeType'] ?? null) === 'NUMERIC'
+                    && (int) ($policy['codeLength'] ?? 0) === 6
+                    && (int) ($policy['validityPeriodMinutes'] ?? 0) === 5
+                    && (int) ($policy['maxAttempts'] ?? 0) === 5;
+            },
+        ));
+
+        $requested = trim((string) ($this->option('code-configuration')
+            ?: config('authentication.otp.aws_notify.notify_code_configuration')));
+
+        if ($requested !== '') {
+            foreach ($valid as $item) {
+                $aliases = [
+                    (string) ($item['notifyCodeConfigurationId'] ?? ''),
+                    (string) ($item['notifyCodeConfigurationArn'] ?? ''),
+                ];
+
+                if (in_array($requested, $aliases, true)) {
+                    $this->line('Notify Code Configuration configurada validada.');
+
+                    return [$item, 'configured'];
+                }
+            }
+
+            throw new RuntimeException(
+                'AWS_NOTIFY_CODE_CONFIGURATION está configurada, pero no existe o no cumple '
+                .'NUMERIC/6 dígitos/5 minutos/5 intentos.',
+            );
+        }
+
+        if ($valid !== []) {
+            $preferredName = "HIPOCRATIQ-{$countryCode}-OTP";
+
+            usort(
+                $valid,
+                static function (array $left, array $right) use ($preferredName): int {
+                    $leftPreferred = ($left['notifyCodeConfigurationName'] ?? null) === $preferredName ? 0 : 1;
+                    $rightPreferred = ($right['notifyCodeConfigurationName'] ?? null) === $preferredName ? 0 : 1;
+                    $preferredComparison = $leftPreferred <=> $rightPreferred;
+
+                    if ($preferredComparison !== 0) {
+
+                        return $preferredComparison;
+                    }
+
+                    return strcmp(
+                        (string) ($left['notifyCodeConfigurationId'] ?? ''),
+                        (string) ($right['notifyCodeConfigurationId'] ?? ''),
+                    );
+                },
+            );
+
+            $this->line('Notify Code Configuration resuelta automáticamente.');
+
+            return [$valid[0], 'existing'];
+        }
+
+        $created = $notifyClient->createNotifyCodeConfiguration([
+            'notifyCodeConfigurationName' => "HIPOCRATIQ-{$countryCode}-OTP",
+            'codeConfigurationParameters' => [
+                'codeType' => 'NUMERIC',
+                'codeLength' => 6,
+                'validityPeriodMinutes' => 5,
+                'maxAttempts' => 5,
+            ],
+            'deletionProtectionEnabled' => false,
+            'tags' => [
+                ['key' => 'Project', 'value' => 'HIPOCRATIQ'],
+                ['key' => 'Environment', 'value' => 'UAT'],
+                ['key' => 'Country', 'value' => $countryCode],
+            ],
+        ]);
+
+        $configuration = $created['notifyCodeConfiguration'] ?? null;
+
+        if (is_array($configuration) === false) {
+            throw new RuntimeException('AWS no devolvió la Notify Code Configuration recién creada.');
+        }
+
+        $this->line('Notify Code Configuration creada automáticamente para UAT.');
+
+        return [$configuration, 'created'];
     }
 
     private function activateRuntimeConfiguration(
