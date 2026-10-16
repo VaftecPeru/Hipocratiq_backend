@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Validar de extremo a extremo la integración de OTP telefónico con AWS End User Messaging Notify sobre la versión estable de `develop`, sin modificar `main` ni producción. HIPOCRATIQ adopta México (`MX`, `+52`) como mercado principal; Perú (`PE`) y Estados Unidos (`US`) continúan soportados como mercados secundarios.
+Validar de extremo a extremo el OTP telefónico con AWS End User Messaging usando directamente `SendNotifyCodeVerification` y `ValidateNotifyCodeVerification`, sin depender de una `Notify Configuration` en estado `ACTIVE`. HIPOCRATIQ adopta México (`MX`, `+52`) como mercado principal; Perú (`PE`) y Estados Unidos (`US`) continúan soportados como mercados secundarios.
 
 Base de trabajo:
 
@@ -13,6 +13,7 @@ Base de trabajo:
 ## Principios de seguridad
 
 - Activar `OTP_PHONE_PROVIDER=aws_notify` únicamente en UAT durante este gate.
+- No usar `DescribeNotifyConfigurations` ni exigir `Notify Configuration = ACTIVE` como precondición del OTP.
 - No almacenar el OTP telefónico en la base de datos.
 - No registrar OTP, credenciales AWS ni secretos en logs, Git o bitácora.
 - Preferir un IAM Role/Instance Profile en EC2 y la cadena de credenciales por defecto del AWS SDK.
@@ -35,12 +36,13 @@ El comando tiene guardas obligatorias:
 - Usa `APP_PRIMARY_COUNTRY=MX` como país objetivo por defecto y exige que el teléfono UAT coincida con ese país.
 - Verifica por STS que el SDK esté usando el rol `HIPOCRATIQ-EC2-Notify-UAT`.
 - Verifica mediante `ListNotifyCountries` que el país objetivo esté disponible para `SMS / CODE_VERIFICATION / BASIC`.
-- Para México, la evidencia UAT confirmó soporte `SMS,VOICE`, tiers `BASIC,ADVANCED` y `CustomerOwnedIdentityRequired=NO`.
-- Descubre una Notify Configuration `ACTIVE / CODE_VERIFICATION / SMS` habilitada para México por defecto.
-- Si no existe una configuración ACTIVE, imprime un inventario sanitizado con ID, estado, `RejectionReason`, tier, canales, países y presencia de pool.
-- `ACCESS_DENIED_CONTACT_SUPPORT` se trata como bloqueo de cuenta/configuración AWS que debe resolverse con AWS Support, no como país no soportado ni error Laravel.
+- México es el mercado principal y la prueba de aceptación se ejecuta con un número `+52`.
+- No consulta ni depende de una `Notify Configuration ACTIVE`.
+- Resuelve `originationIdentity` en este orden: opción explícita, `AWS_NOTIFY_ORIGINATION_IDENTITY`, pool transaccional activo, Sender ID transaccional del país o número SMS activo/internacional del account.
 - Descubre una Notify Code Configuration `NUMERIC / 6 dígitos / 5 minutos / 5 intentos`.
-- Si hay varias configuraciones válidas, solicita seleccionar una.
+- Si hay varias configuraciones de código válidas, solicita seleccionar una.
+- `SendNotifyCodeVerification` genera y entrega el OTP; `ValidateNotifyCodeVerification` confirma el código usando el mismo `referenceId`.
+- La ausencia de `Notify Configuration ACTIVE` deja de ser un bloqueo. Sólo son bloqueos reales: permisos IAM, ausencia de identidad de origen utilizable, ausencia de Code Configuration válida o rechazo de la llamada directa de AWS.
 - Activa `aws_notify` sólo en memoria durante esa ejecución; no escribe secretos ni configuración AWS en Git o `.env`.
 - Ejecuta internamente `otp:aws-check` antes de enviar.
 - Crea una clínica y un paciente temporales únicamente en la base B-109 UAT.
@@ -58,9 +60,9 @@ php artisan otp:aws-uat-gate --target-country=PE
 
 La prueba principal de aceptación B-109 debe realizarse con un número mexicano válido en formato E.164 (`+52` seguido de 10 dígitos), porque México es el mercado objetivo del cliente.
 
-México no requiere una identidad de origen propiedad del cliente para el modo Notify administrado por AWS. Por ello, no se debe aprovisionar un número o pool dedicado sólo para cerrar B-109. Si una configuración ACTIVE no tiene `PoolId`, primero validar desde AWS Console en **Notify > Testing > Send code > Use Notify Configuration** y revisar el **API preview**. El flujo `SendNotifyCodeVerification` exige un `originationIdentity` a nivel de API; ese valor debe definirse a partir de la ruta que AWS exponga para la configuración activa, no por suposición.
+El flujo directo de AWS exige un `originationIdentity` para enviar el SMS, pero ese valor es independiente de una `Notify Configuration ACTIVE`. El gate intenta reutilizar una identidad SMS existente del account antes de solicitar configuración manual.
 
-Sólo si AWS o el país objetivo exige una identidad propia debe usarse:
+Si se quiere forzar una identidad concreta puede usarse:
 
 ```bash
 php artisan otp:aws-uat-gate \
@@ -128,12 +130,14 @@ Verificar además que el OTP por correo y el provider local no tengan regresione
 Flujo mínimo:
 
 1. Solicitar OTP con un teléfono mexicano UAT válido en formato E.164 (`+52` + 10 dígitos).
-2. Confirmar que AWS entrega el SMS.
-3. Confirmar que la respuesta de HIPOCRATIQ devuelve `challenge_id`, nunca el OTP.
-4. Ingresar el código recibido.
-5. Confirmar que AWS devuelve `VALID`.
-6. Confirmar consumo del challenge.
-7. Confirmar creación de sesión web o Bearer token Sanctum móvil según el cliente.
+2. Laravel invoca directamente `SendNotifyCodeVerification` con la identidad de origen y la Code Configuration.
+3. Confirmar que AWS entrega el SMS.
+4. Confirmar que la respuesta de HIPOCRATIQ devuelve `challenge_id`, nunca el OTP.
+5. Ingresar el código recibido.
+6. Laravel invoca `ValidateNotifyCodeVerification` con el mismo `referenceId`.
+7. Confirmar que AWS devuelve `VALID`.
+8. Confirmar consumo del challenge.
+9. Confirmar creación de sesión web o Bearer token Sanctum móvil según el cliente.
 
 No registrar el OTP recibido como evidencia.
 
