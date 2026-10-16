@@ -490,6 +490,7 @@ class RunAwsOtpUatGate extends Command
                 'MaxResults' => 100,
             ])['Pools'] ?? [],
             static function (array $pool): bool {
+
                 return ($pool['Status'] ?? null) === 'ACTIVE'
                     && ($pool['MessageType'] ?? null) === 'TRANSACTIONAL';
             },
@@ -498,6 +499,7 @@ class RunAwsOtpUatGate extends Command
         foreach ($pools as $pool) {
             $poolId = (string) ($pool['PoolId'] ?? '');
             if ($poolId === '') {
+
                 continue;
             }
 
@@ -517,6 +519,7 @@ class RunAwsOtpUatGate extends Command
             ])['OriginationIdentities'] ?? [];
 
             if ($originators === []) {
+
                 continue;
             }
 
@@ -542,12 +545,14 @@ class RunAwsOtpUatGate extends Command
                 || ($sender['Registered'] ?? false) !== true
                 || in_array('TRANSACTIONAL', $sender['MessageTypes'] ?? [], true) === false
             ) {
+
                 continue;
             }
 
             $senderId = (string) ($sender['SenderId'] ?? '');
             $senderArn = (string) ($sender['SenderIdArn'] ?? '');
             if ($senderId === '' && $senderArn === '') {
+
                 continue;
             }
 
@@ -570,6 +575,7 @@ class RunAwsOtpUatGate extends Command
                 || ($phone['MessageType'] ?? null) !== 'TRANSACTIONAL'
                 || in_array('SMS', $phone['NumberCapabilities'] ?? [], true) === false
             ) {
+
                 continue;
             }
 
@@ -577,6 +583,7 @@ class RunAwsOtpUatGate extends Command
             $isInternational = ($phone['InternationalSendingEnabled'] ?? false) === true;
 
             if ($isLocal === false && $isInternational === false) {
+
                 continue;
             }
 
@@ -585,6 +592,7 @@ class RunAwsOtpUatGate extends Command
             $phoneNumber = (string) ($phone['PhoneNumber'] ?? '');
 
             if ($phoneId === '' && $phoneArn === '' && $phoneNumber === '') {
+
                 continue;
             }
 
