@@ -476,7 +476,6 @@ class RunAwsOtpUatGate extends Command
         ];
     }
 
-
     private function resolveOriginationIdentity(
         PinpointSMSVoiceV2Client $smsClient,
         string $countryCode,
@@ -653,7 +652,6 @@ class RunAwsOtpUatGate extends Command
             .' Registra/provisiona un Sender ID, número o pool antes de repetir el gate.',
         );
     }
-
 
     private function resolveCodeConfiguration(
         EndUserMessagingClient $notifyClient,
