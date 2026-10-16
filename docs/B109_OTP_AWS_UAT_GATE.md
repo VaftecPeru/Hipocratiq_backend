@@ -20,6 +20,41 @@ Base de trabajo:
 - Mantener la política local alineada con AWS: 5 minutos y máximo 5 intentos.
 - No promover a `main` hasta completar todos los controles.
 
+## Ejecución consolidada — una sola acción
+
+Después de completar dependencias, migraciones e IAM/Instance Profile, el gate funcional se ejecuta con:
+
+```bash
+php artisan otp:aws-uat-gate --phone=+<E164>
+```
+
+El comando tiene guardas obligatorias:
+
+- Sólo permite `APP_ENV=testing|uat|local`.
+- Exige por defecto que la base conectada sea exactamente `hipocratiq_b109_uat`.
+- Verifica por STS que el SDK esté usando el rol `HIPOCRATIQ-EC2-Notify-UAT`.
+- Descubre una Notify Configuration `ACTIVE / CODE_VERIFICATION / SMS` habilitada para el país del teléfono.
+- Descubre una Notify Code Configuration `NUMERIC / 6 dígitos / 5 minutos / 5 intentos`.
+- Si hay varias configuraciones válidas, solicita seleccionar una.
+- Activa `aws_notify` sólo en memoria durante esa ejecución; no escribe secretos ni configuración AWS en Git o `.env`.
+- Ejecuta internamente `otp:aws-check` antes de enviar.
+- Crea una clínica y un paciente temporales únicamente en la base B-109 UAT.
+- Envía un SMS real por `/api/v1/auth/otp/request`.
+- Solicita el OTP mediante entrada oculta y nunca lo imprime.
+- Valida dispositivo incorrecto, código incorrecto, expiración y reutilización del challenge.
+- Valida OTP correcto por AWS, emisión Bearer Sanctum, `/api/v1/auth/me`, logout y revocación.
+- Elimina los datos temporales al finalizar, salvo uso explícito de `--keep-data`.
+
+Si la Notify Configuration no tiene un pool asociado, ejecutar con una identidad de origen válida:
+
+```bash
+php artisan otp:aws-uat-gate \
+  --phone=+<E164> \
+  --origination-identity=<PhoneNumberId|SenderId|PoolId|ARN>
+```
+
+No registrar el OTP recibido ni el Bearer Token como evidencia. La evidencia válida es la tabla final `PASS/FAIL`, IDs no secretos de configuración y los logs sanitizados.
+
 ## Gate 1 — Dependencias reproducibles
 
 Desde la rama B-109:
