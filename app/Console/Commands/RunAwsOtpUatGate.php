@@ -418,13 +418,39 @@ class RunAwsOtpUatGate extends Command
             'region' => $region,
         ]);
 
+        $countryResult = $smsClient->listNotifyCountries([
+            'Channels' => ['SMS'],
+            'UseCases' => ['CODE_VERIFICATION'],
+            'Tier' => 'BASIC',
+            'MaxResults' => 100,
+        ]);
+        $country = collect($countryResult['NotifyCountries'] ?? [])
+            ->firstWhere('IsoCountryCode', $countryCode);
+
+        if (is_array($country) === false) {
+            throw new RuntimeException(
+                "AWS Notify BASIC no reporta {$countryCode} como país disponible para SMS/CODE_VERIFICATION.",
+            );
+        }
+
+        $customerOwnedIdentityRequired = (bool) ($country['CustomerOwnedIdentityRequired'] ?? false);
+        $this->table(
+            ['País', 'Canales', 'Use cases', 'Tiers', 'Identidad propia requerida'],
+            [[
+                (string) ($country['CountryName'] ?? $countryCode),
+                implode(',', $country['SupportedChannels'] ?? []),
+                implode(',', $country['SupportedUseCases'] ?? []),
+                implode(',', $country['SupportedTiers'] ?? []),
+                $customerOwnedIdentityRequired ? 'SI' : 'NO',
+            ]],
+        );
+
         $notifyResult = $smsClient->describeNotifyConfigurations(['MaxResults' => 100]);
-        $notifyConfigurations = array_values(array_filter(
+        $compatibleConfigurations = array_values(array_filter(
             $notifyResult['NotifyConfigurations'] ?? [],
             static function (array $item) use ($countryCode): bool {
 
-                return ($item['Status'] ?? null) === 'ACTIVE'
-                    && ($item['UseCase'] ?? null) === 'CODE_VERIFICATION'
+                return ($item['UseCase'] ?? null) === 'CODE_VERIFICATION'
                     && in_array('SMS', $item['EnabledChannels'] ?? [], true)
                     && (
                         ($item['EnabledCountries'] ?? []) === []
@@ -432,9 +458,24 @@ class RunAwsOtpUatGate extends Command
                     );
             },
         ));
+        $notifyConfigurations = array_values(array_filter(
+            $compatibleConfigurations,
+            static fn (array $item): bool => ($item['Status'] ?? null) === 'ACTIVE',
+        ));
 
         if ($notifyConfigurations === []) {
-            $this->printNotifyInventory($notifyResult['NotifyConfigurations'] ?? []);
+            $this->printNotifyInventory($compatibleConfigurations);
+
+            $requiresSupport = collect($compatibleConfigurations)->contains(
+                static fn (array $item): bool => ($item['RejectionReason'] ?? null) === 'ACCESS_DENIED_CONTACT_SUPPORT',
+            );
+
+            if ($requiresSupport) {
+                throw new RuntimeException(
+                    "AWS Notify está soportado para {$countryCode}, pero la cuenta/configuración fue rechazada "
+                    .'con ACCESS_DENIED_CONTACT_SUPPORT. Debe resolverse con AWS Support antes de enviar SMS.',
+                );
+            }
 
             throw new RuntimeException(
                 "No existe una Notify Configuration ACTIVE/CODE_VERIFICATION/SMS habilitada para {$countryCode} en la región.",
@@ -450,8 +491,18 @@ class RunAwsOtpUatGate extends Command
             : trim((string) ($notifyConfiguration['PoolId'] ?? ''));
 
         if ($originationIdentity === '' || $originationIdentity === 'UNSET_DEFAULT_POOL_FOR_NOTIFY') {
+            if ($customerOwnedIdentityRequired) {
+                throw new RuntimeException(
+                    "{$countryCode} requiere una identidad propia. Asocia un PoolId válido a la Notify Configuration.",
+                );
+            }
+
             throw new RuntimeException(
-                'La Notify Configuration no tiene PoolId. Ejecuta nuevamente con --origination-identity=<ID/ARN válido>.',
+                "{$countryCode} no exige identidad propia para Notify administrado por AWS, pero "
+                .'SendNotifyCodeVerification requiere originationIdentity. Tras activar la configuración, '
+                .'valida en AWS Console > Notify > Testing > Send code > Use Notify Configuration y revisa '
+                .'el API preview antes de definir AWS_NOTIFY_ORIGINATION_IDENTITY. No aprovisionar un pool '
+                .'dedicado únicamente para resolver este gate.',
             );
         }
 
@@ -517,6 +568,8 @@ class RunAwsOtpUatGate extends Command
                 (string) ($item['NotifyConfigurationId'] ?? ''),
                 (string) ($item['DisplayName'] ?? ''),
                 (string) ($item['Status'] ?? ''),
+                (string) ($item['RejectionReason'] ?? ''),
+                (string) ($item['Tier'] ?? ''),
                 implode(',', $item['EnabledChannels'] ?? []),
                 implode(',', $item['EnabledCountries'] ?? []),
                 empty($item['PoolId']) ? 'NO' : 'SI',
@@ -524,7 +577,7 @@ class RunAwsOtpUatGate extends Command
         }, $items);
 
         $this->table(
-            ['ID', 'Nombre', 'Estado', 'Canales', 'Países', 'Pool'],
+            ['ID', 'Nombre', 'Estado', 'Motivo', 'Tier', 'Canales', 'Países', 'Pool'],
             $rows,
         );
     }
