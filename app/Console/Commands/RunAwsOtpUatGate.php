@@ -16,6 +16,7 @@ use App\Support\PhoneNumber;
 use Aws\EndUserMessaging\EndUserMessagingClient;
 use Aws\PinpointSMSVoiceV2\PinpointSMSVoiceV2Client;
 use Aws\Sts\StsClient;
+use Illuminate\Console\Command;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
