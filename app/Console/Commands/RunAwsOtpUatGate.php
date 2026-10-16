@@ -32,6 +32,7 @@ class RunAwsOtpUatGate extends Command
         {--phone= : Número E.164 que recibirá el SMS real}
         {--database=hipocratiq_b109_uat : Base UAT esperada}
         {--region=us-east-2 : Región AWS Notify}
+        {--target-country= : País ISO objetivo; por defecto APP_PRIMARY_COUNTRY (MX)}
         {--notify-configuration= : Notify Configuration ID a utilizar}
         {--code-configuration= : Notify Code Configuration ID a utilizar}
         {--origination-identity= : Identidad de origen explícita; por defecto usa el PoolId de Notify}
@@ -50,8 +51,23 @@ class RunAwsOtpUatGate extends Command
             return self::FAILURE;
         }
 
-        $phone = $this->resolvePhone();
+        $targetCountry = $this->resolveTargetCountry();
+        if ($targetCountry === null) {
+
+            return self::FAILURE;
+        }
+
+        $phone = $this->resolvePhone($targetCountry);
         if ($phone === null) {
+
+            return self::FAILURE;
+        }
+
+        $phoneNumber = PhoneNumber::fromE164($phone);
+        if ($phoneNumber->countryCode !== $targetCountry) {
+            $this->error(
+                "B-109 está configurado para {$targetCountry}; el número ingresado pertenece a {$phoneNumber->countryCode}.",
+            );
 
             return self::FAILURE;
         }
@@ -61,7 +77,8 @@ class RunAwsOtpUatGate extends Command
         try {
             $this->newLine();
             $this->components->info('1/7 IAM y discovery AWS Notify');
-            $aws = $this->discoverAwsConfiguration($region, PhoneNumber::fromE164($phone)->countryCode);
+            $this->line("País objetivo: {$targetCountry}");
+            $aws = $this->discoverAwsConfiguration($region, $targetCountry);
 
             $this->activateRuntimeConfiguration(
                 $region,
@@ -396,6 +413,8 @@ class RunAwsOtpUatGate extends Command
         ));
 
         if ($notifyConfigurations === []) {
+            $this->printNotifyInventory($notifyResult['NotifyConfigurations'] ?? []);
+
             throw new RuntimeException(
                 "No existe una Notify Configuration ACTIVE/CODE_VERIFICATION/SMS habilitada para {$countryCode} en la región.",
             );
@@ -462,6 +481,31 @@ class RunAwsOtpUatGate extends Command
             'origination_identity' => $originationIdentity,
             'code_configuration_id' => (string) $codeConfiguration['notifyCodeConfigurationId'],
         ];
+    }
+
+    private function printNotifyInventory(array $items): void
+    {
+        if ($items === []) {
+            $this->warn('AWS no devolvió Notify Configurations en esta región.');
+
+            return;
+        }
+
+        $rows = array_map(static function (array $item): array {
+            return [
+                (string) ($item['NotifyConfigurationId'] ?? ''),
+                (string) ($item['DisplayName'] ?? ''),
+                (string) ($item['Status'] ?? ''),
+                implode(',', $item['EnabledChannels'] ?? []),
+                implode(',', $item['EnabledCountries'] ?? []),
+                empty($item['PoolId']) ? 'NO' : 'SI',
+            ];
+        }, $items);
+
+        $this->table(
+            ['ID', 'Nombre', 'Estado', 'Canales', 'Países', 'Pool'],
+            $rows,
+        );
     }
 
     private function selectNotifyConfiguration(array $items): array
