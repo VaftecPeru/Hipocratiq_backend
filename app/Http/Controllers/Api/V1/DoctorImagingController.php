@@ -188,7 +188,7 @@ final class DoctorImagingController extends Controller
             ImagingStudyStatus::Reviewed, ImagingStudyStatus::Canceled => [],
         };
 
-        if (! in_array($next, $allowed, true)) {
+        if (!in_array($next, $allowed, true)) {
             throw ValidationException::withMessages([
                 'status' => ['La transición de estado de imagenología no es válida.'],
             ]);
