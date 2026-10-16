@@ -46,11 +46,13 @@ class RunAwsOtpUatGate extends Command
     public function handle(HttpKernel $kernel, AwsOtpReadiness $readiness): int
     {
         if ($this->guardEnvironment() === false) {
+
             return self::FAILURE;
         }
 
         $phone = $this->resolvePhone();
         if ($phone === null) {
+
             return self::FAILURE;
         }
 
@@ -318,6 +320,7 @@ class RunAwsOtpUatGate extends Command
         $environment = (string) config('app.env');
         if (in_array($environment, ['testing', 'uat', 'local'], true) === false) {
             $this->error("Entorno no permitido [{$environment}]. Este comando es exclusivo para UAT.");
+
             return false;
         }
 
@@ -328,6 +331,7 @@ class RunAwsOtpUatGate extends Command
             $this->error(
                 "Base de datos insegura. Esperada [{$expectedDatabase}], actual [{$actualDatabase}].",
             );
+
             return false;
         }
 
@@ -339,9 +343,11 @@ class RunAwsOtpUatGate extends Command
         $raw = trim((string) ($this->option('phone') ?: $this->secret('Número E.164 para SMS UAT')));
 
         try {
+
             return PhoneNumber::fromE164($raw)->value;
         } catch (Throwable $exception) {
             $this->error($exception->getMessage());
+
             return null;
         }
     }
@@ -378,6 +384,7 @@ class RunAwsOtpUatGate extends Command
         $notifyConfigurations = array_values(array_filter(
             $notifyResult['NotifyConfigurations'] ?? [],
             static function (array $item) use ($countryCode): bool {
+
                 return ($item['Status'] ?? null) === 'ACTIVE'
                     && ($item['UseCase'] ?? null) === 'CODE_VERIFICATION'
                     && in_array('SMS', $item['EnabledChannels'] ?? [], true)
@@ -463,6 +470,7 @@ class RunAwsOtpUatGate extends Command
         if ($requested !== '') {
             foreach ($items as $item) {
                 if (($item['NotifyConfigurationId'] ?? null) === $requested) {
+
                     return $item;
                 }
             }
@@ -471,6 +479,7 @@ class RunAwsOtpUatGate extends Command
         }
 
         if (count($items) === 1) {
+
             return $items[0];
         }
 
@@ -496,6 +505,7 @@ class RunAwsOtpUatGate extends Command
         if ($requested !== '') {
             foreach ($items as $item) {
                 if (($item['notifyCodeConfigurationId'] ?? null) === $requested) {
+
                     return $item;
                 }
             }
@@ -504,6 +514,7 @@ class RunAwsOtpUatGate extends Command
         }
 
         if (count($items) === 1) {
+
             return $items[0];
         }
 
