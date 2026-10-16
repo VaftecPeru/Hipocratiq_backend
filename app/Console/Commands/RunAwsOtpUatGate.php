@@ -458,14 +458,14 @@ class RunAwsOtpUatGate extends Command
             ]],
         );
 
+        [$codeConfiguration, $codeConfigurationSource] = $this->resolveCodeConfiguration(
+            $notifyClient,
+            $countryCode,
+        );
         [$originationIdentity, $originationSource] = $this->resolveOriginationIdentity(
             $smsClient,
             $countryCode,
             $customerOwnedIdentityRequired,
-        );
-        [$codeConfiguration, $codeConfigurationSource] = $this->resolveCodeConfiguration(
-            $notifyClient,
-            $countryCode,
         );
 
         return [
