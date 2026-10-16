@@ -110,22 +110,33 @@ class RunAwsOtpUatGate extends Command
             $this->newLine();
             $this->components->info('4/7 Enviar SMS OTP real por el flujo HTTP de Laravel');
 
-            [$invalidPhoneStatus] = $this->jsonRequest($kernel, 'POST', '/api/v1/auth/otp/request', [
-                'purpose' => OtpPurpose::Registration->value,
-                'client_type' => AuthenticationClient::Mobile->value,
-                'actor_context' => AuthenticationContext::Patient->value,
-                'requested_role' => 'patient',
-                'name' => 'B-109 Invalid Phone',
-                'phone_number' => '123',
-                'clinic_id' => $clinic->id,
-                'device_name' => $deviceName,
-                'device_id' => $deviceId,
-                'terms_accepted' => true,
-            ]);
+            $invalidPhone = 'invalid-'.Str::lower(Str::random(10));
+            [$invalidPhoneStatus, $invalidPhoneBody] = $this->jsonRequest(
+                $kernel,
+                'POST',
+                '/api/v1/auth/otp/request',
+                [
+                    'purpose' => OtpPurpose::Registration->value,
+                    'client_type' => AuthenticationClient::Mobile->value,
+                    'actor_context' => AuthenticationContext::Patient->value,
+                    'requested_role' => 'patient',
+                    'name' => 'B-109 Invalid Phone',
+                    'country_code' => $targetCountry,
+                    'phone_number' => $invalidPhone,
+                    'clinic_id' => $clinic->id,
+                    'device_name' => $deviceName,
+                    'device_id' => $deviceId,
+                    'terms_accepted' => true,
+                ],
+            );
 
             if ($invalidPhoneStatus !== 422) {
-                throw new RuntimeException('Un teléfono inválido superó la validación HTTP.');
+                throw new RuntimeException(
+                    'El negativo de teléfono inválido respondió HTTP '
+                    .$invalidPhoneStatus.': '.$this->safeJson($invalidPhoneBody),
+                );
             }
+
             $this->line('OK: teléfono inválido rechazado antes de AWS.');
 
             [$requestStatus, $requestBody] = $this->jsonRequest($kernel, 'POST', '/api/v1/auth/otp/request', [
