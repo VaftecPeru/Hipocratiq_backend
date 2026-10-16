@@ -59,7 +59,7 @@ class RunAwsOtpUatGate extends Command
         try {
             $this->newLine();
             $this->components->info('1/7 IAM y discovery AWS Notify');
-            $aws = $this->discoverAwsConfiguration($region);
+            $aws = $this->discoverAwsConfiguration($region, PhoneNumber::fromE164($phone)->countryCode);
 
             $this->activateRuntimeConfiguration(
                 $region,
@@ -321,7 +321,7 @@ class RunAwsOtpUatGate extends Command
     /**
      * @return array{notify_configuration_id:string,origination_identity:string,code_configuration_id:string}
      */
-    private function discoverAwsConfiguration(string $region): array
+    private function discoverAwsConfiguration(string $region, string $countryCode): array
     {
         if ($region === '') {
             throw new RuntimeException('AWS region no puede estar vacía.');
@@ -352,11 +352,17 @@ class RunAwsOtpUatGate extends Command
             static fn (array $item): bool =>
                 ($item['Status'] ?? null) === 'ACTIVE'
                 && ($item['UseCase'] ?? null) === 'CODE_VERIFICATION'
-                && in_array('TEXT', $item['EnabledChannels'] ?? [], true),
+                && in_array('SMS', $item['EnabledChannels'] ?? [], true)
+                && (
+                    ($item['EnabledCountries'] ?? []) === []
+                    || in_array($countryCode, $item['EnabledCountries'] ?? [], true)
+                ),
         ));
 
         if ($notifyConfigurations === []) {
-            throw new RuntimeException('No existe una Notify Configuration ACTIVE/CODE_VERIFICATION/TEXT en la región.');
+            throw new RuntimeException(
+                "No existe una Notify Configuration ACTIVE/CODE_VERIFICATION/SMS habilitada para {$countryCode} en la región.",
+            );
         }
 
         $notifyConfiguration = $this->selectNotifyConfiguration($notifyConfigurations);
@@ -367,7 +373,7 @@ class RunAwsOtpUatGate extends Command
             ? $explicitOrigination
             : trim((string) ($notifyConfiguration['PoolId'] ?? ''));
 
-        if ($originationIdentity === '') {
+        if ($originationIdentity === '' || $originationIdentity === 'UNSET_DEFAULT_POOL_FOR_NOTIFY') {
             throw new RuntimeException(
                 'La Notify Configuration no tiene PoolId. Ejecuta nuevamente con --origination-identity=<ID/ARN válido>.',
             );
