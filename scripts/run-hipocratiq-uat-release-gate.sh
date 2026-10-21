@@ -139,8 +139,11 @@ if [[ -z "$UAT_BACKEND_URL" ]]; then
   read -r -p "URL HTTPS del backend UAT accesible desde el móvil: " UAT_BACKEND_URL
 fi
 
-[[ "$UAT_BACKEND_URL" =~ ^https:// ]] || die "HIPOCRATIQ_UAT_BACKEND_URL debe usar HTTPS"
-[[ "$UAT_BACKEND_URL" != "https://hipocratiq.com/backend" ]] || die "El APK integral no puede apuntar al backend productivo"
+[[ "$UAT_BACKEND_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^?#[:space:]]*)?$ ]] || die "HIPOCRATIQ_UAT_BACKEND_URL debe ser una URL HTTPS válida sin credenciales ni parámetros"
+_backend_host="${UAT_BACKEND_URL#https://}"
+_backend_host="${_backend_host%%/*}"
+_backend_host="${_backend_host%%:*}"
+[[ "${_backend_host,,}" =~ (^|[.-])(uat|qa|staging)([.-]|$) ]] || die "Se exige hostname UAT, QA o staging: backend productivo no permitido"
 
 VALIDATION_LOG_DIR="$RUN_DIR/mobile" BACKEND_URL="$UAT_BACKEND_URL" SUPPORT_PORTAL_URL="$SUPPORT_PORTAL_URL"   bash scripts/validate-mobile-vps.sh 2>&1 | tee -a "$SUMMARY"
 
