@@ -81,6 +81,16 @@ class DiagnosticProviderRegistrationTest extends TestCase
         $this->assertDatabaseCount('diagnostic_providers', 1);
     }
 
+    public function test_rejects_invalid_mexican_tax_id_before_persisting(): void
+    {
+        $this->postJson('/api/v1/auth/register/diagnostic-provider/request', [
+            ...$this->payload(),
+            'tax_id' => 'NO-RFC-123',
+        ])->assertStatus(422)->assertJsonValidationErrors('tax_id');
+
+        $this->assertDatabaseCount('diagnostic_providers', 0);
+    }
+
     public function test_requires_terms_of_service_accepted(): void
     {
         $this->postJson('/api/v1/auth/register/diagnostic-provider/request', [
