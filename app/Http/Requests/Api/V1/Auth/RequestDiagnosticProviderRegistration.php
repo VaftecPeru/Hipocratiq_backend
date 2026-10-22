@@ -27,7 +27,7 @@ class RequestDiagnosticProviderRegistration extends FormRequest
                         return;
                     }
                     $rfc = mb_strtoupper(trim((string) $value));
-                    if (preg_match('/\\A[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}\\z/u', $rfc) !== 1) {
+                    if (preg_match('/\A[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}\z/u', $rfc) !== 1) {
                         $fail('El RFC de México debe contener 12 o 13 caracteres válidos.');
                     }
                 },
