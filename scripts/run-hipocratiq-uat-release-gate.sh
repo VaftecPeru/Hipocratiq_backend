@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 BACKEND_QA="${BACKEND_QA:-/srv/hipocratiq/qa-20261013/backend-b109}"
 FRONTEND_QA="${FRONTEND_QA:-/srv/hipocratiq/qa-20261016/frontend-b108}"
-BACKEND_BRANCH="${BACKEND_BRANCH:-feature/b109-otp-aws-uat-gate}"
-FRONTEND_BRANCH="${FRONTEND_BRANCH:-feature/b108-global-branding-splash-20261016}"
+BACKEND_BRANCH="${BACKEND_BRANCH:-develop}"
+FRONTEND_BRANCH="${FRONTEND_BRANCH:-develop}"
 ENV_FILE="${ENV_FILE:-/tmp/hipocratiq-b109.env}"
 NETWORK="${NETWORK:-hipocratiq-b109-net}"
 POSTGRES="${POSTGRES:-hipocratiq-b109-postgres}"
@@ -12,6 +12,25 @@ TARGET_COUNTRY="${TARGET_COUNTRY:-MX}"
 EVIDENCE_ROOT="${EVIDENCE_ROOT:-/srv/hipocratiq/qa-20261016/evidence-release}"
 UAT_BACKEND_URL="${HIPOCRATIQ_UAT_BACKEND_URL:-}"
 SUPPORT_PORTAL_URL="${SUPPORT_PORTAL_URL:-https://hipocratiq.com}"
+
+# El preflight debe completarse ANTES de iniciar Docker, migraciones, pruebas o SMS.
+# Fail-closed: el entorno UAT y la URL de pruebas se configuran antes de ejecutar.
+if [[ -z "$UAT_BACKEND_URL" ]]; then
+  printf '%s\\n' "ERROR: configura HIPOCRATIQ_UAT_BACKEND_URL con un backend UAT HTTPS antes de iniciar." >&2
+  exit 1
+fi
+if [[ ! "$UAT_BACKEND_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^?#[:space:]]*)?$ ]]; then
+  printf '%s\\n' "ERROR: HIPOCRATIQ_UAT_BACKEND_URL debe ser una URL HTTPS válida sin credenciales ni parámetros." >&2
+  exit 1
+fi
+_backend_host="${UAT_BACKEND_URL#https://}"
+_backend_host="${_backend_host%%/*}"
+_backend_host="${_backend_host%%:*}"
+if [[ ! "${_backend_host,,}" =~ (^|[.-])(uat|qa|staging)([.-]|$) ]]; then
+  printf '%s\\n' "ERROR: se exige un hostname UAT/QA/staging. Producción no está permitida." >&2
+  exit 1
+fi
+
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="${EVIDENCE_ROOT}/${timestamp}"
@@ -134,16 +153,6 @@ log "Web QA: PASS"
 
 log ""
 log "=== 7/8 QA MOBILE + APK/AAB UAT ==="
-
-if [[ -z "$UAT_BACKEND_URL" ]]; then
-  read -r -p "URL HTTPS del backend UAT accesible desde el móvil: " UAT_BACKEND_URL
-fi
-
-[[ "$UAT_BACKEND_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^?#[:space:]]*)?$ ]] || die "HIPOCRATIQ_UAT_BACKEND_URL debe ser una URL HTTPS válida sin credenciales ni parámetros"
-_backend_host="${UAT_BACKEND_URL#https://}"
-_backend_host="${_backend_host%%/*}"
-_backend_host="${_backend_host%%:*}"
-[[ "${_backend_host,,}" =~ (^|[.-])(uat|qa|staging)([.-]|$) ]] || die "Se exige hostname UAT, QA o staging: backend productivo no permitido"
 
 VALIDATION_LOG_DIR="$RUN_DIR/mobile" BACKEND_URL="$UAT_BACKEND_URL" SUPPORT_PORTAL_URL="$SUPPORT_PORTAL_URL"   bash scripts/validate-mobile-vps.sh 2>&1 | tee -a "$SUMMARY"
 
