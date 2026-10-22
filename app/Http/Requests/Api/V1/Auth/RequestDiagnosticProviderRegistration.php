@@ -22,7 +22,7 @@ class RequestDiagnosticProviderRegistration extends FormRequest
             'country_code' => ['required', Rule::in(['MX', 'PE', 'US'])],
             'tax_id' => [
                 'required', 'string', 'min:6', 'max:80',
-                function (string $attribute, mixed $value, \\Closure $fail): void {
+                function (string $attribute, mixed $value, \Closure $fail): void {
                     if ($this->input('country_code') !== 'MX') {
                         return;
                     }
