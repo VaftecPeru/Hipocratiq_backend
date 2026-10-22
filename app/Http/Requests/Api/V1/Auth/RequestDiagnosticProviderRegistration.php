@@ -22,6 +22,15 @@ class RequestDiagnosticProviderRegistration extends FormRequest
             'country_code' => ['required', Rule::in(['MX', 'PE', 'US'])],
             'tax_id' => [
                 'required', 'string', 'min:6', 'max:80',
+                function (string $attribute, mixed $value, \\Closure $fail): void {
+                    if ($this->input('country_code') !== 'MX') {
+                        return;
+                    }
+                    $rfc = mb_strtoupper(trim((string) $value));
+                    if (preg_match('/\\A[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}\\z/u', $rfc) !== 1) {
+                        $fail('El RFC de México debe contener 12 o 13 caracteres válidos.');
+                    }
+                },
                 Rule::unique('diagnostic_providers', 'tax_id')
                     ->where('country_code', $this->input('country_code')),
             ],
