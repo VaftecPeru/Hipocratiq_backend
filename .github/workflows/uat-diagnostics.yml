@@ -1,0 +1,143 @@
+name: UAT Diagnostics (isolated)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-diagnostics.yml
+      - app/**
+      - bootstrap/**
+      - config/**
+      - database/**
+      - routes/**
+      - tests/**
+      - composer.json
+      - composer.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hipocratiq-uat-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-uat:
+    name: Laravel PostgreSQL 17 / isolated restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: hipocratiq_uat_ci
+          POSTGRES_USER: uat_ci
+          POSTGRES_PASSWORD: uat_ci_ephemeral_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uat_ci -d hipocratiq_uat_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.2.7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_URL: http://127.0.0.1
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_DATABASE: hipocratiq_uat_ci
+      DB_USERNAME: uat_ci
+      DB_PASSWORD: uat_ci_ephemeral_only
+      DB_URL: ""
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+      SMS_DRIVER: array
+      OTP_PHONE_PROVIDER: local
+      OTP_HASH_KEY: github-actions-uat-synthetic-otp-only
+      OTP_FIXED_CODE: "123456"
+      BILLING_DRIVER: simulated
+      BACKUP_SERVICE_ENABLED: "false"
+      EPIDEMIOLOGICAL_AI_ENABLED: "false"
+      WHATSAPP_DRIVER: unavailable
+      HIPOCRATIQ_UAT_ACCESS_ENABLED: "false"
+      TELESCOPE_ENABLED: "false"
+      PULSE_ENABLED: "false"
+      NIGHTWATCH_ENABLED: "false"
+    steps:
+      - name: Checkout (no production credentials)
+        uses: actions/checkout@v4
+
+      - name: PHP 8.4 + PostgreSQL driver
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_pgsql, pdo_sqlite, redis
+          coverage: none
+
+      - name: Install locked dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Generate ephemeral application key
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+          php artisan config:clear
+
+      - name: Verify PostgreSQL connection and migrations
+        run: |
+          php artisan migrate:fresh --force --no-interaction
+          php artisan migrate:status --no-interaction
+
+      - name: Execute Laravel tests against PostgreSQL
+        run: php artisan test --no-ansi
+
+      - name: Backup and verify isolated restore (synthetic schema)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/hipocratiq-uat"
+          docker run --rm --network host \
+            -e PGPASSWORD="$DB_PASSWORD" \
+            -v "$RUNNER_TEMP/hipocratiq-uat:/backup" \
+            postgres:17 pg_dump -h 127.0.0.1 -U "$DB_USERNAME" \
+              -d "$DB_DATABASE" --format=custom --file=/backup/uat.dump
+          sha256sum "$RUNNER_TEMP/hipocratiq-uat/uat.dump" > "$RUNNER_TEMP/hipocratiq-uat/uat.sha256"
+          (cd "$RUNNER_TEMP/hipocratiq-uat" && sha256sum --check uat.sha256)
+          docker run --rm --network host \
+            -v "$RUNNER_TEMP/hipocratiq-uat:/backup:ro" \
+            postgres:17 pg_restore --list /backup/uat.dump > /dev/null
+          docker run --rm --network host \
+            -e PGPASSWORD="$DB_PASSWORD" postgres:17 \
+            psql -h 127.0.0.1 -U "$DB_USERNAME" -d postgres \
+              -v ON_ERROR_STOP=1 -c "CREATE DATABASE hipocratiq_uat_restore OWNER uat_ci"
+          docker run --rm --network host \
+            -e PGPASSWORD="$DB_PASSWORD" \
+            -v "$RUNNER_TEMP/hipocratiq-uat:/backup:ro" \
+            postgres:17 pg_restore -h 127.0.0.1 -U "$DB_USERNAME" \
+              -d hipocratiq_uat_restore --exit-on-error --no-owner /backup/uat.dump
+          table_count="$(docker run --rm --network host \
+            -e PGPASSWORD="$DB_PASSWORD" postgres:17 \
+            psql -h 127.0.0.1 -U "$DB_USERNAME" -d hipocratiq_uat_restore \
+              -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")"
+          test "$table_count" -gt 0
+          echo "Restore aislado correcto; tablas verificadas: $table_count"
+          rm -f "$RUNNER_TEMP/hipocratiq-uat/uat.dump" "$RUNNER_TEMP/hipocratiq-uat/uat.sha256"
+
+      - name: UAT scope declaration
+        run: |
+          echo "CI sintético: PostgreSQL 17, PHPUnit y restauración temporal."
+          echo "No valida HTTPS externo, OTP SMS MX, E2E Next.js, multi-tenant/IDOR externo ni producción."
