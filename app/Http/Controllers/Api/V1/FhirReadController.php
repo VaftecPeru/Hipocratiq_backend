@@ -143,12 +143,27 @@ final class FhirReadController extends Controller
         }
 
         if ($context === AuthenticationContext::Doctor->value) {
+            if (! $user->hasActiveDoctorAccess()) {
+                return false;
+            }
+
+            if ($patient->clinic_id !== null && (
+                ! $user->doctorProfile()->where('clinic_id', $patient->clinic_id)->exists()
+                || ! $this->hasClinicMembership($user, $patient->clinic_id)
+            )) {
+                return false;
+            }
+
             return $patient->owner_doctor_user_id === $user->id
                 || $patient->consultations()->where('doctor_user_id', $user->id)->exists()
                 || $patient->appointments()->where('doctor_user_id', $user->id)->exists();
         }
 
-        return $patient->clinic_id !== null && $this->hasClinicMembership($user, $patient->clinic_id);
+        return in_array($context, [
+            AuthenticationContext::ClinicAdmin->value,
+            AuthenticationContext::Receptionist->value,
+        ], true) && $patient->clinic_id !== null
+            && $this->hasClinicMembership($user, $patient->clinic_id);
     }
 
     private function canAccessPractitioner(Request $request, User $practitioner): bool
@@ -172,39 +187,70 @@ final class FhirReadController extends Controller
             return true;
         }
 
-        if ($user->doctorProfile()->where('clinic_id', $clinic->id)->exists()) {
-            return true;
+        $context = (string) $request->attributes->get('actor_context');
+
+        if ($context === AuthenticationContext::Doctor->value) {
+            return $user->hasActiveDoctorAccess()
+                && $user->doctorProfile()->where('clinic_id', $clinic->id)->exists()
+                && $this->hasClinicMembership($user, $clinic->id);
         }
 
-        return $user->patientProfile()->where('clinic_id', $clinic->id)->exists();
+        return $context === AuthenticationContext::Patient->value
+            && $user->patientProfile()->where('clinic_id', $clinic->id)->exists();
     }
 
     private function canAccessAppointment(Request $request, Appointment $appointment): bool
     {
         $user = $request->user();
 
-        if ($user->hasRole(RoleKey::SuperAdmin) || $appointment->doctor_user_id === $user->id) {
+        if ($user->hasRole(RoleKey::SuperAdmin)) {
             return true;
         }
 
         $patient = $appointment->patientProfile()->first();
+        $context = (string) $request->attributes->get('actor_context');
 
-        return ($patient !== null && $this->canAccessPatient($request, $patient))
-            || ($appointment->clinic_id !== null && $this->hasClinicMembership($user, $appointment->clinic_id));
+        if ($context === AuthenticationContext::Doctor->value) {
+            return $appointment->doctor_user_id === $user->id
+                && $patient !== null && $this->canAccessPatient($request, $patient);
+        }
+
+        if ($context === AuthenticationContext::Patient->value) {
+            return $patient !== null && $this->canAccessPatient($request, $patient);
+        }
+
+        return in_array($context, [
+            AuthenticationContext::ClinicAdmin->value,
+            AuthenticationContext::Receptionist->value,
+        ], true) && $appointment->clinic_id !== null
+            && $this->hasClinicMembership($user, $appointment->clinic_id);
     }
 
     private function canAccessEncounter(Request $request, Consultation $encounter): bool
     {
         $user = $request->user();
 
-        if ($user->hasRole(RoleKey::SuperAdmin) || $encounter->doctor_user_id === $user->id) {
+        if ($user->hasRole(RoleKey::SuperAdmin)) {
             return true;
         }
 
         $patient = $encounter->patientProfile()->first();
+        $context = (string) $request->attributes->get('actor_context');
 
-        return ($patient !== null && $this->canAccessPatient($request, $patient))
-            || ($encounter->clinic_id !== null && $this->hasClinicMembership($user, $encounter->clinic_id));
+        if ($context === AuthenticationContext::Doctor->value) {
+            return $encounter->doctor_user_id === $user->id
+                && $patient !== null && $this->canAccessPatient($request, $patient);
+        }
+
+        if ($context === AuthenticationContext::Patient->value) {
+            return $patient !== null && $this->canAccessPatient($request, $patient);
+        }
+
+        return in_array($context, [
+            AuthenticationContext::ClinicAdmin->value,
+            AuthenticationContext::Receptionist->value,
+        ], true) && $encounter->clinic_id !== null
+            && $this->hasClinicMembership($user, $encounter->clinic_id);
     }
 
     private function hasClinicMembership(User $user, int $clinicId): bool
@@ -212,6 +258,8 @@ final class FhirReadController extends Controller
         return $user->clinicMemberships()
             ->where('clinic_id', $clinicId)
             ->where('status', 'active')
+            ->whereHas('clinic', fn ($query) => $query->where('status', 'active'))
+            ->whereHas('clinic.subscriptions', fn ($query) => $query->currentlyActive())
             ->exists();
     }
 
