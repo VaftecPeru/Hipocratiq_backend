@@ -106,6 +106,7 @@ jobs:
         run: php artisan test --no-ansi
 
       - name: Backup and verify isolated restore (synthetic schema)
+        if: success() || failure()
         shell: bash
         run: |
           set -euo pipefail
