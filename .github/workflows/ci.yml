@@ -91,6 +91,29 @@ jobs:
           DB_PASSWORD: root
           DB_URL: ''
 
+      - name: Test Laravel feature suite on PostgreSQL
+        run: php artisan test --no-ansi
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ job.services.postgres.ports[5432] }}
+          DB_DATABASE: back_api
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          DB_URL: ''
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: array
+          SMS_DRIVER: array
+          OTP_PHONE_PROVIDER: local
+          OTP_HASH_KEY: ci-postgres-synthetic-otp-key
+          OTP_FIXED_CODE: '123456'
+          BILLING_DRIVER: simulated
+          BACKUP_SERVICE_ENABLED: 'false'
+          HIPOCRATIQ_UAT_ACCESS_ENABLED: 'false'
+
       - name: Run registration plans performance smoke
         shell: bash
         run: |
