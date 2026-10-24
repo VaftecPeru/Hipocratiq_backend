@@ -14,6 +14,8 @@ SAFE_ACTIONS = {
     ("ec2", "describe-instances"),
     ("ec2", "describe-volumes"),
     ("ec2", "describe-security-group-rules"),
+    ("ec2", "describe-instance-status"),
+    ("ssm", "describe-instance-information"),
 }
 RISK_PORTS = {22, 5432, 6379, 3306, 8000, 8080}
 
@@ -29,10 +31,17 @@ def check(condition, message):
 
 def preflight(env):
     """Called before AWS OIDC assumption; does not make network requests."""
+    check(env.get("GITHUB_REPOSITORY") == "VaftecPeru/Hipocratiq_backend",
+          "Only the approved HIPOCRATIQ repository is authorized.")
     check(env.get("GITHUB_REF") == "refs/heads/develop", "Only develop is authorized.")
     check(env.get("GITHUB_EVENT_NAME") in ("push", "workflow_dispatch"),
           "PRs and unapproved trigger types must never call AWS.")
     check(env.get("UAT_INVENTORY_ENABLED") == "true", "UAT inventory not enabled.")
+    check(env.get("UAT_ACKNOWLEDGEMENT") == "READ_ONLY_UAT_INVENTORY",
+          "Explicit read-only UAT acknowledgement is required.")
+    if env.get("GITHUB_EVENT_NAME") == "push":
+        check(env.get("UAT_PUSH_APPROVED") == "true",
+              "Push-based UAT inventory was not explicitly approved.")
     account = env.get("UAT_AWS_ACCOUNT_ID", "")
     region = env.get("UAT_AWS_REGION", "")
     instance = env.get("UAT_INSTANCE_ID", "")
@@ -130,6 +139,24 @@ def inspect(config, runner=None):
     state = instance.get("State", {}).get("Name", "unknown")
     if state != "running":
         blockers.append("UAT EC2 is not running")
+
+    health = aws_json([
+        "ec2", "describe-instance-status", "--instance-ids", config["instance"],
+        "--include-all-instances",
+    ], config, runner).get("InstanceStatuses", [])
+    if len(health) != 1 or (
+        health[0].get("InstanceStatus", {}).get("Status") != "ok" or
+        health[0].get("SystemStatus", {}).get("Status") != "ok"
+    ):
+        blockers.append("EC2 instance/system status checks are not both OK")
+
+    ssm = aws_json([
+        "ssm", "describe-instance-information", "--filters",
+        "Key=InstanceIds,Values=" + config["instance"],
+    ], config, runner).get("InstanceInformationList", [])
+    if len(ssm) != 1 or ssm[0].get("PingStatus") != "Online":
+        blockers.append("SSM agent is not Online (no remote command was run)")
+
     volume_ids = sorted({
         mapping.get("Ebs", {}).get("VolumeId")
         for mapping in instance.get("BlockDeviceMappings", [])
@@ -168,12 +195,14 @@ def inspect(config, runner=None):
         "verified_uat_role_and_tags": True,
         "verified_separate_instance_and_vpc": True,
         "ec2_state": state,
+        "ec2_system_and_instance_health_checked": True,
+        "ssm_agent_ping_checked": True,
         "checked_ebs_volumes": len(volume_ids),
         "checked_security_groups": len(groups),
         "blockers": blockers,
         "limitations": [
             "Metadata cannot prove Docker, PostgreSQL, Redis, TLS, SMS OTP or restore readiness.",
-            "No SSH, SSM RunCommand, writes, migrations, PHI or production changes.",
+            "SSM DescribeInstanceInformation only; NO SendCommand, Session, SSH or writes.",
             "Clinical HTTPS UAT and customer acceptance must be validated separately.",
         ],
     }
