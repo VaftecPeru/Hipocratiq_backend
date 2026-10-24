@@ -161,6 +161,61 @@ class UatInventoryReadOnlyTests(unittest.TestCase):
                 report = inventory.inspect(inventory.preflight(VALID), runner)
                 self.assertEqual(report["status"], "NO_GO")
 
+    def test_narrow_public_ipv4_and_ipv6_cidrs_are_blocking(self):
+        # The old gate flagged only broad prefixes. A /32 SSH rule still
+        # exposes the host to that public address and must block release.
+        examples = [
+            ("CidrIpv4", "8.8.8.8/32", 22),
+            ("CidrIpv4", "1.1.1.0/24", 5432),
+            ("CidrIpv6", "2606:4700::1111/128", 6379),
+            ("CidrIpv6", "2606:4700::/48", 8000),
+        ]
+        for field, cidr, port in examples:
+            with self.subTest(cidr=cidr, port=port):
+                runner, _ = stub_responses(rules=[{
+                    "IsEgress": False, "IpProtocol": "tcp",
+                    "FromPort": port, "ToPort": port, field: cidr,
+                }])
+                result = inventory.inspect(inventory.preflight(VALID), runner)
+                self.assertEqual(result["status"], "NO_GO")
+                self.assertTrue(any("Public inbound" in x
+                                    for x in result["blockers"]))
+
+    def test_private_ipv4_and_ipv6_sensitive_ingress_is_not_public(self):
+        for field, cidr in [
+            ("CidrIpv4", "10.0.3.0/24"),
+            ("CidrIpv4", "172.16.5.128/25"),
+            ("CidrIpv4", "192.168.1.0/24"),
+            ("CidrIpv6", "fd00:abcd::/64"),
+        ]:
+            with self.subTest(cidr=cidr):
+                runner, _ = stub_responses(rules=[{
+                    "IsEgress": False, "IpProtocol": "tcp",
+                    "FromPort": 22, "ToPort": 22, field: cidr,
+                }])
+                result = inventory.inspect(inventory.preflight(VALID), runner)
+                self.assertEqual(result["status"],
+                                 "INVENTORY_PASS_NOT_RELEASE_APPROVAL")
+
+    def test_narrow_public_https_and_outbound_ssh_are_not_exposure(self):
+        runner, _ = stub_responses(rules=[
+            {"IsEgress": False, "IpProtocol": "tcp",
+             "FromPort": 443, "ToPort": 443, "CidrIpv4": "8.8.8.8/32"},
+            {"IsEgress": True, "IpProtocol": "tcp",
+             "FromPort": 22, "ToPort": 22, "CidrIpv4": "0.0.0.0/0"},
+        ])
+        report = inventory.inspect(inventory.preflight(VALID), runner)
+        self.assertEqual(report["status"],
+                         "INVENTORY_PASS_NOT_RELEASE_APPROVAL")
+
+    def test_malformed_ingress_cidr_is_fail_closed(self):
+        runner, _ = stub_responses(rules=[{
+            "IsEgress": False, "IpProtocol": "tcp",
+            "FromPort": 22, "ToPort": 22, "CidrIpv4": "invalid-cidr",
+        }])
+        with self.assertRaisesRegex(inventory.GateError, "Invalid AWS security group CIDR"):
+            inventory.inspect(inventory.preflight(VALID), runner)
+
     def test_public_https_only_does_not_fail_network_gate(self):
         runner, _ = stub_responses()
         result = inventory.inspect(inventory.preflight(VALID), runner)
