@@ -69,10 +69,16 @@ if ! tr -d '\r' < "$WORK_DIR/allowed-headers.txt" | grep -Fqi "access-control-al
   exit 1
 fi
 cors_preflight "$DENIED_ORIGIN" "$WORK_DIR/denied-headers.txt"
-if grep -qi '^access-control-allow-origin:' "$WORK_DIR/denied-headers.txt"; then
-  origin_header="$(tr -d '\r' < "$WORK_DIR/denied-headers.txt" | grep -i '^access-control-allow-origin:' | head -1)"
-  echo "::error::Unexpected allow-origin header during denied preflight: $origin_header" >&2
+origin_header="$(tr -d '\r' < "$WORK_DIR/denied-headers.txt" | grep -i '^access-control-allow-origin:' | head -1 || true)"
+origin_value="${origin_header#*:}"
+origin_value="${origin_value# }"
+# Laravel can return the *single configured allowed origin* on every preflight.
+# Browsers reject that header when it does not match the request's Origin.
+# What must never happen: wildcard or reflection of the untrusted origin.
+if [[ "$origin_value" == "*" || "$origin_value" == "$DENIED_ORIGIN" ||
+      ( -n "$origin_value" && "$origin_value" != "$FRONT_ORIGIN" ) ]]; then
+  echo "::error::CORS returned an unsafe or unexpected allow-origin" >&2
   exit 1
 fi
-echo "CORS allowlist and untrusted-origin denial: PASS"
+echo "CORS configured origin never reflects an untrusted origin or wildcard: PASS"
 echo "UAT_HTTP_GATE=PASS (isolated loopback HTTP, no external HTTPS, no PHI, no AWS)"
