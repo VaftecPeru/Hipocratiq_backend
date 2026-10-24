@@ -46,9 +46,11 @@ jobs:
   aws-uat-inventory:
     name: Approved AWS UAT instance metadata ONLY
     if: >-
-      github.event_name != 'pull_request' &&
       github.ref == 'refs/heads/develop' &&
-      vars.HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED == 'true'
+      vars.HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      vars.HIPOCRATIQ_AWS_UAT_RUN_ON_DEVELOP_PUSH == 'true'))
     needs: offline-safety
     runs-on: ubuntu-24.04
     timeout-minutes: 12
@@ -58,6 +60,8 @@ jobs:
       id-token: write
     env:
       UAT_INVENTORY_ENABLED: ${{ vars.HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED }}
+      UAT_PUSH_APPROVED: ${{ vars.HIPOCRATIQ_AWS_UAT_RUN_ON_DEVELOP_PUSH }}
+      UAT_ACKNOWLEDGEMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.acknowledgement || vars.HIPOCRATIQ_AWS_UAT_PUSH_ACKNOWLEDGEMENT }}
       UAT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_UAT_AWS_ACCOUNT_ID }}
       UAT_AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
       UAT_INSTANCE_ID: ${{ vars.HIPOCRATIQ_UAT_INSTANCE_ID }}
@@ -88,6 +92,7 @@ jobs:
           role-to-assume: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
           role-session-name: hipocratiqUatInventory
           aws-region: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+          allowed-account-ids: ${{ vars.HIPOCRATIQ_UAT_AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
 
       - name: Inspect ONLY approved UAT EC2, network and EBS metadata
