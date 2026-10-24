@@ -151,6 +151,16 @@ class UatInventoryReadOnlyTests(unittest.TestCase):
         result = inventory.inspect(inventory.preflight(VALID), runner)
         self.assertEqual(result["status"], "NO_GO")
 
+    def test_broad_ipv4_and_ipv6_ranges_are_rejected(self):
+        for cidr, name in [("0.0.0.0/1", "CidrIpv4"), ("2000::/3", "CidrIpv6")]:
+            with self.subTest(cidr=cidr):
+                runner, _ = stub_responses(rules=[{
+                    "IsEgress": False, "IpProtocol": "tcp",
+                    "FromPort": 22, "ToPort": 22, name: cidr,
+                }])
+                report = inventory.inspect(inventory.preflight(VALID), runner)
+                self.assertEqual(report["status"], "NO_GO")
+
     def test_public_https_only_does_not_fail_network_gate(self):
         runner, _ = stub_responses()
         result = inventory.inspect(inventory.preflight(VALID), runner)
