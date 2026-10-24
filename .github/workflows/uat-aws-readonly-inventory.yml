@@ -1,0 +1,109 @@
+name: UAT AWS Inventory (read-only, opt-in)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-aws-readonly-inventory.yml
+      - scripts/uat_aws_inventory_readonly.py
+      - tests/Scripts/test_uat_aws_inventory_readonly.py
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-aws-readonly-inventory.yml
+      - scripts/uat_aws_inventory_readonly.py
+      - tests/Scripts/test_uat_aws_inventory_readonly.py
+  workflow_dispatch:
+    inputs:
+      acknowledgement:
+        description: Type READ_ONLY_UAT_INVENTORY
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hipocratiq-uat-aws-readonly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  offline-safety:
+    name: Safety guards (mock AWS only, no credentials)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Python syntax
+        run: python3 -m py_compile scripts/uat_aws_inventory_readonly.py tests/Scripts/test_uat_aws_inventory_readonly.py
+      - name: Simulate IAM, EC2, VPC, EBS and security group scenarios
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_uat_aws_inventory_readonly.py' -v
+      - name: Scope
+        run: |
+          echo "Offline safety passed; no AWS credentials requested or AWS API called."
+          echo "Real UAT inventory is OFF by default and isolated from PRs."
+
+  aws-uat-inventory:
+    name: Approved AWS UAT instance metadata ONLY
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/develop' &&
+      vars.HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED == 'true'
+    needs: offline-safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: hipocratiq-uat-readonly
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      UAT_INVENTORY_ENABLED: ${{ vars.HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED }}
+      UAT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_UAT_AWS_ACCOUNT_ID }}
+      UAT_AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+      UAT_INSTANCE_ID: ${{ vars.HIPOCRATIQ_UAT_INSTANCE_ID }}
+      PROD_INSTANCE_ID: ${{ vars.HIPOCRATIQ_PROD_INSTANCE_ID }}
+      UAT_VPC_ID: ${{ vars.HIPOCRATIQ_UAT_VPC_ID }}
+      PROD_VPC_ID: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }}
+      UAT_READONLY_ROLE_ARN: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
+      MANUAL_ACKNOWLEDGEMENT: ${{ inputs.acknowledgement }}
+
+    steps:
+      - name: Checkout Backend develop only
+        uses: actions/checkout@v4
+
+      - name: Enforce fail-closed target, account, role and approval BEFORE AWS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" &&
+                "$MANUAL_ACKNOWLEDGEMENT" != "READ_ONLY_UAT_INVENTORY" ]]; then
+            echo "::error::Read-only acknowledgement is required"
+            exit 1
+          fi
+          python3 scripts/uat_aws_inventory_readonly.py --preflight
+
+      - name: Assume UAT read-only AWS role using short-lived OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
+          role-session-name: hipocratiqUatInventory
+          aws-region: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Inspect ONLY approved UAT EC2, network and EBS metadata
+        shell: bash
+        env:
+          UAT_REPORT_PATH: ${{ runner.temp }}/hipocratiq-uat-aws-readonly.json
+        run: |
+          set -Eeuo pipefail
+          command -v aws >/dev/null || { echo "::error::AWS CLI unavailable"; exit 1; }
+          python3 scripts/uat_aws_inventory_readonly.py
+
+      - name: Save redacted UAT inventory evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-uat-aws-readonly-metadata
+          path: ${{ runner.temp }}/hipocratiq-uat-aws-readonly.json
+          if-no-files-found: ignore
+          retention-days: 7
