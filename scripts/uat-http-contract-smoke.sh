@@ -70,7 +70,8 @@ if ! tr -d '\r' < "$WORK_DIR/allowed-headers.txt" | grep -Fqi "access-control-al
 fi
 cors_preflight "$DENIED_ORIGIN" "$WORK_DIR/denied-headers.txt"
 if grep -qi '^access-control-allow-origin:' "$WORK_DIR/denied-headers.txt"; then
-  echo "::error::Unexpected Access-Control-Allow-Origin for unauthorized site" >&2
+  origin_header="$(tr -d '\r' < "$WORK_DIR/denied-headers.txt" | grep -i '^access-control-allow-origin:' | head -1)"
+  echo "::error::Unexpected allow-origin header during denied preflight: $origin_header" >&2
   exit 1
 fi
 echo "CORS allowlist and untrusted-origin denial: PASS"
