@@ -9,8 +9,12 @@ fail() {
 
 [[ "$GITHUB_REPOSITORY" == "VaftecPeru/Hipocratiq_backend" ]] ||
   fail "Unexpected repository"
-[[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] ||
-  fail "Only explicit manual workflow_dispatch is permitted"
+[[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" || "$GITHUB_EVENT_NAME" == "push" ]] ||
+  fail "Only manual dispatch or an explicitly approved develop push is permitted"
+if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+  [[ "${UAT_PUSH_APPROVED:-}" == "true" ]] ||
+    fail "Read-only push inspection was not expressly approved"
+fi
 [[ "$GITHUB_REF" == "refs/heads/develop" ]] ||
   fail "Only the reviewed develop branch can access the AWS inventory gate"
 [[ "${UAT_READONLY_ENABLED:-}" == "true" ]] ||
