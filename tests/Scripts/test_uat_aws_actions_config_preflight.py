@@ -33,6 +33,8 @@ class OfflineUatReadinessTests(unittest.TestCase):
         self.assertEqual(report["aws_api_requests"], 0)
         self.assertFalse(report["cloud_resources_verified"])
         self.assertFalse(report["actual_oidc_assumption_verified"])
+        self.assertEqual(report["visibility_scope"], "workflow_without_github_environment")
+        self.assertIn("may exist in GitHub Environment scope", report["visibility_warning"])
 
     def test_syntactically_valid_configuration_does_not_claim_aws_success(self):
         report = uat_config.check_variables(SAFE)
@@ -93,6 +95,7 @@ class OfflineUatReadinessTests(unittest.TestCase):
                             "sensitive-secret-test-sentinel"):
                 self.assertNotIn(private, data)
                 self.assertNotIn(private, summary)
+            self.assertIn("This offline job has no GitHub Environment", summary)
 
 
 if __name__ == "__main__":
