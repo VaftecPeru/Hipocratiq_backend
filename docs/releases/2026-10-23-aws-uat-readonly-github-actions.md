@@ -7,7 +7,7 @@
 - En un PR a develop, ejecuta exclusivamente pruebas de seguridad Python sin credenciales ni acceso a AWS. Los servicios AWS se simulan con respuestas ficticias.
 - Un segundo job puede consultar metadatos reales si el administrador habilita explícitamente UAT_INVENTORY_ENABLED y configura las variables GitHub de la siguiente sección. Se ejecuta sólo al recibir un push a develop o un despacho manual aprobado; nunca desde pull_request.
 - Adquiere un token GitHub OIDC temporal y asume un rol AWS exclusivo de UAT.
-- Ejecuta únicamente STS GetCallerIdentity y EC2 DescribeInstances, DescribeVolumes, DescribeSecurityGroupRules. No realiza SSH, SSM, cambios EC2, Docker, migraciones, lecturas SQL, OTP, SMS, despliegues o manejo de datos clínicos.
+- Ejecuta únicamente STS GetCallerIdentity; EC2 DescribeInstances, DescribeInstanceStatus, DescribeVolumes y DescribeSecurityGroupRules; SSM DescribeInstanceInformation (sólo ping del agente). No realiza SSH, SSM, cambios EC2, Docker, migraciones, lecturas SQL, OTP, SMS, despliegues o manejo de datos clínicos.
 - Bloquea si EC2 o VPC UAT son iguales a producción, si la etiqueta Environment no es UAT/QA/staging, si Project no es HIPOCRATIQ, si hay EBS sin cifrado o si hay puertos peligrosos abiertos a Internet.
 - Publica un JSON no clínico en GitHub Actions Artifacts con retención de 7 días.
 
@@ -18,13 +18,15 @@ El inventario es seguro **sólo** si IAM también limita al rol a las consultas 
 1. Identificar o provisionar EC2 y VPC UAT **independientes** de producción. No usar una carpeta QA dentro de la instancia productiva como sustituto de aislamiento de infraestructura.
 2. Etiquetar EC2 con Environment=uat y Project=HIPOCRATIQ. Identificar los IDs de EC2/VPC UAT y producción.
 3. Crear el rol AWS HIPOCRATIQ-UAT-ReadOnly y asociarlo a GitHub OIDC. Audiencia esperada: sts.amazonaws.com. Subject de confianza EXACTO: repo:VaftecPeru/Hipocratiq_backend:environment:hipocratiq-uat-readonly.
-4. Otorgar solamente ec2:DescribeInstances, ec2:DescribeVolumes, ec2:DescribeSecurityGroupRules y sts:GetCallerIdentity. No conceder ec2:*, iam:*, ssm:SendCommand, SMS ni permisos de escritura.
+4. Otorgar solamente ec2:DescribeInstances, ec2:DescribeInstanceStatus, ec2:DescribeVolumes, ec2:DescribeSecurityGroupRules, ssm:DescribeInstanceInformation y sts:GetCallerIdentity. No conceder ec2:*, iam:*, ssm:SendCommand, SMS ni permisos de escritura.
 5. En GitHub Backend, Settings > Environments, crear hipocratiq-uat-readonly. Configurar revisores obligatorios y restringir ramas a develop. El campo environment en YAML por sí solo NO crea una política de revisiones.
 6. En Settings > Secrets and variables > Actions > Variables, configurar:
 
 | Variable | Descripción |
 |---|---|
 | HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED | false por defecto; true únicamente tras aprobar UAT/IAM |
+| HIPOCRATIQ_AWS_UAT_RUN_ON_DEVELOP_PUSH | false por defecto; true sólo para un push autorizado a develop |
+| HIPOCRATIQ_AWS_UAT_PUSH_ACKNOWLEDGEMENT | READ_ONLY_UAT_INVENTORY (para push habilitado; en dispatch se introduce manualmente) |
 | HIPOCRATIQ_UAT_AWS_ACCOUNT_ID | Cuenta AWS UAT de 12 dígitos |
 | HIPOCRATIQ_UAT_AWS_REGION | Región EC2 UAT, p.ej. us-east-2 |
 | HIPOCRATIQ_UAT_READONLY_ROLE_ARN | ARN IAM del rol dedicado HIPOCRATIQ-UAT-ReadOnly |
@@ -37,7 +39,7 @@ No almacenar llaves de AWS, OTP, credenciales de BD, tokens, teléfonos ni datos
 
 ## Disparadores y main protegida por decisión del proyecto
 
-La suite OFFLINE funciona en pull_request y push hacia develop. El inventario AWS solo se activa con bandera true, identity AWS UAT y el Environment autorizado.
+La suite OFFLINE funciona en pull_request y push hacia develop. El inventario AWS solo se activa con ambas banderas administrativas true, reconocimiento READ_ONLY_UAT_INVENTORY, identidad AWS UAT y el Environment autorizado. Nunca se ejecuta en pull_request.
 
 GitHub generalmente exige que un workflow con workflow_dispatch exista en la rama predeterminada para mostrar Run workflow. Como main NO puede modificarse en este momento, no se debe prometer disparar manualmente el inventario desde la UI. El disparador compatible sin tocar main es push a develop, exclusivamente con la bandera habilitada y aprobación Environment.
 
