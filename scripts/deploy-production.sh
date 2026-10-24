@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+# Clinical records: newly created backups must never be world-readable.
+umask 077
 
 PRODUCTION_DIR="${PRODUCTION_DIR:-/srv/hipocratiq/backend}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-}"
@@ -7,6 +9,22 @@ HEALTH_URL="${HEALTH_URL:-https://hipocratiq.com/backend/api/health/ready}"
 LOCK_FILE="${LOCK_FILE:-/tmp/hipocratiq-backend-deploy.lock}"
 BACKUP_ROOT="${BACKUP_ROOT:-/srv/hipocratiq/backups/predeploy}"
 TARGET_BRANCH="main"
+
+# Explicit release checks BEFORE any git fetch, migration, backup, or Docker writes.
+RELEASE_APPROVAL="${RELEASE_APPROVAL:-}"
+RELEASE_APPROVED_SHA="${RELEASE_APPROVED_SHA:-}"
+RELEASE_CHANGE_ID="${RELEASE_CHANGE_ID:-}"
+UAT_RESTORE_EVIDENCE="${UAT_RESTORE_EVIDENCE:-}"
+BACKUP_AT_REST_VERIFIED="${BACKUP_AT_REST_VERIFIED:-}"
+
+if [[ "$RELEASE_APPROVAL" != "APPROVED_FOR_PRODUCTION" ||
+      ! "$RELEASE_APPROVED_SHA" =~ ^[0-9a-f]{40}$ ||
+      -z "$RELEASE_CHANGE_ID" ||
+      -z "$UAT_RESTORE_EVIDENCE" ||
+      "$BACKUP_AT_REST_VERIFIED" != "true" ]]; then
+  echo "ERROR NO-GO: release requires signed-off SHA, change ID, UAT restore evidence, and backup encryption attestation." >&2
+  exit 1
+fi
 
 for command in git docker curl flock awk mkdir sha256sum; do
   command -v "$command" >/dev/null 2>&1 || {
@@ -98,7 +116,7 @@ rollback_code() {
   if [[ -n "$BACKUP_PATH" ]]; then
     echo "BACKUP PRE-DEPLOY DISPONIBLE: $BACKUP_PATH"
     echo "SHA-256: $BACKUP_SHA256"
-    echo "La base de datos NO se restaura automáticamente."
+    echo "La base de datos NO se restaura automáticamente. Una migración aplicada NO se revierte con rollback de código."
   fi
 }
 
@@ -137,6 +155,11 @@ fi
 git fetch --prune origin "$TARGET_BRANCH"
 TARGET_SHA="$(git rev-parse "origin/$TARGET_BRANCH")"
 
+if [[ "$TARGET_SHA" != "$RELEASE_APPROVED_SHA" ]]; then
+  echo "ERROR NO-GO: origin/main SHA differs from approved release SHA." >&2
+  exit 1
+fi
+
 if ! git merge-base --is-ancestor "$OLD_SHA" "$TARGET_SHA"; then
   echo "ERROR: origin/main no es fast-forward respecto al estado productivo actual." >&2
   exit 1
@@ -145,9 +168,22 @@ fi
 echo "Destino: $TARGET_SHA"
 
 echo "Creando respaldo PostgreSQL previo independiente de Laravel..."
-mkdir -p "$BACKUP_ROOT"
+if [[ -L "$BACKUP_ROOT" ]]; then
+  echo "ERROR: backup directory cannot be a symbolic link." >&2
+  exit 1
+fi
+mkdir -p -m 700 "$BACKUP_ROOT"
+chmod 700 "$BACKUP_ROOT"
+if [[ ! -d "$BACKUP_ROOT" || ! -w "$BACKUP_ROOT" ]]; then
+  echo "ERROR: dedicated backup directory is not writable." >&2
+  exit 1
+fi
 BACKUP_ID="$(date -u +%Y%m%dT%H%M%SZ)-${OLD_SHA:0:12}"
 BACKUP_PATH="$BACKUP_ROOT/$BACKUP_ID.dump"
+if [[ -e "$BACKUP_PATH" || -L "$BACKUP_PATH" ]]; then
+  echo "ERROR: predeploy backup path already exists, refusing overwrite." >&2
+  exit 1
+fi
 
 DB_USER_RUNTIME="$(docker exec "$APP_CONTAINER" sh -lc 'printf %s "$DB_USERNAME"')"
 DB_NAME_RUNTIME="$(docker exec "$APP_CONTAINER" sh -lc 'printf %s "$DB_DATABASE"')"
@@ -169,6 +205,7 @@ docker exec -e PGPASSWORD="$DB_PASSWORD_RUNTIME" "$POSTGRES_CONTAINER" \
 
 unset DB_PASSWORD_RUNTIME
 
+chmod 600 "$BACKUP_PATH"
 if [[ ! -s "$BACKUP_PATH" ]]; then
   echo "ERROR: el respaldo PostgreSQL quedó vacío." >&2
   exit 1
