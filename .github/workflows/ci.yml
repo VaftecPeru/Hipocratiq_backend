@@ -142,7 +142,13 @@ jobs:
           bash scripts/performance-smoke.sh
 
       - name: Validate production deploy script
-        run: bash -n scripts/deploy-production.sh
+        run: |
+          bash -n scripts/deploy-production.sh
+          bash -n scripts/test-deploy-preflight-failclosed.sh
+
+      - name: Verify production deploy fails closed before side effects
+        shell: bash
+        run: bash scripts/test-deploy-preflight-failclosed.sh
 
       - name: Validate Docker Compose runtime
         run: docker compose config --quiet
