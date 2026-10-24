@@ -1,0 +1,90 @@
+name: UAT AWS EC2/SSM inventory (read-only)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-aws-inventory-readonly.yml
+      - scripts/uat-aws-readonly-*.sh
+      - scripts/tests/uat-aws-readonly-preflight.test.sh
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-aws-inventory-readonly.yml
+      - scripts/uat-aws-readonly-*.sh
+      - scripts/tests/uat-aws-readonly-preflight.test.sh
+  workflow_dispatch:
+    inputs:
+      acknowledgement:
+        description: "Type INVENTORY_ONLY_NO_PRODUCTION"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hipocratiq-uat-aws-inventory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-guard:
+    if: github.event_name == 'pull_request'
+    name: Offline guard checks (synthetic, no AWS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate read-only scripts
+        shell: bash
+        run: |
+          bash -n scripts/uat-aws-readonly-preflight.sh
+          bash -n scripts/uat-aws-readonly-inventory.sh
+          bash -n scripts/tests/uat-aws-readonly-preflight.test.sh
+          bash scripts/tests/uat-aws-readonly-preflight.test.sh
+
+  inventory:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && vars.HIPOCRATIQ_UAT_AWS_RUN_ON_DEVELOP_PUSH == 'true')
+    name: EC2 and SSM control plane / no remote commands
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: uat-readonly
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      UAT_READONLY_ENABLED: ${{ vars.HIPOCRATIQ_UAT_AWS_INVENTORY_ENABLED }}
+      UAT_PUSH_APPROVED: ${{ vars.HIPOCRATIQ_UAT_AWS_RUN_ON_DEVELOP_PUSH }}
+      UAT_ACKNOWLEDGEMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.acknowledgement || vars.HIPOCRATIQ_UAT_AWS_PUSH_ACKNOWLEDGEMENT }}
+      UAT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_UAT_AWS_ACCOUNT_ID }}
+      UAT_AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+      UAT_EC2_INSTANCE_ID: ${{ vars.HIPOCRATIQ_UAT_EC2_INSTANCE_ID }}
+      UAT_OIDC_ROLE_ARN: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
+    steps:
+      - name: Check out reviewed Backend branch
+        uses: actions/checkout@v4
+
+      - name: Fail closed before obtaining AWS credentials
+        shell: bash
+        run: bash scripts/uat-aws-readonly-preflight.sh
+
+      - name: Configure short-lived AWS OIDC credentials (approved account only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+          role-to-assume: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.HIPOCRATIQ_UAT_AWS_ACCOUNT_ID }}
+          role-session-name: HipocratiqUatInventory${{ github.run_id }}
+          mask-aws-account-id: true
+
+      - name: EC2 + SSM read-only inventory; never SSH or SendCommand
+        shell: bash
+        run: bash scripts/uat-aws-readonly-inventory.sh
+
+      - name: Declare release boundary
+        if: success()
+        run: |
+          echo "Control-plane EC2 and SSM inspection only; no EC2 shell, no DB, no SMS, no deployment."
+          echo "HTTPS clinical UAT, isolation and data recovery remain separate NO-GO controls."
