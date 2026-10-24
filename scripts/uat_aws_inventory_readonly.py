@@ -18,6 +18,14 @@ SAFE_ACTIONS = {
     ("ssm", "describe-instance-information"),
 }
 RISK_PORTS = {22, 5432, 6379, 3306, 8000, 8080}
+# Treat ANY ingress CIDR outside these strictly private/non-routable ranges as
+# potentially Internet reachable, including /32 IPv4 and /128 IPv6 rules.
+# Security groups cannot safely assume that a narrow public CIDR is harmless.
+NONPUBLIC_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "127.0.0.0/8", "169.254.0.0/16",
+    "::1/128", "fc00::/7", "fe80::/10",
+))
 
 
 class GateError(Exception):
@@ -91,10 +99,16 @@ def public_sensitive_port(rule):
         return False
     try:
         public = any(
-            (lambda net: net.prefixlen <= (8 if net.version == 4 else 32))(
-                ipaddress.ip_network(cidr, strict=False)
+            not any(
+                network.subnet_of(private)
+                for private in NONPUBLIC_NETWORKS
+                if network.version == private.version
             )
-            for cidr in (rule.get("CidrIpv4"), rule.get("CidrIpv6")) if cidr
+            for network in (
+                ipaddress.ip_network(cidr, strict=False)
+                for cidr in (rule.get("CidrIpv4"), rule.get("CidrIpv6"))
+                if cidr
+            )
         )
     except ValueError:
         raise GateError("Invalid AWS security group CIDR.") from None
