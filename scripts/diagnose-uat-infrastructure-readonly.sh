@@ -6,6 +6,7 @@ set -uo pipefail
 
 if [[ "${1:-}" == "--help" ]]; then
   cat <<'HELP'
+READ-ONLY INVENTORY — metadata only; no infrastructure mutations.
 Usage: bash scripts/diagnose-uat-infrastructure-readonly.sh
 Optional overrides:
   HIPOCRATIQ_QA_BACKEND  /srv/hipocratiq/qa-20261013/backend-b109
