@@ -7,12 +7,16 @@ on:
       - .github/workflows/uat-aws-readonly-inventory.yml
       - scripts/uat_aws_inventory_readonly.py
       - tests/Scripts/test_uat_aws_inventory_readonly.py
+      - tests/Scripts/test_uat_oidc_readonly_role.py
+      - infra/aws/uat-readonly-oidc-role.json
   push:
     branches: [develop]
     paths:
       - .github/workflows/uat-aws-readonly-inventory.yml
       - scripts/uat_aws_inventory_readonly.py
       - tests/Scripts/test_uat_aws_inventory_readonly.py
+      - tests/Scripts/test_uat_oidc_readonly_role.py
+      - infra/aws/uat-readonly-oidc-role.json
   workflow_dispatch:
     inputs:
       acknowledgement:
@@ -35,12 +39,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify Python syntax
-        run: python3 -m py_compile scripts/uat_aws_inventory_readonly.py tests/Scripts/test_uat_aws_inventory_readonly.py
+        run: python3 -m py_compile scripts/uat_aws_inventory_readonly.py tests/Scripts/test_uat_aws_inventory_readonly.py tests/Scripts/test_uat_oidc_readonly_role.py
       - name: Simulate IAM, EC2, VPC, EBS and security group scenarios
-        run: python3 -m unittest discover -s tests/Scripts -p 'test_uat_aws_inventory_readonly.py' -v
+        run: |
+          python3 -m unittest discover -s tests/Scripts -p 'test_uat_aws_inventory_readonly.py' -v
+          python3 -m unittest discover -s tests/Scripts -p 'test_uat_oidc_readonly_role.py' -v
       - name: Scope
         run: |
-          echo "Offline safety passed; no AWS credentials requested or AWS API called."
+          echo "Offline IAM trust and policy guards passed; no AWS credentials requested or AWS API called."
           echo "Real UAT inventory is OFF by default and isolated from PRs."
 
   aws-uat-inventory:
