@@ -13,9 +13,12 @@ inventory = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(inventory)
 
 VALID = {
+    "GITHUB_REPOSITORY": "VaftecPeru/Hipocratiq_backend",
     "GITHUB_REF": "refs/heads/develop",
     "GITHUB_EVENT_NAME": "push",
     "UAT_INVENTORY_ENABLED": "true",
+    "UAT_ACKNOWLEDGEMENT": "READ_ONLY_UAT_INVENTORY",
+    "UAT_PUSH_APPROVED": "true",
     "UAT_AWS_ACCOUNT_ID": "123456789012",
     "UAT_AWS_REGION": "us-east-2",
     "UAT_INSTANCE_ID": "i-0123456789abcdef0",
@@ -39,7 +42,8 @@ INSTANCE = {
 }
 
 
-def stub_responses(instance=None, volumes=None, rules=None, identity=None):
+def stub_responses(instance=None, volumes=None, rules=None, identity=None,
+                   ec2_health=None, ssm_ping=None):
     payloads = {
         ("sts", "get-caller-identity"):
             identity or {
@@ -57,6 +61,14 @@ def stub_responses(instance=None, volumes=None, rules=None, identity=None):
             {"SecurityGroupRules": rules if rules is not None else [
                 {"IsEgress": False, "IpProtocol": "tcp", "FromPort": 443,
                  "ToPort": 443, "CidrIpv4": "0.0.0.0/0"}
+            ]},
+        ("ec2", "describe-instance-status"):
+            {"InstanceStatuses": ec2_health if ec2_health is not None else [
+                {"InstanceStatus": {"Status": "ok"}, "SystemStatus": {"Status": "ok"}}
+            ]},
+        ("ssm", "describe-instance-information"):
+            {"InstanceInformationList": ssm_ping if ssm_ping is not None else [
+                {"PingStatus": "Online"}
             ]},
     }
     seen = []
@@ -82,6 +94,9 @@ class UatInventoryReadOnlyTests(unittest.TestCase):
         for field, invalid in [
             ("UAT_INVENTORY_ENABLED", ""),
             ("GITHUB_REF", "refs/heads/main"),
+            ("GITHUB_REPOSITORY", "Untrusted/other"),
+            ("UAT_ACKNOWLEDGEMENT", ""),
+            ("UAT_PUSH_APPROVED", "false"),
             ("GITHUB_EVENT_NAME", "pull_request"),
             ("UAT_READONLY_ROLE_ARN", "arn:aws:iam::123456789012:role/Admin"),
             ("UAT_AWS_ACCOUNT_ID", "999"),
@@ -97,7 +112,7 @@ class UatInventoryReadOnlyTests(unittest.TestCase):
         runner, seen = stub_responses()
         result = inventory.inspect(inventory.preflight(VALID), runner)
         self.assertEqual(result["status"], "INVENTORY_PASS_NOT_RELEASE_APPROVAL")
-        self.assertEqual(len(seen), 4)
+        self.assertEqual(len(seen), 6)
         self.assertEqual({tuple(cmd[1:3]) for cmd in seen}, inventory.SAFE_ACTIONS)
         self.assertTrue(all("--no-cli-pager" in command for command in seen))
 
@@ -148,6 +163,22 @@ class UatInventoryReadOnlyTests(unittest.TestCase):
         result = inventory.inspect(inventory.preflight(VALID), runner)
         self.assertEqual(result["status"], "NO_GO")
         self.assertTrue(any("encrypted" in x for x in result["blockers"]))
+
+    def test_unhealthy_ec2_status_check_is_blocking(self):
+        runner, _ = stub_responses(ec2_health=[
+            {"InstanceStatus": {"Status": "impaired"},
+             "SystemStatus": {"Status": "ok"}}
+        ])
+        report = inventory.inspect(inventory.preflight(VALID), runner)
+        self.assertEqual(report["status"], "NO_GO")
+        self.assertTrue(any("status checks" in x for x in report["blockers"]))
+
+    def test_ssm_agent_offline_is_blocking_without_remote_execution(self):
+        runner, seen = stub_responses(ssm_ping=[{"PingStatus": "Offline"}])
+        report = inventory.inspect(inventory.preflight(VALID), runner)
+        self.assertEqual(report["status"], "NO_GO")
+        self.assertTrue(any("SSM agent" in x for x in report["blockers"]))
+        self.assertFalse(any("send-command" in " ".join(cmd) for cmd in seen))
 
     def test_allowlist_blocks_mutative_aws_calls_before_subprocess(self):
         with self.assertRaisesRegex(inventory.GateError, "allowlist"):
