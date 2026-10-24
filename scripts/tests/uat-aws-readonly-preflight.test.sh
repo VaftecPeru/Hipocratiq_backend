@@ -21,6 +21,12 @@ if ! env -i PATH="$PATH" "${BASE[@]}" bash "$GUARD" >/dev/null; then
 fi
 echo "Valid synthetic preflight: PASS"
 
+if ! env -i PATH="$PATH" "${BASE[@]}" GITHUB_EVENT_NAME=push UAT_PUSH_APPROVED=true bash "$GUARD" >/dev/null; then
+  echo "::error::Explicitly approved synthetic develop push was unexpectedly denied" >&2
+  exit 1
+fi
+echo "Explicitly approved synthetic push preflight: PASS"
+
 deny() {
   local scenario="$1"
   shift
@@ -34,6 +40,7 @@ deny() {
 deny "production branch" GITHUB_REF=refs/heads/main
 deny "wrong repository" GITHUB_REPOSITORY=VaftecPeru/unrelated
 deny "PR event" GITHUB_EVENT_NAME=pull_request
+deny "unapproved develop push" GITHUB_EVENT_NAME=push UAT_PUSH_APPROVED=false
 deny "disabled feature" UAT_READONLY_ENABLED=false
 deny "missing acknowledgment" UAT_ACKNOWLEDGEMENT=
 deny "unapproved AWS region" UAT_AWS_REGION=not-a-region
