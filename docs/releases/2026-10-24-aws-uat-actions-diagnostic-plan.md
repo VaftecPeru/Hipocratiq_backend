@@ -76,7 +76,7 @@ El script AWS solo ejecuta `sts:GetCallerIdentity`, `ec2:DescribeInstances`, `ec
 La ejecución [#40143761463](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40143761463)
 terminó el diagnóstico **SUCCESS**, pero el artifact
 `hipocratiq-aws-uat-config-offline-only` indica
-`BLOCKED_NO_AWS_DIAGNOSTIC`: **8/8 variables exigidas están ausentes**:
+`BLOCKED_NO_AWS_DIAGNOSTIC`: **8/8 variables no son visibles en el contexto del job offline**:
 
 - `HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED`
 - `HIPOCRATIQ_UAT_AWS_ACCOUNT_ID`
@@ -88,6 +88,11 @@ terminó el diagnóstico **SUCCESS**, pero el artifact
 - `HIPOCRATIQ_UAT_READONLY_ROLE_ARN`
 
 Estos campos deben proceder **únicamente de un inventario verificado y autorizado por el administrador**.
+El job offline **no selecciona un GitHub Environment**. Si estas variables se
+configuraron exclusivamente dentro del Environment, no serán visibles aquí:
+el reporte no prueba su inexistencia global. Deben confirmarse con la cuenta
+administradora y, una vez autorizado, mediante el job AWS real.
+
 El artifact no demuestra que un rol IAM, EC2, VPC, OIDC ni GitHub Environment
 exista. No completar variables con IDs inventados ni obtenidos de datos de producción.
 `HIPOCRATIQ_AWS_UAT_RUN_ON_DEVELOP_PUSH` debe conservarse `false` por defecto.
