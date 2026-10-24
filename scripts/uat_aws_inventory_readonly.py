@@ -91,7 +91,9 @@ def public_sensitive_port(rule):
         return False
     try:
         public = any(
-            ipaddress.ip_network(cidr, strict=False).prefixlen == 0
+            (lambda net: net.prefixlen <= (8 if net.version == 4 else 32))(
+                ipaddress.ip_network(cidr, strict=False)
+            )
             for cidr in (rule.get("CidrIpv4"), rule.get("CidrIpv6")) if cidr
         )
     except ValueError:
@@ -193,7 +195,8 @@ def inspect(config, runner=None):
         "instance_id": config["instance"],
         "verified_aws_account": True,
         "verified_uat_role_and_tags": True,
-        "verified_separate_instance_and_vpc": True,
+        "approved_uat_ids_differ_from_declared_production_ids": True,
+        "isolation_caveat": "Production IDs were administrator-supplied, not queried; separation requires independent verification.",
         "ec2_state": state,
         "ec2_system_and_instance_health_checked": True,
         "ssm_agent_ping_checked": True,
@@ -202,6 +205,7 @@ def inspect(config, runner=None):
         "blockers": blockers,
         "limitations": [
             "Metadata cannot prove Docker, PostgreSQL, Redis, TLS, SMS OTP or restore readiness.",
+            "The declared production exclusion IDs were not independently verified.",
             "SSM DescribeInstanceInformation only; NO SendCommand, Session, SSH or writes.",
             "Clinical HTTPS UAT and customer acceptance must be validated separately.",
         ],
