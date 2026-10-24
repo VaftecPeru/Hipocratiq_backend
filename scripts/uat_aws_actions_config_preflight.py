@@ -93,6 +93,12 @@ def check_variables(env):
         "cloud_resources_verified": False,
         "actual_oidc_assumption_verified": False,
         "configuration_checks": checks,
+        "visibility_scope": "workflow_without_github_environment",
+        "visibility_warning": (
+            "An absent variable is not visible to this offline job; "
+            "it may exist in GitHub Environment scope. "
+            "This result cannot establish AWS/GitHub admin configuration."
+        ),
         "blocker_codes": blockers,
         "manual_preconditions_unverified": MANUAL_STEPS,
     }
@@ -118,7 +124,8 @@ def report_no_sensitive_values(report, env):
                 f.write("\nUnmet prerequisites:\n")
                 for blocker in report["blocker_codes"]:
                     f.write("- " + blocker + "\n")
-            f.write("\n**Unverified:** GitHub Environment approvals, OIDC trust, actual resource IDs and live EC2/VPC.\n")
+            f.write("\n**Scope:** This offline job has no GitHub Environment; an absent variable may be Environment-scoped.\n")
+            f.write("**Unverified:** GitHub Environment approvals, OIDC trust, actual resource IDs and live EC2/VPC.\n")
 
 
 def main():
