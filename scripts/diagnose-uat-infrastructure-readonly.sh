@@ -4,7 +4,7 @@
 # No network calls, Git fetch, Docker exec/start, SMS, migrations or filesystem writes.
 set -uo pipefail
 
-if [[ "\${1:-}" == "--help" ]]; then
+if [[ "${1:-}" == "--help" ]]; then
   cat <<'HELP'
 Usage: bash scripts/diagnose-uat-infrastructure-readonly.sh
 Optional overrides:
@@ -27,11 +27,11 @@ if [[ "$#" -ne 0 ]]; then
   exit 2
 fi
 
-qa_backend="\${HIPOCRATIQ_QA_BACKEND:-/srv/hipocratiq/qa-20261013/backend-b109}"
-qa_frontend="\${HIPOCRATIQ_QA_FRONTEND:-/srv/hipocratiq/qa-20261016/frontend-b108}"
-qa_pg="\${HIPOCRATIQ_QA_PG:-hipocratiq-b109-postgres}"
-qa_network="\${HIPOCRATIQ_QA_NETWORK:-hipocratiq-b109-net}"
-qa_env="\${HIPOCRATIQ_QA_ENV_FILE:-/tmp/hipocratiq-b109.env}"
+qa_backend="${HIPOCRATIQ_QA_BACKEND:-/srv/hipocratiq/qa-20261013/backend-b109}"
+qa_frontend="${HIPOCRATIQ_QA_FRONTEND:-/srv/hipocratiq/qa-20261016/frontend-b108}"
+qa_pg="${HIPOCRATIQ_QA_PG:-hipocratiq-b109-postgres}"
+qa_network="${HIPOCRATIQ_QA_NETWORK:-hipocratiq-b109-net}"
+qa_env="${HIPOCRATIQ_QA_ENV_FILE:-/tmp/hipocratiq-b109.env}"
 
 blockers=0
 warnings=0
@@ -62,8 +62,8 @@ safe_qa_checkout() {
 
 printf '\n=== 1. QA checkouts (Git HEAD only; no fetch or checkout) ===\n'
 for entry in "Backend|$qa_backend" "Frontend|$qa_frontend"; do
-  label="\${entry%%|*}"
-  path="\${entry#*|}"
+  label="${entry%%|*}"
+  path="${entry#*|}"
   if ! safe_qa_checkout "$path"; then
     block "$label: QA path missing, outside allowlist or points at production; cannot inspect."
     continue
@@ -75,7 +75,7 @@ for entry in "Backend|$qa_backend" "Frontend|$qa_frontend"; do
   sha="$(git -C "$path" rev-parse --verify HEAD 2>/dev/null)" || sha=""
   branch="$(git -C "$path" branch --show-current 2>/dev/null)" || branch=""
   if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-    ok "$label checkout present, commit $sha, branch \${branch:-detached}."
+    ok "$label checkout present, commit $sha, branch ${branch:-detached}."
   else
     block "$label checkout exists but HEAD could not be verified."
   fi
@@ -153,7 +153,7 @@ else
     block "Network target name is not explicitly QA/UAT."
   elif docker network inspect "$qa_network" >/dev/null 2>&1; then
     members="$(docker network inspect --format '{{range .Containers}}{{.Name}} {{end}}' "$qa_network" 2>/dev/null)" || members=""
-    printf 'QA_NETWORK | %s | members: %s\n' "$qa_network" "\${members:-none}"
+    printf 'QA_NETWORK | %s | members: %s\n' "$qa_network" "${members:-none}"
     contaminated=0
     for member in $members; do
       if [[ "$member" == back-api-* || "$member" == front-web-app ]]; then
