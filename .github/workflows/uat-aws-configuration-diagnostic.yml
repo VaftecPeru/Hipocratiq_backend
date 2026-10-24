@@ -31,7 +31,7 @@ jobs:
       HIPOCRATIQ_UAT_VPC_ID: ${{ vars.HIPOCRATIQ_UAT_VPC_ID }}
       HIPOCRATIQ_PROD_VPC_ID: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }}
       HIPOCRATIQ_UAT_READONLY_ROLE_ARN: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
-      UAT_READINESS_REPORT_PATH: ${{ runner.temp }}/hipocratiq-uat-actions-config-offline.json
+      # Runner filesystem paths are available only after the job starts.
     steps:
       - name: Checkout only this repository (never infra)
         uses: actions/checkout@v4
@@ -42,6 +42,8 @@ jobs:
           python3 -m unittest discover -s tests/Scripts -p 'test_uat_aws_actions_config_preflight.py' -v
 
       - name: Record sanitized configuration readiness (no network)
+        env:
+          UAT_READINESS_REPORT_PATH: ${{ runner.temp }}/hipocratiq-uat-actions-config-offline.json
         run: python3 scripts/uat_aws_actions_config_preflight.py
 
       - name: Upload redacted configuration artifact (NOT an AWS inventory)
