@@ -69,3 +69,76 @@ El script AWS solo ejecuta `sts:GetCallerIdentity`, `ec2:DescribeInstances`, `ec
 - Frontend PR #80 y Backend PR #90 deben permanecer DRAFT hasta superar los gates.
 
 **Advertencia:** el inventario de solo lectura verifica metadatos EC2/VPC, no docker, TLS, datos clínicos ni restauración. Nunca cambiar un PR release a READY solo para satisfacer el guard.
+
+
+## E. Bloqueos confirmados mediante artifact real (24/10/2026)
+
+La ejecución [#40143761463](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40143761463)
+terminó el diagnóstico **SUCCESS**, pero el artifact
+`hipocratiq-aws-uat-config-offline-only` indica
+`BLOCKED_NO_AWS_DIAGNOSTIC`: **8/8 variables exigidas están ausentes**:
+
+- `HIPOCRATIQ_AWS_UAT_INVENTORY_ENABLED`
+- `HIPOCRATIQ_UAT_AWS_ACCOUNT_ID`
+- `HIPOCRATIQ_UAT_AWS_REGION`
+- `HIPOCRATIQ_UAT_INSTANCE_ID`
+- `HIPOCRATIQ_PROD_INSTANCE_ID`
+- `HIPOCRATIQ_UAT_VPC_ID`
+- `HIPOCRATIQ_PROD_VPC_ID`
+- `HIPOCRATIQ_UAT_READONLY_ROLE_ARN`
+
+Estos campos deben proceder **únicamente de un inventario verificado y autorizado por el administrador**.
+El artifact no demuestra que un rol IAM, EC2, VPC, OIDC ni GitHub Environment
+exista. No completar variables con IDs inventados ni obtenidos de datos de producción.
+`HIPOCRATIQ_AWS_UAT_RUN_ON_DEVELOP_PUSH` debe conservarse `false` por defecto.
+
+## F. Gate adicional ANTES de solicitar credenciales AWS (PR #94)
+
+El job `aws-uat-inventory` ahora primero valida **sin conectarse a AWS**:
+
+1. Repositorio exacto `VaftecPeru/Hipocratiq_backend`.
+2. Trigger `push` o `workflow_dispatch` sobre `refs/heads/develop`.
+3. Respuesta GitHub REST `GET /repos/VaftecPeru/Hipocratiq_backend/branches/develop`
+   con `protected=true`.
+4. SHA devuelto por GitHub idéntico a `GITHUB_SHA` de la ejecución.
+
+Si falla cualquiera, termina **antes** de `configure-aws-credentials`
+y por tanto antes de solicitar OIDC o inspeccionar EC2.
+Solo necesita `GITHUB_TOKEN` de lectura de metadatos de la rama;
+no crea protección de ramas, cuentas ni entornos.
+
+**Advertencia crítica:** actualmente GitHub responde `protected=false`
+tanto para `develop` como para `main` de Backend/Frontend.
+El administrador deberá habilitar protección real de `develop` con
+revisión por PR, checks obligatorios, bloqueo de force-push y bypass limitado.
+`protected=true` es condición necesaria **pero no suficiente**;
+se debe inspeccionar y documentar el contenido de la política.
+
+El trust AWS `sub` se limita a
+`repo:VaftecPeru/Hipocratiq_backend:environment:hipocratiq-uat-readonly`.
+**Ese valor no incorpora por sí solo el nombre de la rama**.
+GitHub Environment debe restringir exactamente a `develop`.
+No asumir que declarar `environment:` en YAML configura revisores o política de ramas.
+
+**Atención a planes GitHub y repositorios privados:** GitHub indica que
+los *required reviewers* de Environments privados están sujetos a la
+disponibilidad del plan (en GitHub Free/Pro/Team generalmente solo están
+disponibles para repositorios públicos). Verificar la suscripción/organización
+antes de prometer revisores obligatorios. Si no se pueden imponer revisores
+o un control equivalente apropiado, **NO habilitar** inventario OIDC
+ni despliegue hasta resolver la gobernanza.
+
+Referencias oficiales:
+- https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html
+
+## G. Próximas decisiones de administración (sin ejecutarlas desde este PR)
+
+- [ ] Validar el plan GitHub y la posibilidad efectiva de reglas/revisores en repos privados.
+- [ ] Proteger `develop` Backend, y `main` en ambos repositorios; revisar reglas reales.
+- [ ] Verificar cuenta y región AWS UAT y recursos EC2/VPC **aislados**.
+- [ ] Revisar el change set de `HIPOCRATIQ-UAT-ReadOnly` sin aplicarlo automáticamente.
+- [ ] Configurar `hipocratiq-uat-readonly` con rama permitida `develop` y revisores disponibles.
+- [ ] Configurar las ocho variables GitHub usando identificadores verificados (sin AWS keys).
+- [ ] Ejecutar inventario real UAT con aprobación; exigir job AWS **SUCCESS**, no `SKIPPED`.
+- [ ] Retener informe saneado, contrastar evidencia y mantener los PR a `main` en DRAFT.
