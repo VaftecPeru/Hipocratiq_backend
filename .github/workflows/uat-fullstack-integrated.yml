@@ -1,0 +1,188 @@
+name: UAT full-stack Next Laravel PostgreSQL Redis (synthetic)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-fullstack-integrated.yml
+      - scripts/uat-fullstack-http-smoke.mjs
+      - app/**
+      - routes/**
+      - bootstrap/**
+      - config/**
+      - composer.json
+      - composer.lock
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-fullstack-integrated.yml
+      - scripts/uat-fullstack-http-smoke.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fullstack-integration:
+    name: Actual Next.js to Laravel with PostgreSQL17 Redis8 (no PHI)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: hipocratiq_integrated_ci
+          POSTGRES_USER: hipocratiq_ci
+          POSTGRES_PASSWORD: synthetic_job_password_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hipocratiq_ci -d hipocratiq_integrated_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.2.7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_DATABASE: hipocratiq_integrated_ci
+      DB_USERNAME: hipocratiq_ci
+      DB_PASSWORD: synthetic_job_password_only
+      DB_URL: ""
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      REDIS_URL: ""
+      CACHE_STORE: redis
+      CACHE_LIMITER_STORE: redis_limiter
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      SESSION_CONNECTION: session
+      SESSION_STORE: redis_session
+      SESSION_ENCRYPT: "true"
+      SESSION_SECURE_COOKIE: "false"
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:3000
+      MAIL_MAILER: array
+      SMS_DRIVER: array
+      OTP_PHONE_PROVIDER: local
+      OTP_HASH_KEY: synthetic-ci-not-an-otp-credential
+      OTP_FIXED_CODE: "123456"
+      BILLING_DRIVER: simulated
+      BACKUP_SERVICE_ENABLED: "false"
+      HIPOCRATIQ_UAT_ACCESS_ENABLED: "false"
+      WHATSAPP_DRIVER: unavailable
+      EPIDEMIOLOGICAL_AI_ENABLED: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKEND_URL: http://127.0.0.1:8000
+      APP_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:3000/backend
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+
+    steps:
+      - name: Checkout private Backend under test
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout audited public Frontend at exact immutable SHA
+        uses: actions/checkout@v4
+        with:
+          repository: VaftecPeru/Hipocratiq_Frontend
+          ref: fea9867729069216112f41d86f0d163588e7afb5
+          path: frontend-src
+          persist-credentials: false
+
+      - name: Assert pinned Frontend release candidate SHA
+        run: |
+          test "$(git -C frontend-src rev-parse HEAD)" = "fea9867729069216112f41d86f0d163588e7afb5"
+          echo "Frontend integration source SHA verified"
+
+      - name: Install PHP 8.4 and Redis/PostgreSQL extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_pgsql, redis
+          coverage: none
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install locked Backend Composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Generate transient Backend key and migrate isolated PostgreSQL
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+          php artisan config:clear
+          php artisan migrate:fresh --force --no-interaction
+
+      - name: Install locked Frontend dependencies
+        working-directory: frontend-src/front_web
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile actual Next.js release candidate
+        working-directory: frontend-src/front_web
+        run: npm run build
+
+      - name: Run real reverse-proxy and clinical access HTTP contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          php artisan serve --host=127.0.0.1 --port=8000 > /tmp/uat-laravel-server.log 2>&1 &
+          API_PID=$!
+          (
+            cd frontend-src/front_web
+            npm run start -- --hostname 127.0.0.1 --port 3000
+          ) > /tmp/uat-next-server.log 2>&1 &
+          WEB_PID=$!
+
+          cleanup() {
+            rc=$?
+            if [[ "$rc" != "0" ]]; then
+              echo "::group::Laravel startup error (no patient data in CI)"
+              tail -n 70 /tmp/uat-laravel-server.log || true
+              echo "::endgroup::"
+              echo "::group::Next.js startup error (synthetic CI)"
+              tail -n 70 /tmp/uat-next-server.log || true
+              echo "::endgroup::"
+            fi
+            kill "$WEB_PID" "$API_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..60}; do
+            if curl --silent --fail --output /dev/null http://127.0.0.1:8000/api/health/ready &&
+               curl --silent --fail --output /dev/null http://127.0.0.1:3000/; then
+              break
+            fi
+            if [[ "$attempt" -eq 60 ]]; then
+              echo "::error::Laravel or Next did not start in the ephemeral runner"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          node scripts/uat-fullstack-http-smoke.mjs
+
+      - name: Define scope explicitly
+        if: success()
+        run: |
+          echo "NEXT + LARAVEL + PostgreSQL + Redis integrated HTTP smoke PASS."
+          echo "Backend CI is synthetic: NO PHI, NO AWS calls, NO external HTTPS."
+          echo "DO NOT count as UAT clinical 36/36, real OTP +52 or main release approval."
