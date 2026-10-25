@@ -17,6 +17,7 @@ SHA = "a" * 40
 PROTECTION = {
     "required_status_checks": {"strict": True, "checks": [
         {"context": "lint"},
+        {"context": "Actual Next.js to Laravel with PostgreSQL17 Redis8 (no PHI)"},
         {"context": "Release evidence / main P0 NO-GO (read-only)"},
         {"context": "web"},
         {"context": "Frontend CI"},
@@ -52,6 +53,22 @@ class GovernanceTests(unittest.TestCase):
             with self.subTest(repo=repo, branch=branch):
                 payload = {"name": branch, "protected": True, "commit": {"sha": SHA}}
                 self.assertEqual(guard.evaluate_branch(repo, branch, payload, PROTECTION), [])
+
+    def test_fullstack_check_cannot_be_omitted_for_main_or_develop(self):
+        for branch in ("develop", "main"):
+            policy = copy.deepcopy(PROTECTION)
+            policy["required_status_checks"]["checks"] = [
+                item for item in policy["required_status_checks"]["checks"]
+                if item.get("context") != guard.FULLSTACK_CHECK
+            ]
+            blockers = guard.evaluate_branch(
+                guard.BACKEND, branch,
+                {"name": branch, "protected": True}, policy,
+            )
+            self.assertTrue(
+                any("REQUIRED_CHECKS_MISSING" in code for code in blockers),
+                "Full-stack integration must be enforced on " + branch,
+            )
 
     def test_missing_protected_flag_does_not_claim_safety(self):
         results = guard.evaluate_branch(guard.BACKEND, "develop",
