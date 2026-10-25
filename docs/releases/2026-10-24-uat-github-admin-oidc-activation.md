@@ -24,7 +24,8 @@ Configurar en ambos repositorios VaftecPeru/Hipocratiq_backend y VaftecPeru/Hipo
 - PR obligatorio, al menos un revisor diferente del autor, dismiss stale reviews, no bypass administrativo, resolver conversaciones.
 - Required status checks estrictos, force-push y borrados bloqueados.
 - No activar linear history sin comprobar que el flujo histórico basado en merge commits lo permita.
-- Check names observados: Backend develop: lint. Backend main: lint y Release evidence / main P0 NO-GO (read-only).
+- Check names Backend (PR a develop y main): lint y Actual Next.js to Laravel with PostgreSQL17 Redis8 (no PHI). El workflow de integración Full Stack se ejecuta **en todos los PR** (sin filtros de rutas), usa frontend público pinneado al SHA aprobado y nunca accede a AWS real.
+- Check adicional Backend main: Release evidence / main P0 NO-GO (read-only).
 - Frontend develop: web y Frontend CI. Frontend main: web, Frontend CI y Frontend E2E role routing.
 - No exigir trabajos de Flutter omitidos (SKIPPED) como check obligatorio.
 - Verificar configuración real, no solo que la propiedad protected sea true.

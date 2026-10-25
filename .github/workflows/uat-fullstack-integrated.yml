@@ -1,17 +1,9 @@
 name: UAT full-stack Next Laravel PostgreSQL Redis (synthetic)
 
 on:
+  # Run for EVERY PR: required checks must never be silently skipped by path filters.
   pull_request:
-    branches: [develop]
-    paths:
-      - .github/workflows/uat-fullstack-integrated.yml
-      - scripts/uat-fullstack-http-smoke.mjs
-      - app/**
-      - routes/**
-      - bootstrap/**
-      - config/**
-      - composer.json
-      - composer.lock
+    branches: [develop, main]
   push:
     branches: [develop]
     paths:
@@ -96,6 +88,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Validate GitHub branch governance policy regressions (offline)
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_uat_github_admin_governance_readonly.py' -v
 
       - name: Checkout audited public Frontend at exact immutable SHA
         uses: actions/checkout@v4
