@@ -1,17 +1,9 @@
 name: UAT full-stack Next Laravel PostgreSQL Redis (synthetic)
 
 on:
+  # Run for EVERY PR: required checks must never be silently skipped by path filters.
   pull_request:
-    branches: [develop]
-    paths:
-      - .github/workflows/uat-fullstack-integrated.yml
-      - scripts/uat-fullstack-http-smoke.mjs
-      - app/**
-      - routes/**
-      - bootstrap/**
-      - config/**
-      - composer.json
-      - composer.lock
+    branches: [develop, main]
   push:
     branches: [develop]
     paths:
