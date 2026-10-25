@@ -83,6 +83,25 @@ class ReleaseEvidenceTests(unittest.TestCase):
         with self.assertRaises(GateError):
             http_get_json("/repos/other/project/issues/1", token="synthetic")
 
+    def test_release_evidence_runs_for_all_main_pull_requests(self):
+        """No paths filter: every code-only PR to main must execute NO-GO."""
+        workflow_path = Path(__file__).resolve().parents[2] / (
+            ".github/workflows/release-readiness.yml"
+        )
+        workflow = workflow_path.read_text(encoding="utf-8")
+        self.assertIn("  pull_request:", workflow)
+        trigger_section = workflow.split("on:\\n", 1)[-1].split(
+            "\\npermissions:", 1
+        )[0]
+        self.assertIn("branches: [develop, main]", trigger_section)
+        self.assertNotIn("\\n    paths:", trigger_section)
+        self.assertNotIn("\\n    paths-ignore:", trigger_section)
+        self.assertIn(
+            "github.event_name == 'pull_request' && github.base_ref == 'main'",
+            workflow,
+        )
+        self.assertIn("python3 scripts/release_go_no_go.py", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
