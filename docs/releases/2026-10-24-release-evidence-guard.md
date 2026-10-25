@@ -15,9 +15,10 @@ la disponibilidad AWS UAT o la preparación de una rama productiva.
 
 1. PR a main, abierto, no draft, desde este mismo repositorio.
 2. SHA head del PR exactamente igual al SHA actual de develop.
-3. API GitHub confirma main protegida.
-4. Issue #92 de seguimiento clínico marcado cerrado **después de revisar evidencia externa**.
-5. GitHub Actions, en los últimos siete días, ha ejecutado en develop el job real
+3. API GitHub confirma `main` **y `develop` Backend** protegidas.
+4. API GitHub confirma `main` **y `develop` Frontend** protegidas y Frontend PR #80 abierto, sin DRAFT, dirigido a `main` y con SHA exacto de `develop`.
+5. Issue #92 de seguimiento clínico marcado cerrado **después de revisar evidencia externa**.
+6. GitHub Actions, en los últimos siete días, ha ejecutado en develop el job real
    "Approved AWS UAT instance metadata ONLY", con conclusion SUCCESS (no SKIPPED)
    y artifact AWS no vacío y no expirado.
 
@@ -66,3 +67,11 @@ datos médicos ni AWS. Una pasada en verde no significa GO a producción.
 
 No fusionar este PR a develop sin autorización y no ejecutar merge a main ni
 deploy AWS hasta que se cumplan los gates.
+
+## Hardening cross-repo — 25/10/2026
+
+- El guard del **Backend** comprueba también la preparación de la release **Frontend**. Sin este control, un Backend aparentemente apto podría avanzar con la rama `main` de Web/Mobile aún desprotegida o con un release candidato desactualizado.
+- Se usan exclusivamente lecturas GitHub de los dos repositorios exactos `VaftecPeru/Hipocratiq_backend` y `VaftecPeru/Hipocratiq_Frontend`; sin credenciales AWS, sin SMS ni PHI.
+- Nuevas regresiones rechazan `develop` sin protección, Frontend `main` desprotegida, PR Frontend DRAFT, SHA divergente, fork no aprobado y endpoint fuera de la allowlist de repositorios.
+- **Hallazgo adicional pendiente de validación de política:** la API GitHub del 25/10 devuelve `private=false` en ambos repositorios, pese a que las guías de seguridad los describían privados. El administrador debe confirmar si la visibilidad pública es autorizada, inspeccionar antecedentes de secretos y definir política de acceso. **No publicar código ni cambiar la visibilidad automáticamente.**
+- Aun con ambos release PR listos y ramas protegidas, el script es **evidencia mínima**, no un permiso de producción: UAT real 36/36, OTP mexicano, restore, IAM OIDC y firma del cliente permanecen P0 independientes.

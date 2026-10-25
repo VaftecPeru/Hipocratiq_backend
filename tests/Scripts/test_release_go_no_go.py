@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from release_go_no_go import (  # noqa: E402
-    REPOSITORY, assess, normalize_inventory_run, http_get_json, GateError
+    REPOSITORY, FRONTEND_REPOSITORY, assess, assess_frontend_release,
+    normalize_inventory_run, http_get_json, GateError
 )
 
 NOW = dt.datetime(2026, 10, 24, 20, tzinfo=dt.timezone.utc)
@@ -20,7 +21,7 @@ def fixtures():
         "draft": False, "state": "open",
     }
     main = {"protected": True}
-    develop = {"commit": {"sha": SHA}}
+    develop = {"commit": {"sha": SHA}, "protected": True}
     issue = {"state": "closed"}
     inventory = [{
         "created_at": "2026-10-24T19:00:00Z",
@@ -45,6 +46,56 @@ class ReleaseEvidenceTests(unittest.TestCase):
         pr, main, develop, issue, inv = fixtures()
         main["protected"] = False
         self.assertIn("not protected", " ".join(assess(pr, main, develop, issue, inv, now=NOW)))
+
+    def test_backend_develop_requires_protection(self):
+        pr, main, develop, issue, inv = fixtures()
+        develop["protected"] = False
+        self.assertIn(
+            "Backend develop branch is not protected",
+            " ".join(assess(pr, main, develop, issue, inv, now=NOW)),
+        )
+
+    def test_frontend_release_must_be_protected_ready_and_sha_aligned(self):
+        frontend_pr = {
+            "base": {"ref": "main"},
+            "head": {"sha": SHA, "repo": {"full_name": FRONTEND_REPOSITORY}},
+            "state": "open",
+            "draft": False,
+        }
+        frontend_main = {"protected": True}
+        frontend_develop = {"protected": True, "commit": {"sha": SHA}}
+
+        self.assertEqual(
+            assess_frontend_release(frontend_pr, frontend_main, frontend_develop),
+            [],
+        )
+        frontend_main["protected"] = False
+        frontend_pr["draft"] = True
+        frontend_pr["head"]["sha"] = "a" * 40
+        errors = assess_frontend_release(frontend_pr, frontend_main, frontend_develop)
+        self.assertTrue(any("Frontend main branch is not protected" in x for x in errors))
+        self.assertTrue(any("DRAFT" in x for x in errors))
+        self.assertTrue(any("SHA differs" in x for x in errors))
+
+    def test_frontend_release_rejects_fork_wrong_base_or_unprotected_develop(self):
+        frontend_pr = {
+            "base": {"ref": "develop"},
+            "head": {"sha": SHA, "repo": {"full_name": "untrusted/fork"}},
+            "state": "closed",
+            "draft": False,
+        }
+        frontend_main = {"protected": True}
+        frontend_develop = {"protected": False, "commit": {"sha": SHA}}
+        reasons = assess_frontend_release(frontend_pr, frontend_main, frontend_develop)
+        self.assertGreaterEqual(len(reasons), 4)
+
+    def test_rejects_other_repositories_when_reading_github_evidence(self):
+        with self.assertRaises(GateError):
+            http_get_json(
+                "/repos/unknown/project/branches/main",
+                token="synthetic",
+                repository="unknown/project",
+            )
 
     def test_open_clinical_p0_issue_refuses_release(self):
         pr, main, develop, issue, inv = fixtures()
