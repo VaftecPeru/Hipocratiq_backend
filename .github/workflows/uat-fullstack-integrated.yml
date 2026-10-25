@@ -92,17 +92,23 @@ jobs:
       - name: Validate GitHub branch governance policy regressions (offline)
         run: python3 -m unittest discover -s tests/Scripts -p 'test_uat_github_admin_governance_readonly.py' -v
 
+      - name: Verify Frontend release source coherence (offline)
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_verify_frontend_release_sync.py' -v
+
+      - name: Verify current Frontend develop and release PR #80 match the pinned SHA
+        run: python3 scripts/verify_frontend_release_sync.py --expected 47aca58a5b70ce4028440cdc862a9c1028d4d58e
+
       - name: Checkout audited public Frontend at exact immutable SHA
         uses: actions/checkout@v4
         with:
           repository: VaftecPeru/Hipocratiq_Frontend
-          ref: fea9867729069216112f41d86f0d163588e7afb5
+          ref: 47aca58a5b70ce4028440cdc862a9c1028d4d58e
           path: frontend-src
           persist-credentials: false
 
       - name: Assert pinned Frontend release candidate SHA
         run: |
-          test "$(git -C frontend-src rev-parse HEAD)" = "fea9867729069216112f41d86f0d163588e7afb5"
+          test "$(git -C frontend-src rev-parse HEAD)" = "47aca58a5b70ce4028440cdc862a9c1028d4d58e"
           echo "Frontend integration source SHA verified"
 
       - name: Install PHP 8.4 and Redis/PostgreSQL extensions
