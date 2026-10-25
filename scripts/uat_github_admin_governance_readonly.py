@@ -17,9 +17,11 @@ OWNER = "VaftecPeru"
 BACKEND = OWNER + "/Hipocratiq_backend"
 FRONTEND = OWNER + "/Hipocratiq_Frontend"
 ENVIRONMENT = "hipocratiq-uat-readonly"
+FULLSTACK_CHECK = "Actual Next.js to Laravel with PostgreSQL17 Redis8 (no PHI)"
 EXPECTED_CHECKS = {
-    (BACKEND, "develop"): {"lint"},
-    (BACKEND, "main"): {"lint", "Release evidence / main P0 NO-GO (read-only)"},
+    (BACKEND, "develop"): {"lint", FULLSTACK_CHECK},
+    (BACKEND, "main"): {"lint", FULLSTACK_CHECK,
+                        "Release evidence / main P0 NO-GO (read-only)"},
     (FRONTEND, "develop"): {"web", "Frontend CI"},
     (FRONTEND, "main"): {"web", "Frontend CI", "Frontend E2E role routing"},
 }
