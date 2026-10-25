@@ -1,12 +1,10 @@
 name: Release evidence NO-GO gate (no AWS calls)
 
 on:
+  # Mandatory release evidence must run on EVERY PR into main, even when
+  # no release gate files are changed. Never filter this workflow by paths.
   pull_request:
     branches: [develop, main]
-    paths:
-      - .github/workflows/release-readiness.yml
-      - scripts/release_go_no_go.py
-      - tests/Scripts/test_release_go_no_go.py
   workflow_dispatch:
 
 permissions:
