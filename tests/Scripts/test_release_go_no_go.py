@@ -90,12 +90,12 @@ class ReleaseEvidenceTests(unittest.TestCase):
         )
         workflow = workflow_path.read_text(encoding="utf-8")
         self.assertIn("  pull_request:", workflow)
-        trigger_section = workflow.split("on:\\n", 1)[-1].split(
-            "\\npermissions:", 1
+        trigger_section = workflow.split("on:\n", 1)[-1].split(
+            "\npermissions:", 1
         )[0]
         self.assertIn("branches: [develop, main]", trigger_section)
-        self.assertNotIn("\\n    paths:", trigger_section)
-        self.assertNotIn("\\n    paths-ignore:", trigger_section)
+        self.assertNotIn("\n    paths:", trigger_section)
+        self.assertNotIn("\n    paths-ignore:", trigger_section)
         self.assertIn(
             "github.event_name == 'pull_request' && github.base_ref == 'main'",
             workflow,
