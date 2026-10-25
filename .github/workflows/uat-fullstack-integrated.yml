@@ -89,6 +89,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate GitHub branch governance policy regressions (offline)
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_uat_github_admin_governance_readonly.py' -v
+
       - name: Checkout audited public Frontend at exact immutable SHA
         uses: actions/checkout@v4
         with:
