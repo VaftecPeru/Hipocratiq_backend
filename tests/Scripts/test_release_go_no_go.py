@@ -7,7 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from release_go_no_go import (  # noqa: E402
     REPOSITORY, FRONTEND_REPOSITORY, assess, assess_frontend_release,
-    normalize_inventory_run, http_get_json, GateError
+    normalize_inventory_run, http_get_json, GateError,
+    SECURITY_ISSUE, assess_public_security_issue
 )
 
 NOW = dt.datetime(2026, 10, 24, 20, tzinfo=dt.timezone.utc)
@@ -102,6 +103,27 @@ class ReleaseEvidenceTests(unittest.TestCase):
         pr, main, develop, issue, inv = fixtures()
         issue["state"] = "open"
         self.assertIn("#92 remains open", " ".join(assess(pr, main, develop, issue, inv, now=NOW)))
+
+    def test_public_repository_security_p0_must_be_closed(self):
+        self.assertEqual(SECURITY_ISSUE, 102)
+        for security_issue in (None, {}, {"state": "open"}, {"state": "unknown"}):
+            reasons = assess_public_security_issue(security_issue)
+            self.assertTrue(any("#102" in reason for reason in reasons))
+        self.assertEqual(
+            assess_public_security_issue({"state": "closed"}), [],
+        )
+
+    def test_live_release_gate_uses_security_p0_evidence(self):
+        source = (Path(__file__).resolve().parents[2] / "scripts" /
+                  "release_go_no_go.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'security_issue = http_get_json(root + "/issues/" + str(SECURITY_ISSUE)',
+            source,
+        )
+        self.assertIn(
+            "blockers.extend(assess_public_security_issue(security_issue))",
+            source,
+        )
 
     def test_green_offline_with_skipped_aws_must_fail(self):
         pr, main, develop, issue, inv = fixtures()
