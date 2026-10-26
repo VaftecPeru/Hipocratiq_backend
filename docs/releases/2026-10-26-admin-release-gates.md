@@ -1,5 +1,15 @@
 # HIPOCRATIQ — Hoja de ejecución P0 antes de publicar (26/10/2026)
 
+## Evidencia adicional del historial público — PR #108
+
+- Backend `main` histórico: en `.env.example`, las asignaciones `DB_PASSWORD` y `REDIS_PASSWORD` no estaban vacías; `develop` actual las tiene vacías gracias a la remediación #106. **No hay prueba de que fueran contraseñas operativas.**
+- [Backend PR #108](https://github.com/VaftecPeru/Hipocratiq_backend/pull/108) (abierto, sin merge) añade el auditor de historia Git que **no publica secretos, SHA de blobs ni rutas sensibles**. Sobre SHA `434aa017c0b26799757b74729ce118a591044f5c`, los cinco CI/UAT son **SUCCESS**, incluida [auditoría #40393503926](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40393503926) con artefacto sanitizado ID `12686341018`.
+- **Señales del historial:** 25 objetos históricos de plantillas con asignaciones no vacías y 1 ruta de archivo de entorno. Los conteos no demuestran una credencial activa ni su descarte. [Issue P0 #102](https://github.com/VaftecPeru/Hipocratiq_backend/issues/102) sigue **OPEN** con evidencia actualizada.
+- **Acción no automatizable sin responsables:** revisión privada de la validez/reutilización de valores históricos, rotación en caso de coincidencia o duda, revisión de artifacts/releases/forks, decisión documentada de visibilidad GitHub y acta de Seguridad/PM. Nunca copiar valores al issue, bitácora o logs.
+- La barrera de producción [release evidence #40376745118](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40376745118) sigue NO-GO con nueve bloqueos, incluidos P0 #92/#102, ramas desprotegidas e inventario AWS real sin evidencia. **No convertir draft a ready ni fusionar `main`/desplegar AWS.**
+
+---
+
 ## Corte vigente 26/10/2026 — control #107 integrado; producción NO-GO
 
 - **Backend `develop` verificado:** `fed0b1d5a8d66637d4d584e07452770f1abcf0ec`, tras integrar [PR #107](https://github.com/VaftecPeru/Hipocratiq_backend/pull/107) con cinco checks premerge SUCCESS. El CI postmerge [#40376290175](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40376290175) exige confirmación separada.
