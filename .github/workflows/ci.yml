@@ -52,6 +52,11 @@ jobs:
           key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
           restore-keys: ${{ runner.os }}-composer-
 
+      - name: Reject non-empty credentials in tracked environment examples
+        run: |
+          python3 -m unittest discover -s tests/Scripts -p 'test_public_env_template.py' -v
+          python3 scripts/check_public_env_template.py .env.example
+
       - name: Create environment file
         run: cp .env.example .env
 
