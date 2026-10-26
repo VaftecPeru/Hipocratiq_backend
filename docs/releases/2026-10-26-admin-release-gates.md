@@ -1,5 +1,18 @@
 # HIPOCRATIQ — Hoja de ejecución P0 antes de publicar (26/10/2026)
 
+## Corte vigente 26/10/2026 — control #107 integrado; producción NO-GO
+
+- **Backend `develop` verificado:** `fed0b1d5a8d66637d4d584e07452770f1abcf0ec`, tras integrar [PR #107](https://github.com/VaftecPeru/Hipocratiq_backend/pull/107) con cinco checks premerge SUCCESS. El CI postmerge [#40376290175](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40376290175) exige confirmación separada.
+- **PR #106 ya integrado** en `develop` previamente: plantilla `.env.example` sin valores DB/Redis y guard preventivo CI. El [P0 seguridad #102](https://github.com/VaftecPeru/Hipocratiq_backend/issues/102) sigue **OPEN** hasta revisión histórica/rotación privada según corresponda.
+- **Protección adicional:** el release gate consulta ahora el issue #102. Solo se obtiene evidencia mínima si el P0 clínico #92 y el P0 seguridad #102 cumplen sus respectivos cierres verificados; el CI sintético no suple UAT real.
+- **Backend candidato [PR #90](https://github.com/VaftecPeru/Hipocratiq_backend/pull/90):** continúa DRAFT/NO-GO. Su SHA `e18c98af93827eef6cf75e2968e648dd948673a5` es histórico: falta sincronizar el nuevo commit de release gate y repetir checks antes de solicitar GO. Frontend [PR #80](https://github.com/VaftecPeru/Hipocratiq_Frontend/pull/80) permanece DRAFT.
+- **Bloqueos reales:** GitHub `main`/`develop` de los dos repos públicos `protected=false`, Environment `hipocratiq-uat-readonly` no acreditado, rol AWS OIDC / inventario UAT real no certificados, 0/36 UAT clínica, OTP +52, respaldo/restauración y autorización cliente ausentes. **Ningún merge a `main`, ningún deploy AWS**.
+
+Las secciones inferiores conservan cortes anteriores para auditoría y NO representan SHAs actuales.
+
+---
+
+
 
 ## Nuevo corte verificado — 26/10/2026, tras remediación P0 #106
 
