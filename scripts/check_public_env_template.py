@@ -41,7 +41,7 @@ def verify_template(content: str) -> tuple[bool, list[str]]:
         if key in found:
             problems.append(key + ":DUPLICATE_KEY")
         found.add(key)
-        if raw_value.strip().strip('\\\"\''):
+        if raw_value.strip().strip(chr(34) + chr(39)):
             problems.append(key + ":NONEMPTY_VALUE")
     for key in sorted(REQUIRED - found):
         problems.append(key + ":MISSING_KEY")
