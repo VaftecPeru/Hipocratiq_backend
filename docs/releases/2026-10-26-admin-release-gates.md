@@ -1,5 +1,29 @@
 # HIPOCRATIQ — Hoja de ejecución P0 antes de publicar (26/10/2026)
 
+## Actualización de control — 26/10/2026 (posterior al PR #105)
+
+**ESTADO: NO-GO.** El PR #105 fue integrado **solo a Backend `develop`** con el bootstrap de configuración GitHub. Tener el código del bootstrap **no significa** que las protecciones, Environment o el rol AWS OIDC estén configurados.
+
+| Verificación nueva | Evidencia y estado |
+|---|---|
+| Backend `develop` | `2606c86bf7addb39d2dddb17b68cafbaa0de7c1c`; CI [#40366180991](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40366180991) SUCCESS |
+| Backend release PR #90 | Actualizado por fast-forward a `2606c86bf7addb39d2dddb17b68cafbaa0de7c1c`, **continúa DRAFT**; CI/Fullstack del RC en ejecución o sujetos a revisión final |
+| Frontend `develop` y release PR #80 | `684977a7067638c564e74a72e93647f2f5a8f9c0`, **PR #80 DRAFT** |
+| GitHub `main` y `develop` | `protected=false` en ambos repositorios. Repos `public`; [P0 #102](https://github.com/VaftecPeru/Hipocratiq_backend/issues/102) OPEN |
+| Gate clínico | [P0 #92](https://github.com/VaftecPeru/Hipocratiq_backend/issues/92) OPEN; 0/36 casos UAT real aprobados |
+| Revisión de credenciales de ejemplo | [Backend PR #106](https://github.com/VaftecPeru/Hipocratiq_backend/pull/106) en revisión; si `DB_PASSWORD`/`REDIS_PASSWORD` históricos están en uso, validar rotación privada y auditar historial, **sin revelar valores** |
+
+### Paso administrativo ejecutable, sin atajos de producción
+
+1. Desde una **estación confiable con permiso Administration:write**, ejecutar primero el modo offline y las pruebas de `scripts/configure_github_release_governance.py`. La [guía del PR #105](2026-10-26-github-admin-bootstrap-execution.md) detalla los comandos, las cuatro ramas, los checks y el Environment `hipocratiq-uat-readonly` con reviewer independiente.
+2. Tras revisión del plan, el **administrador** ejecuta `--apply` con token admin local y frase exacta. Repetir `--verify` y `scripts/uat_github_admin_governance_readonly.py --live`; exigir evidencia de reglas **efectivamente aplicadas**, no solo YAML ni CI offline.
+3. Solo con ese control, solicitar change set IAM/OIDC AWS **de lectura** independiente, verificar cuenta/región/EC2/VPC reales y ejecutar inventario AWS UAT aprobado. Ningún cambio IAM ni lectura EC2/SSM se ha realizado en esta actualización.
+4. Con inventario real y entorno UAT segregado, completar HTTPS, OTP SMS MX, matriz clínica 36/36, restauración/rollback y acta de aceptación. **No quitar DRAFT a PR #90/#80, no cerrar #92/#102, no tocar `main` ni producción hasta evidencias P0.**
+
+Los SHAs y CI en la tabla original inferior son un corte histórico previo al PR #105. No utilizarlos como prueba de versión vigente.
+
+---
+
 **Decisión: NO-GO. Este documento no autoriza merges a main, llamadas AWS ni el cierre del issue #92.**  
 La aprobación del software en CI y las pruebas con datos sintéticos no acreditan que la infraestructura UAT, la restauración ni la aceptación clínica se hayan realizado.
 
