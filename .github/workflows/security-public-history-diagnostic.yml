@@ -1,0 +1,57 @@
+name: Public Git history redacted diagnostic (P0-102)
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hipocratiq-history-audit-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  history-review:
+    name: Public history metadata / sanitized security signals only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout full reachable history without persistent token
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Audit scanner tests on synthetic local Git fixtures
+        run: python -m unittest discover -s tests/Scripts -p 'test_audit_public_git_history.py' -v
+
+      - name: Inspect historical tracked secrets without publishing their values
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python scripts/audit_public_git_history.py \
+            --repository . \
+            --report "$RUNNER_TEMP/hipocratiq-history-sanitized.json"
+          python -c 'import json,os,pathlib; r=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"],"hipocratiq-history-sanitized.json").read_text()); assert r["secret_values_recorded"] is False and r["sensitive_paths_recorded"] is False and r["aws_calls"] == 0; print("SANITIZATION=PASS; RELEASE_CLEARANCE=NOT_GRANTED")'
+
+      - name: Upload counts-only diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-public-git-history-sanitized
+          path: \${{ runner.temp }}/hipocratiq-history-sanitized.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Enforce private audit and release NO-GO separation
+        run: |
+          echo "A SUCCESS here means only a COMPLETE, REDACTED inventory scan."
+          echo "The scanner deliberately does not expose paths, SHA, secret values or dumps."
+          echo "P0 issue #102 remains OPEN until private human review and rotations."
+          echo "This job does not touch AWS, branch protections, main or production."
