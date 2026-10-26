@@ -11,6 +11,10 @@ on:
       - tests/Scripts/test_uat_github_admin_governance_readonly.py
       - scripts/configure_github_release_governance.py
       - tests/Scripts/test_configure_github_release_governance.py
+  # Always refresh NON-AWS configuration evidence when reviewed code lands on develop.
+  # This workflow has no Environment, OIDC permission or AWS credentials.
+  push:
+    branches: [develop]
   workflow_dispatch:
 
 permissions:
