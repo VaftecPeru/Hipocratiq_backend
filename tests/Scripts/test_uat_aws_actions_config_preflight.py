@@ -26,6 +26,19 @@ SAFE = {
 
 
 class OfflineUatReadinessTests(unittest.TestCase):
+    def test_offline_config_workflow_refreshes_on_develop_only_and_never_uses_oidc(self):
+        workflow = (SCRIPT.parents[2] / ".github/workflows"
+                    / "uat-aws-configuration-diagnostic.yml").read_text(
+                        encoding="utf-8")
+        self.assertIn("  push:\n    branches: [develop]\n", workflow)
+        self.assertIn("  pull_request:\n    branches: [develop]\n", workflow)
+        self.assertIn("  workflow_dispatch:\n", workflow)
+        self.assertIn("name: AWS UAT configuration diagnostic (offline, no credentials)", workflow)
+        self.assertNotIn("id-token: write", workflow)
+        self.assertNotIn("aws-actions/configure-aws-credentials", workflow)
+        self.assertNotIn("environment: hipocratiq-uat-readonly", workflow)
+        self.assertIn("hipocratiq-aws-uat-config-offline-only", workflow)
+
     def test_absent_variables_block_real_aws_with_clear_keys(self):
         report = uat_config.check_variables({"GITHUB_REPOSITORY": SAFE["GITHUB_REPOSITORY"]})
         self.assertEqual(report["status"], "BLOCKED_NO_AWS_DIAGNOSTIC")
