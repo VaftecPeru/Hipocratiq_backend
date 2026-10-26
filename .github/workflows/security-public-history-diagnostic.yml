@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hipocratiq-history-audit-\${{ github.workflow }}-\${{ github.ref }}
+  group: hipocratiq-history-audit-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hipocratiq-public-git-history-sanitized
-          path: \${{ runner.temp }}/hipocratiq-history-sanitized.json
+          path: ${{ runner.temp }}/hipocratiq-history-sanitized.json
           retention-days: 7
           if-no-files-found: error
 
