@@ -25,7 +25,8 @@ def fixtures():
     issue = {"state": "closed"}
     inventory = [{
         "created_at": "2026-10-24T19:00:00Z",
-        "head_branch": "develop", "event": "workflow_dispatch",
+        "head_branch": "develop", "head_sha": SHA,
+        "event": "workflow_dispatch",
         "run_conclusion": "success", "aws_job_conclusion": "success",
         "artifact_present": True, "run_id": 123,
     }]
@@ -124,6 +125,34 @@ class ReleaseEvidenceTests(unittest.TestCase):
         inv[0]["created_at"] = "2026-10-24T19:00:00Z"
         inv[0]["head_branch"] = "main"
         self.assertTrue(assess(pr, main, develop, issue, inv, now=NOW))
+
+    def test_recent_real_inventory_from_old_develop_sha_must_fail(self):
+        """Successful AWS job and artifact for prior commit cannot unblock release."""
+        pr, main, develop, issue, inv = fixtures()
+        inv[0]["head_sha"] = "a" * 40
+        self.assertIn(
+            "exact current develop SHA",
+            " ".join(assess(pr, main, develop, issue, inv, now=NOW)),
+        )
+
+    def test_inventory_without_commit_sha_must_fail(self):
+        pr, main, develop, issue, inv = fixtures()
+        inv[0].pop("head_sha")
+        self.assertTrue(assess(pr, main, develop, issue, inv, now=NOW))
+
+    def test_normalizer_retains_aws_inventory_commit_sha(self):
+        run = {
+            "id": 123, "head_branch": "develop", "head_sha": SHA,
+            "created_at": "2026-10-24T19:00:00Z", "event": "workflow_dispatch",
+            "conclusion": "success",
+        }
+        jobs = [{"name": "Approved AWS UAT instance metadata ONLY",
+                 "conclusion": "success"}]
+        artifacts = [{"name": "hipocratiq-uat-aws-readonly-metadata",
+                      "expired": False, "size_in_bytes": 2048}]
+        item = normalize_inventory_run(run, jobs, artifacts)
+        self.assertEqual(item["head_sha"], SHA)
+        self.assertTrue(item["artifact_present"])
 
     def test_forked_release_branch_refuses(self):
         pr, main, develop, issue, inv = fixtures()

@@ -62,6 +62,7 @@ def normalize_inventory_run(run, jobs, artifacts):
     return {
         "created_at": run.get("created_at", ""),
         "head_branch": run.get("head_branch"),
+        "head_sha": run.get("head_sha"),
         "event": run.get("event"),
         "run_conclusion": run.get("conclusion"),
         "aws_job_conclusion": match.get("conclusion") if match else None,
@@ -103,6 +104,9 @@ def assess(pr, main, develop, issue, inventory, now=None):
             continue
         if (dt.timedelta(0) <= age <= dt.timedelta(days=MAX_INVENTORY_AGE_DAYS)
             and run.get("head_branch") == "develop"
+            # Real inventory must certify precisely the release candidate's code.
+            # Fresh status/artifact alone cannot certify a previous develop SHA.
+            and run.get("head_sha") == expected_sha
             and run.get("event") in ("workflow_dispatch", "push")
             and run.get("run_conclusion") == "success"
             and run.get("aws_job_conclusion") == "success"
@@ -110,7 +114,8 @@ def assess(pr, main, develop, issue, inventory, now=None):
             accepted.append(run)
     if not accepted:
         blockers.append(
-            "No recent real AWS UAT inventory: job must be SUCCESS, not SKIPPED, "
+            "No recent real AWS UAT inventory for the exact current develop SHA: "
+            "job must be SUCCESS, not SKIPPED, "
             "with a retained non-empty metadata artifact."
         )
 
