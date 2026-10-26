@@ -1,5 +1,29 @@
 # HIPOCRATIQ — Hoja de ejecución P0 antes de publicar (26/10/2026)
 
+
+## Corte verificado — PR #108 fusionado a develop (26/10/2026)
+
+**Producción: NO-GO.** Este corte prevalece sobre los SHAs y estados históricos de secciones posteriores.
+
+| Control | Evidencia actual |
+| --- | --- |
+| Backend PR [#108](https://github.com/VaftecPeru/Hipocratiq_backend/pull/108) | **MERGED** a develop, merge SHA `4e08b5a173f59b039ed8b40ee68866dda09f4fe1`; HEAD aprobado `434aa017c0b26799757b74729ce118a591044f5c`. |
+| CI previo al merge | **6/6 SUCCESS**, todos sobre el HEAD exacto, incluido redacted Git history [#40393503926](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40393503926). |
+| CI posterior en develop | [#40396116781](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40396116781): **COMPLETED/SUCCESS**. |
+| Backend release [PR #90](https://github.com/VaftecPeru/Hipocratiq_backend/pull/90) | Rama RC sincronizada por **fast-forward no forzado** a `4e08b5a173f59b039ed8b40ee68866dda09f4fe1`, **DRAFT**, sin fusionar a main. |
+| Frontend release [PR #80](https://github.com/VaftecPeru/Hipocratiq_Frontend/pull/80) | **DRAFT**, SHA `684977a7067638c564e74a72e93647f2f5a8f9c0`, sin fusionar. |
+| main Backend / Frontend | `c99c6e9391ea44986997c7a49c311b4177e6f731` / `235bb34225e51f8e93b8aa134192d7e8971e1194`: **intactas**. |
+| GitHub protección/visibilidad | Ambos repos **públicos**; **cuatro ramas** develop/main sin protección efectiva (`protected=false`), sin rulesets. |
+| P0 [#102](https://github.com/VaftecPeru/Hipocratiq_backend/issues/102) | **OPEN**. Auditor sanitizado halló **25 objetos históricos** de plantillas con asignaciones no vacías y **1 ruta de archivo de entorno**. No demuestra credenciales operativas, exige revisión privada y rotación si aplica. |
+| P0 [#92](https://github.com/VaftecPeru/Hipocratiq_backend/issues/92) | **OPEN**. Sin prueba de OIDC/Environment protegido y AWS UAT inventario real SUCCESS con artifact sobre SHA actual; **0/36 UAT clínica real**, OTP México, restore/rollback y aceptación pendientes. |
+
+**Cinco controles de cierre obligatorios sin omisiones:** (1) propietario y Seguridad deciden visibilidad pública y confirman auditoría privada del historial, artifacts/releases/forks, rotación/invalidez según correspondencia; (2) administrador GitHub con permisos reales instala protección de 4 ramas y Environment `hipocratiq-uat-readonly` restringido a develop con revisores efectivos y verifica lectura posterior; (3) administrador AWS revisa change set IAM OIDC de lectura, verifica cuenta/región/EC2/VPC UAT vs producción y ejecuta inventario real solamente tras aprobación; (4) equipo QA completa HTTPS/OTP MX +52, 36/36 UAT clínica y restauración/rollback aislados con evidencia; (5) cliente/PM emiten acta GO y autorización **separada** de merge main y deploy productivo.
+
+**Regla STOP:** no cerrar #102/#92 por CI verde, no quitar DRAFT a PR #90/#80, no hacer merge a main ni mutar AWS producción. Este PR #104 continúa en revisión documental hacia develop y **no se fusiona** con esta actualización.
+
+---
+
+
 ## Evidencia adicional del historial público — PR #108
 
 - Backend `main` histórico: en `.env.example`, las asignaciones `DB_PASSWORD` y `REDIS_PASSWORD` no estaban vacías; `develop` actual las tiene vacías gracias a la remediación #106. **No hay prueba de que fueran contraseñas operativas.**
