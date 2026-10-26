@@ -27,7 +27,7 @@ SAFE = {
 
 class OfflineUatReadinessTests(unittest.TestCase):
     def test_offline_config_workflow_refreshes_on_develop_only_and_never_uses_oidc(self):
-        workflow = (SCRIPT.parents[2] / ".github/workflows"
+        workflow = (SCRIPT.parents[1] / ".github/workflows"
                     / "uat-aws-configuration-diagnostic.yml").read_text(
                         encoding="utf-8")
         self.assertIn("  push:\n    branches: [develop]\n", workflow)
