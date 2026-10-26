@@ -1,5 +1,12 @@
 # HIPOCRATIQ — Desbloqueo verificable de UAT y main (25/10/2026)
 
+> **HISTÓRICO, SUPERADO POR EL CORTE DEL 26/10/2026.** Consultar primero
+> [2026-10-26-admin-release-gates.md](2026-10-26-admin-release-gates.md)
+> para SHAs, CI y bloqueos vigentes. GitHub confirmó el 26/10/2026 que
+> Backend y Frontend son **públicos** (`private=false`); las afirmaciones
+> de repositorios privados en documentos anteriores no describen su estado
+> actual. No inferir configuración AWS/GitHub a partir de esas afirmaciones.
+
 **Estado actual: NO-GO clínico y operativo.** Esta guía prepara exclusivamente acciones de administración; este PR NO realiza cambios en GitHub Settings, AWS, base de datos o producción.
 
 ## Evidencia base (verificar de nuevo justo antes de cada acción)
