@@ -1,5 +1,27 @@
 # HIPOCRATIQ — Hoja de ejecución P0 antes de publicar (26/10/2026)
 
+
+## Nuevo corte verificado — 26/10/2026, tras remediación P0 #106
+
+**Producción: NO-GO.** El [Backend PR #106](https://github.com/VaftecPeru/Hipocratiq_backend/pull/106) se fusionó a `develop` en el SHA **`e18c98af93827eef6cf75e2968e648dd948673a5`**, con cinco ejecuciones CI/QA previas `SUCCESS`; el CI posterior al merge [#40374153870](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40374153870) debe comprobarse por separado. La plantilla `.env.example` ya deja vacíos los campos de contraseña de BD y Redis e incorpora un control CI que no imprime secretos. **No elimina el historial de Git ni certifica la rotación** de credenciales, por lo que el [P0 público #102](https://github.com/VaftecPeru/Hipocratiq_backend/issues/102) permanece OPEN; si hubo reutilización o no puede descartarse, corresponde revisión privada y rotación por un administrador, sin exponer valores.
+
+| Control al 26/10 | Evidencia |
+|---|---|
+| Backend `develop` | `e18c98af93827eef6cf75e2968e648dd948673a5` |
+| Frontend `develop` | `684977a7067638c564e74a72e93647f2f5a8f9c0`; CI #40271757694 SUCCESS |
+| Backend release [PR #90](https://github.com/VaftecPeru/Hipocratiq_backend/pull/90) | **DRAFT**, candidato anterior `2606c86bf7addb39d2dddb17b68cafbaa0de7c1c`; quedó desfasado tras PR #106. NO actualizar automáticamente a `main` |
+| Frontend release [PR #80](https://github.com/VaftecPeru/Hipocratiq_Frontend/pull/80) | **DRAFT**; `684977a7067638c564e74a72e93647f2f5a8f9c0` |
+| GitHub | Ambos repositorios **públicos**; ramas `main` y `develop` con `protected=false` y sin rulesets efectivos |
+| Release gate Backend [#40369034777](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/40369034777) | **NO_GO**: 8 bloqueos reales (ambos DRAFT, cuatro ramas sin protección, issue #92 abierto, inventario AWS real ausente) |
+| UAT clínica | 0/36 aprobadas en entorno real; OTP México, backup/restore y acta de cliente pendientes |
+
+**Acción administrativa siguiente, verificable y sin falsos verdes:** usar el bootstrap aprobado del PR #105 desde una estación con credenciales de administración; configurar y leer de vuelta las cuatro protecciones, revisar política de visibilidad, restringir Environment `hipocratiq-uat-readonly` a `develop` con revisores y, solamente después, autorizar el change set del rol AWS `HIPOCRATIQ-UAT-ReadOnly`. No confundir OIDC `sub:...:environment:...` con una restricción implícita de rama. Ejecutar inventario AWS real solo con cuenta/región/EC2/VPC corroborados; el job debe terminar `SUCCESS`, no `SKIPPED`, y aportar artifact saneado inspeccionado.
+
+**Regla STOP:** ni el merge preventivo #106 ni los pipelines sintéticos autorizan publicar. Mantener [#92](https://github.com/VaftecPeru/Hipocratiq_backend/issues/92) y [#102](https://github.com/VaftecPeru/Hipocratiq_backend/issues/102) OPEN, candidatos a `main` DRAFT y sin cambios en AWS hasta pruebas clínicas, recuperación, controles efectivos y autorización final.
+
+---
+
+
 ## Actualización de control — 26/10/2026 (posterior al PR #105)
 
 **ESTADO: NO-GO.** El PR #105 fue integrado **solo a Backend `develop`** con el bootstrap de configuración GitHub. Tener el código del bootstrap **no significa** que las protecciones, Environment o el rol AWS OIDC estén configurados.
