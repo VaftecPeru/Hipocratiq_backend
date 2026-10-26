@@ -10,17 +10,14 @@ on:
       - tests/Scripts/test_uat_oidc_readonly_role.py
       - scripts/uat_github_protected_develop_preflight.py
       - tests/Scripts/test_uat_github_protected_develop_preflight.py
+      - tests/Scripts/test_uat_aws_inventory_workflow_activation.py
       - infra/aws/uat-readonly-oidc-role.json
+  # workflow_dispatch is unavailable while this workflow is absent from the
+  # default main branch. Future reviewed develop pushes can trigger inventory,
+  # but ONLY after both opt-in vars, branch SHA and environment reviewers pass.
+  # This path-unfiltered trigger never assumes AWS credentials by default.
   push:
     branches: [develop]
-    paths:
-      - .github/workflows/uat-aws-readonly-inventory.yml
-      - scripts/uat_aws_inventory_readonly.py
-      - tests/Scripts/test_uat_aws_inventory_readonly.py
-      - tests/Scripts/test_uat_oidc_readonly_role.py
-      - scripts/uat_github_protected_develop_preflight.py
-      - tests/Scripts/test_uat_github_protected_develop_preflight.py
-      - infra/aws/uat-readonly-oidc-role.json
   workflow_dispatch:
     inputs:
       acknowledgement:
@@ -43,12 +40,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify Python syntax
-        run: python3 -m py_compile scripts/uat_aws_inventory_readonly.py tests/Scripts/test_uat_aws_inventory_readonly.py tests/Scripts/test_uat_oidc_readonly_role.py scripts/uat_github_protected_develop_preflight.py tests/Scripts/test_uat_github_protected_develop_preflight.py
+        run: python3 -m py_compile scripts/uat_aws_inventory_readonly.py tests/Scripts/test_uat_aws_inventory_readonly.py tests/Scripts/test_uat_oidc_readonly_role.py scripts/uat_github_protected_develop_preflight.py tests/Scripts/test_uat_github_protected_develop_preflight.py tests/Scripts/test_uat_aws_inventory_workflow_activation.py
       - name: Simulate IAM, EC2, VPC, EBS and security group scenarios
         run: |
           python3 -m unittest discover -s tests/Scripts -p 'test_uat_aws_inventory_readonly.py' -v
           python3 -m unittest discover -s tests/Scripts -p 'test_uat_oidc_readonly_role.py' -v
           python3 -m unittest discover -s tests/Scripts -p 'test_uat_github_protected_develop_preflight.py' -v
+          python3 -m unittest discover -s tests/Scripts -p 'test_uat_aws_inventory_workflow_activation.py' -v
       - name: Scope
         run: |
           echo "Offline IAM trust and policy guards passed; no AWS credentials requested or AWS API called."
