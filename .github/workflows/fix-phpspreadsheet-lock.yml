@@ -1,0 +1,44 @@
+name: Resolve PhpSpreadsheet lock on security branch
+on:
+  push:
+    branches:
+      - security/phpspreadsheet-5-10-0-20261027
+    paths:
+      - composer.json
+      - .github/workflows/fix-phpspreadsheet-lock.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fix-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/phpspreadsheet-5-10-0-20261027
+          persist-credentials: true
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, zip, gd, redis
+          coverage: none
+          tools: composer:v2
+      - name: Resolve patched version and dependencies
+        run: composer update phpoffice/phpspreadsheet --with-all-dependencies --no-interaction --no-progress --no-scripts
+      - name: Refuse remaining security advisories
+        run: composer audit --locked --no-interaction
+      - name: Verify Composer lock integrity
+        run: composer validate --strict --no-interaction
+      - name: Commit lock only if patched and audited
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -r '$j=json_decode(file_get_contents("composer.lock"),true); foreach($j["packages"] as $p){ if($p["name"]==="phpoffice/phpspreadsheet"){ if(version_compare(ltrim($p["version"],"v"),"5.10.0","<")) exit(1); exit(0); }} exit(2);'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add composer.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "security: lock PhpSpreadsheet patched version after audit"
+            git push origin HEAD:security/phpspreadsheet-5-10-0-20261027
+          fi
