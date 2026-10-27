@@ -1,4 +1,5 @@
 name: Resolve PhpSpreadsheet lock on security branch
+# Runs only in the isolated security branch; production is never modified.
 on:
   push:
     branches:
