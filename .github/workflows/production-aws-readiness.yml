@@ -1,0 +1,58 @@
+name: AWS production readiness (read-only preflight)
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_sha:
+        description: 'Approved Frontend main commit (40 lowercase hex)'
+        required: true
+        type: string
+      backend_sha:
+        description: 'Approved Backend main commit (40 lowercase hex)'
+        required: true
+        type: string
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  readiness:
+    name: Verify production AWS identity and instance (NO DEPLOY)
+    runs-on: ubuntu-24.04
+    environment: hipocratiq-production
+    timeout-minutes: 10
+    steps:
+      - name: Validate configured inputs without touching AWS
+        shell: bash
+        env:
+          FE_SHA: ${{ inputs.frontend_sha }}
+          BE_SHA: ${{ inputs.backend_sha }}
+          ROLE: ${{ vars.AWS_PRODUCTION_ROLE_ARN }}
+          REGION: ${{ vars.AWS_PRODUCTION_REGION }}
+          INSTANCE: ${{ vars.AWS_PRODUCTION_EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$FE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid frontend SHA"; exit 1; }
+          [[ "$BE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid backend SHA"; exit 1; }
+          [[ "$ROLE" =~ ^arn:aws:iam::[0-9]{12}:role/.+ ]] || { echo "::error::Missing dedicated production OIDC role"; exit 1; }
+          [[ "$REGION" == "us-east-2" ]] || { echo "::error::Production AWS region must be confirmed us-east-2"; exit 1; }
+          [[ "$INSTANCE" =~ ^i-[a-f0-9]+$ ]] || { echo "::error::Missing production EC2 instance ID"; exit 1; }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PRODUCTION_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_PRODUCTION_REGION }}
+          role-session-name: hipocratiq-production-preflight
+      - name: Confirm AWS account and EC2 status (read-only)
+        shell: bash
+        env:
+          INSTANCE: ${{ vars.AWS_PRODUCTION_EC2_INSTANCE_ID }}
+          EXPECTED_ACCOUNT: ${{ vars.AWS_PRODUCTION_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          actual="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "$actual" == "$EXPECTED_ACCOUNT" ]] || { echo "::error::AWS account mismatch"; exit 1; }
+          state="$(aws ec2 describe-instances --instance-ids "$INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text)"
+          [[ "$state" == "running" ]] || { echo "::error::Production instance is not running"; exit 1; }
+          echo "Production identity and EC2 instance verified. NO DEPLOY PERFORMED."
+          {
+            echo '### AWS readiness preflight'
+            echo 'Identity and instance check passed. Read-only, no deployment and no clinical approval.'
+          } >> "$GITHUB_STEP_SUMMARY"
