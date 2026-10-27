@@ -57,39 +57,31 @@ class ReleaseEvidenceTests(unittest.TestCase):
             " ".join(assess(pr, main, develop, issue, inv, now=NOW)),
         )
 
-    def test_frontend_release_must_be_protected_ready_and_sha_aligned(self):
+    def test_merged_frontend_web_only_pr85_is_valid_evidence(self):
         frontend_pr = {
-            "base": {"ref": "main"},
-            "head": {"sha": SHA, "repo": {"full_name": FRONTEND_REPOSITORY}},
-            "state": "open",
-            "draft": False,
+            "number": 85, "base": {"ref": "main"},
+            "head": {"repo": {"full_name": FRONTEND_REPOSITORY}},
+            "state": "closed", "merged": True, "merge_commit_sha": SHA,
         }
-        frontend_main = {"protected": True}
-        frontend_develop = {"protected": True, "commit": {"sha": SHA}}
-
-        self.assertEqual(
-            assess_frontend_release(frontend_pr, frontend_main, frontend_develop),
-            [],
-        )
+        frontend_main = {"protected": True, "commit": {"sha": SHA}}
+        self.assertEqual(assess_frontend_release(frontend_pr, frontend_main, {}), [])
         frontend_main["protected"] = False
-        frontend_pr["draft"] = True
-        frontend_pr["head"]["sha"] = "a" * 40
-        errors = assess_frontend_release(frontend_pr, frontend_main, frontend_develop)
-        self.assertTrue(any("Frontend main branch is not protected" in x for x in errors))
-        self.assertTrue(any("DRAFT" in x for x in errors))
-        self.assertTrue(any("SHA differs" in x for x in errors))
+        frontend_pr["merged"] = False
+        frontend_pr["merge_commit_sha"] = "a" * 40
+        reasons = assess_frontend_release(frontend_pr, frontend_main, {})
+        self.assertTrue(any("not protected" in x for x in reasons))
+        self.assertTrue(any("must be merged" in x for x in reasons))
+        self.assertTrue(any("advanced" in x for x in reasons))
 
-    def test_frontend_release_rejects_fork_wrong_base_or_unprotected_develop(self):
+    def test_frontend_evidence_rejects_fork_wrong_base_and_wrong_pr(self):
         frontend_pr = {
-            "base": {"ref": "develop"},
-            "head": {"sha": SHA, "repo": {"full_name": "untrusted/fork"}},
-            "state": "closed",
-            "draft": False,
+            "number": 80, "base": {"ref": "develop"},
+            "head": {"repo": {"full_name": "untrusted/fork"}},
+            "state": "closed", "merged": True, "merge_commit_sha": SHA,
         }
-        frontend_main = {"protected": True}
-        frontend_develop = {"protected": False, "commit": {"sha": SHA}}
-        reasons = assess_frontend_release(frontend_pr, frontend_main, frontend_develop)
-        self.assertGreaterEqual(len(reasons), 4)
+        frontend_main = {"protected": True, "commit": {"sha": SHA}}
+        reasons = assess_frontend_release(frontend_pr, frontend_main, {})
+        self.assertGreaterEqual(len(reasons), 3)
 
     def test_rejects_other_repositories_when_reading_github_evidence(self):
         with self.assertRaises(GateError):
