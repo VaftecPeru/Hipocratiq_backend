@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 REPOSITORY = "VaftecPeru/Hipocratiq_backend"
 FRONTEND_REPOSITORY = "VaftecPeru/Hipocratiq_Frontend"
-FRONTEND_RELEASE_PR = 80
+FRONTEND_RELEASE_PR = 85
 ISSUE = 92
 SECURITY_ISSUE = 102
 AWS_JOB_NAME = "Approved AWS UAT instance metadata ONLY"
@@ -135,27 +135,28 @@ def assess_public_security_issue(security_issue):
 
 
 def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
-    """Ensure the separate Web/Mobile candidate is protected and in sync.
+    """Require the reviewed Web-only PR #85 to be merged into protected main.
 
-    This is necessary cross-repository GitHub evidence only; real UAT remains
-    an independent prerequisite and must not be inferred from these checks.
+    Deliberately do not demand open PR #80 or matching mobile develop; it is a
+    selective web-only release. Clinical/security and real AWS checks stay
+    separate and remain fail-closed.
     """
     blockers = []
     if frontend_main.get("protected") is not True:
         blockers.append("GitHub Frontend main branch is not protected.")
-    if frontend_develop.get("protected") is not True:
-        blockers.append("GitHub Frontend develop branch is not protected.")
-    if frontend_pr.get("state") != "open":
-        blockers.append("Frontend release PR #80 is not open.")
-    if frontend_pr.get("draft") is not False:
-        blockers.append("Frontend release PR #80 is DRAFT.")
+    if frontend_pr.get("number") != FRONTEND_RELEASE_PR:
+        blockers.append("Frontend release evidence must be PR #85.")
+    if frontend_pr.get("merged") is not True or frontend_pr.get("state") != "closed":
+        blockers.append("Frontend Web-only PR #85 must be merged.")
     if frontend_pr.get("base", {}).get("ref") != "main":
-        blockers.append("Frontend release PR #80 must target main.")
+        blockers.append("Frontend Web-only PR #85 must target main.")
     if (frontend_pr.get("head", {}).get("repo") or {}).get("full_name") != FRONTEND_REPOSITORY:
-        blockers.append("Frontend release PR #80 must originate from the approved repository.")
-    frontend_sha = frontend_develop.get("commit", {}).get("sha")
-    if not frontend_sha or frontend_pr.get("head", {}).get("sha") != frontend_sha:
-        blockers.append("Frontend release PR #80 SHA differs from Frontend develop.")
+        blockers.append("Frontend Web-only PR #85 must originate from approved repository.")
+    merge_sha = frontend_pr.get("merge_commit_sha")
+    if not isinstance(merge_sha, str) or len(merge_sha) != 40:
+        blockers.append("Frontend Web-only PR #85 merge SHA is absent.")
+    elif frontend_main.get("commit", {}).get("sha") != merge_sha:
+        blockers.append("Frontend main advanced: validate PR #85 ancestry before release.")
     return blockers
 
 
