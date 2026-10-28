@@ -155,8 +155,8 @@ def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
     merge_sha = frontend_pr.get("merge_commit_sha")
     if not isinstance(merge_sha, str) or len(merge_sha) != 40:
         blockers.append("Frontend Web-only PR #85 merge SHA is absent.")
-    elif frontend_main.get("commit", {}).get("sha") != merge_sha:
-        blockers.append("Frontend main advanced: validate PR #85 ancestry before release.")
+    elif frontend_main.get("web85_in_history") is not True:
+        blockers.append("Frontend PR #85 merge commit is not verified in protected main ancestry.")
     return blockers
 
 
@@ -179,6 +179,20 @@ def collect_evidence(token, number):
     frontend_develop = http_get_json(
         frontend_root + "/branches/develop", token, repository=FRONTEND_REPOSITORY,
     )
+    # GitHub compare must prove the exact web-only merge commit is in current
+    # protected main history. A newer main SHA by itself is not an error.
+    merge_sha = frontend_pr.get("merge_commit_sha", "")
+    main_sha = frontend_main.get("commit", {}).get("sha", "")
+    if (isinstance(merge_sha, str) and len(merge_sha) == 40
+            and isinstance(main_sha, str) and len(main_sha) == 40):
+        ancestry = http_get_json(
+            frontend_root + "/compare/" + merge_sha + "..." + main_sha,
+            token, repository=FRONTEND_REPOSITORY,
+        )
+        frontend_main["web85_in_history"] = ancestry.get("status") in ("ahead", "identical")
+    else:
+        frontend_main["web85_in_history"] = False
+
 
     # No calls to AWS. All results come from GitHub's own workflow/job API.
     raw = http_get_json(
