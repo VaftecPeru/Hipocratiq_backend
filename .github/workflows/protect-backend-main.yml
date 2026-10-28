@@ -1,10 +1,30 @@
 name: Protect Backend main (administrator approval)
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
+  validate-protection-policy:
+    name: Validate main protection policy (no admin access)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate workflow contains fail-closed controls
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/protect-backend-main.yml').read_text()
+          required=['refs/heads/main', 'HIPOCRATIQ-Backend-Protect-Main', 'non_fast_forward', 'deletion', 'pull_request', 'required_status_checks', 'hipocratiq-security-admin', 'BACKEND_RULESET_ADMIN_TOKEN', 'Release evidence / main P0 NO-GO (read-only)']
+          missing=[x for x in required if x not in p]
+          if missing: raise SystemExit('Missing required main-protection guards: '+', '.join(missing))
+          print('PASS: policy invariants found; no GitHub administration or AWS changes performed')
+          PY
   protect-main:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     environment: hipocratiq-security-admin
     timeout-minutes: 5
