@@ -1,0 +1,58 @@
+name: Production release blockers evidence (read-only)
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, develop]
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: read
+jobs:
+  release-blocker-report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Inspect GitHub release blockers without exposing secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          root='https://api.github.com/repos/'+os.environ['REPOSITORY']
+          token=os.environ['GH_TOKEN']
+          def get(path):
+              req=urllib.request.Request(root+path,headers={
+                  'Authorization':'Bearer '+token,
+                  'Accept':'application/vnd.github+json',
+                  'X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(req,timeout=20) as res:return json.load(res)
+          checks=[]
+          for branch in ('main','develop'):
+              d=get('/branches/'+branch)
+              checks.append((f'Backend {branch} protected',bool(d.get('protected'))))
+          for number in (92,102):
+              d=get('/issues/'+str(number))
+              checks.append((f'P0 issue #{number} closed',d.get('state')=='closed'))
+          pr=get('/pulls/90')
+          checks.append(('PR #90 targets main and ready for review',pr.get('base',{}).get('ref')=='main' and pr.get('draft') is False))
+          checks.append(('PR #90 head SHA equals develop SHA',pr.get('head',{}).get('sha')==get('/branches/develop')['commit']['sha']))
+          try:
+              d=get('/actions/workflows/uat-aws-readonly-inventory.yml/runs?branch=develop&per_page=5')
+              good=any(r.get('conclusion')=='success' for r in d.get('workflow_runs',[]))
+          except (urllib.error.HTTPError,ValueError):
+              good=False
+          # A green workflow run alone is NOT evidence of a real AWS inventory job/artifact.
+          checks.append(('Real AWS UAT inventory verified',False))
+          summary=['## HIPOCRATIQ production evidence (read-only)','']
+          for label,ok in checks:
+              summary.append(('- PASS: ' if ok else '- BLOCKED: ')+label)
+          summary.extend(['','Real AWS inventory needs successful job and retained artifact for exact SHA; no automatic approximation.',
+                          'This report does not approve production, configure IAM or deploy AWS.'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write('\n'.join(summary)+'\n')
+          print('\n'.join(summary))
+          if not all(ok for _,ok in checks):raise SystemExit(1)
+          PY
