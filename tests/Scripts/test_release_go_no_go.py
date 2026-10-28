@@ -63,15 +63,15 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "head": {"repo": {"full_name": FRONTEND_REPOSITORY}},
             "state": "closed", "merged": True, "merge_commit_sha": SHA,
         }
-        frontend_main = {"protected": True, "commit": {"sha": SHA}}
+        frontend_main = {"protected": True, "commit": {"sha": SHA}, "web85_in_history": True}
         self.assertEqual(assess_frontend_release(frontend_pr, frontend_main, {}), [])
         frontend_main["protected"] = False
         frontend_pr["merged"] = False
-        frontend_pr["merge_commit_sha"] = "a" * 40
+        frontend_main["web85_in_history"] = False
         reasons = assess_frontend_release(frontend_pr, frontend_main, {})
         self.assertTrue(any("not protected" in x for x in reasons))
         self.assertTrue(any("must be merged" in x for x in reasons))
-        self.assertTrue(any("advanced" in x for x in reasons))
+        self.assertTrue(any("ancestry" in x for x in reasons))
 
     def test_frontend_evidence_rejects_fork_wrong_base_and_wrong_pr(self):
         frontend_pr = {
