@@ -4,7 +4,7 @@ from scripts.controlled_web_release_evidence import validate, REQUIRED
 
 BACK = "a" * 40
 FRONT = "b" * 40
-NOW = dt.datetime(2026, 10, 28, tzinfo=dt.timezone.utc)
+NOW = dt.datetime(2026, 10, 28, 13, 0, tzinfo=dt.timezone.utc)
 
 
 def valid():
