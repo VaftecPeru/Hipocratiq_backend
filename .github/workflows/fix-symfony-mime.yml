@@ -1,0 +1,47 @@
+name: Fix Symfony MIME advisory (branch only)
+on:
+  push:
+    branches:
+      - fix/symfony-mime-cve-2026-45070
+    paths:
+      - .github/workflows/fix-symfony-mime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-lock:
+    if: github.ref == 'refs/heads/fix/symfony-mime-cve-2026-45070'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Validate dependency state
+        run: composer validate --no-check-publish --strict
+      - name: Update vulnerable Symfony component
+        run: composer update symfony/mime --with-all-dependencies --no-interaction --no-scripts --no-progress
+      - name: Validate dependency security
+        run: |
+          composer validate --no-check-publish --strict
+          composer audit --locked --no-interaction
+      - name: Commit reviewed lockfile candidate to isolated branch
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = 'fix/symfony-mime-cve-2026-45070'
+          git diff --exit-code -- composer.json
+          git add -- composer.lock
+          if git diff --cached --quiet; then
+            echo "ERROR: Composer did not change composer.lock" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(deps): update symfony/mime for CVE-2026-45070"
+          git push origin HEAD:refs/heads/fix/symfony-mime-cve-2026-45070
