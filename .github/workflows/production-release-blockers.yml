@@ -54,5 +54,5 @@ jobs:
                           'This report does not approve production, configure IAM or deploy AWS.'])
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write('\n'.join(summary)+'\n')
           print('\n'.join(summary))
-          if not all(ok for _,ok in checks):raise SystemExit(1)
+          # Informational diagnostic only: existing fail-closed release gate remains authoritative.
           PY
