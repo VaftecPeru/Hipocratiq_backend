@@ -1,0 +1,64 @@
+name: Clinical #92 synthetic regression evidence (not signoff)
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clinical-synthetic:
+    name: Clinical synthetic access and audit regressions (not UAT approval)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      APP_ENV: testing
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ':memory:'
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+      SMS_DRIVER: array
+      OTP_PHONE_PROVIDER: local
+      OTP_HASH_KEY: synthetic-ci-otp-only
+      OTP_FIXED_CODE: '123456'
+      BILLING_DRIVER: simulated
+      BACKUP_SERVICE_ENABLED: 'false'
+      HIPOCRATIQ_UAT_ACCESS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_sqlite
+          coverage: none
+      - name: Install locked dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Prepare isolated synthetic environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+      - name: Execute targeted clinical tests (synthetic only)
+        run: |
+          set -Eeuo pipefail
+          php artisan test --no-ansi \
+            tests/Feature/Phase4ClinicalUatTest.php \
+            tests/Feature/ClinicalAuditTrailTest.php \
+            tests/Feature/DoctorClinicalRecordTest.php \
+            tests/Feature/PatientPortalTest.php
+      - name: Document evidence scope
+        if: success()
+        run: |
+          {
+            echo '## Clinical synthetic tests: PASS'
+            echo ''
+            echo 'Scope: isolated synthetic Laravel feature tests only.'
+            echo 'Test source SHA: ${{ github.sha }}'
+            echo 'Not evidence of live clinical UAT, human signoff, production backups or security-history clearance.'
+            echo 'Release status remains NO-GO pending #92, #102, #113 and independent attestations.'
+          } >> "$GITHUB_STEP_SUMMARY"
