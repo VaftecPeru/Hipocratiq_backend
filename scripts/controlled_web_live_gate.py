@@ -3,6 +3,7 @@
 This is NOT production authorization and cannot verify clinical records or AWS backups.
 """
 import json
+import re
 import os
 import sys
 from urllib.request import Request, urlopen
@@ -14,11 +15,13 @@ REQUIRED_ISSUES = (92, 102, 113)
 def check(event, backend_sha, issues):
     blockers = []
     pr = event.get("pull_request", {})
+    if pr.get("draft") is not False:
+        blockers.append("Release pull request must be explicitly ready for review.")
     if pr.get("base", {}).get("ref") != "main":
         blockers.append("Not a main release PR.")
     if pr.get("head", {}).get("repo", {}).get("full_name") != REPO:
         blockers.append("Unapproved source repository.")
-    if pr.get("head", {}).get("sha") != backend_sha or len(backend_sha) != 40:
+    if not isinstance(backend_sha, str) or re.fullmatch(r"[0-9a-f]{40}", backend_sha) is None or pr.get("head", {}).get("sha") != backend_sha:
         blockers.append("Release SHA does not match immutable candidate.")
     for issue in REQUIRED_ISSUES:
         if issues.get(issue) != "closed":
