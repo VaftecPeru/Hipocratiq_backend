@@ -21,6 +21,10 @@ def check(event, backend_sha, issues):
         blockers.append("Not a main release PR.")
     if pr.get("head", {}).get("repo", {}).get("full_name") != REPO:
         blockers.append("Unapproved source repository.")
+    if not str(pr.get("head", {}).get("ref", "")).startswith("release/"):
+        blockers.append("Candidate must originate from a release branch.")
+    if pr.get("base", {}).get("repo", {}).get("full_name") != REPO:
+        blockers.append("Unapproved target repository.")
     if not isinstance(backend_sha, str) or re.fullmatch(r"[0-9a-f]{40}", backend_sha) is None or pr.get("head", {}).get("sha") != backend_sha:
         blockers.append("Release SHA does not match immutable candidate.")
     for issue in REQUIRED_ISSUES:
