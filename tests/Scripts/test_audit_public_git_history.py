@@ -41,16 +41,16 @@ class RedactedGitHistoryAuditTest(unittest.TestCase):
         self.assertTrue(SENSITIVE.issubset(audit.SECRET_ASSIGNMENTS))
         self.assertEqual(
             audit.template_sensitive_assignments(
-                b"OTP_HASH_KEY=synthetic-otp-only\\n"
-                b"HIPOCRATIQ_UAT_ACCESS_PASSWORD=synthetic-uat-only\\n"
-                b"WHATSAPP_ACCESS_TOKEN=synthetic-token-only\\n"
-                b"GOOGLE_CLIENT_SECRET=synthetic-oauth-only\\n"
+                b"OTP_HASH_KEY=synthetic-otp-only\n"
+                b"HIPOCRATIQ_UAT_ACCESS_PASSWORD=synthetic-uat-only\n"
+                b"WHATSAPP_ACCESS_TOKEN=synthetic-token-only\n"
+                b"GOOGLE_CLIENT_SECRET=synthetic-oauth-only\n"
             ),
             4,
         )
         self.assertEqual(
             audit.template_sensitive_assignments(
-                b"OTP_HASH_KEY=\\nHIPOCRATIQ_UAT_ACCESS_PASSWORD=''\\n"
+                b"OTP_HASH_KEY=\nHIPOCRATIQ_UAT_ACCESS_PASSWORD=''\n"
             ),
             0,
         )
