@@ -14,6 +14,7 @@ use App\Http\Requests\Api\V1\Auth\VerifyClinicRegistrationRequest;
 use App\Http\Resources\UserResource;
 use App\Models\Plan;
 use App\Services\Auth\ClinicRegistrationDraftStore;
+use App\Services\Auth\GoogleRegistrationIdentity;
 use App\Services\Auth\RegistrationDraftAccess;
 use App\Support\Auth\MobileDeviceProof;
 use App\Support\PhoneNumber;
@@ -36,9 +37,20 @@ class ClinicRegistrationController extends Controller
         ]);
     }
 
-    public function draft(StartClinicRegistrationRequest $request, ClinicRegistrationDraftStore $store): JsonResponse
-    {
+    public function draft(
+        StartClinicRegistrationRequest $request,
+        ClinicRegistrationDraftStore $store,
+        GoogleRegistrationIdentity $googleIdentity,
+    ): JsonResponse {
         $data = $request->validated();
+        $identity = $googleIdentity->resolve(
+            $data['google_registration_token'] ?? null,
+            'clinic',
+            $data['admin_email'],
+        );
+        if ($identity !== null) {
+            $data['google_identity'] = $identity;
+        }
         $client = AuthenticationClient::from($data['client_type']);
         $data['admin_phone_number'] = PhoneNumber::from($data['admin_phone_number'], $data['country_code'])->value;
         $data['contact_phone'] = PhoneNumber::from($data['contact_phone'], $data['country_code'])->value;

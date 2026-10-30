@@ -76,6 +76,12 @@ class RequestOtpRequest extends FormRequest
                 'regex:/\A[A-Za-z0-9._~:-]+\z/',
             ],
             'terms_accepted' => [$isRegistration ? 'accepted' : 'prohibited'],
+            'google_registration_token' => [
+                $isRegistration ? 'nullable' : 'prohibited',
+                'string',
+                'size:64',
+                'regex:/^[A-Za-z0-9]+$/',
+            ],
         ];
     }
 

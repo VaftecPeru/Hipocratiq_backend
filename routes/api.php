@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\V1\AdminSystemIncidentController;
 use App\Http\Controllers\Api\V1\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\ClinicRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\DoctorRegistrationController;
+use App\Http\Controllers\Api\V1\Auth\GoogleOAuthController;
 use App\Http\Controllers\Api\V1\Auth\LoginController;
 use App\Http\Controllers\Api\V1\Auth\OtpAuthenticationController;
 use App\Http\Controllers\Api\V1\Auth\OtpController;
@@ -97,6 +98,18 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
         Route::post('/verify-otp', [DoctorRegistrationController::class, 'verify'])->middleware('throttle:auth-otp')->name('verify-otp');
         Route::post('/resend-otp', [DoctorRegistrationController::class, 'resend'])->middleware('throttle:clinic-registration-otp')->name('resend-otp');
     });
+    Route::get('/google/redirect', [GoogleOAuthController::class, 'redirect'])
+        ->middleware('throttle:auth-login')
+        ->name('google.redirect');
+    Route::get('/google/callback', [GoogleOAuthController::class, 'callback'])
+        ->middleware('throttle:auth-login')
+        ->name('google.callback');
+    Route::post('/google/complete', [GoogleOAuthController::class, 'complete'])
+        ->middleware('throttle:auth-login')
+        ->name('google.complete');
+    Route::get('/google/registration-profile', [GoogleOAuthController::class, 'registrationProfile'])
+        ->middleware('throttle:auth-login')
+        ->name('google.registration-profile');
     Route::post('/otp/request', [OtpAuthenticationController::class, 'request'])
         ->middleware('throttle:auth-otp-request')
         ->name('otp.request');
