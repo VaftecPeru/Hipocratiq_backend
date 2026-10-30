@@ -60,7 +60,7 @@ class ProbeSmtpCommandTest extends TestCase
             'services.ses.region' => 'us-east-2',
         ]);
 
-        $this->assertTrue(app(\\App\\Services\\Mail\\MailInfrastructureService::class)->configured());
+        $this->assertTrue(app(\App\Services\Mail\MailInfrastructureService::class)->configured());
 
         $this->artisan('mail:probe')
             ->expectsOutputToContain('Solicitud de envío completada.')
@@ -101,7 +101,7 @@ class ProbeSmtpCommandTest extends TestCase
             'services.ses.region' => 'us-east-2',
         ]);
 
-        $status = app(\\App\\Services\\Mail\\MailInfrastructureService::class)->status();
+        $status = app(\App\Services\Mail\MailInfrastructureService::class)->status();
 
         $this->assertSame('ses', $status['driver']);
         $this->assertSame('us-east-2', $status['region']);
@@ -109,5 +109,4 @@ class ProbeSmtpCommandTest extends TestCase
         $this->assertNull($status['port']);
         $this->assertStringContainsString('verificación independiente', $status['message']);
     }
-
 }
