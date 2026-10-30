@@ -96,19 +96,19 @@ jobs:
         run: python3 -m unittest discover -s tests/Scripts -p 'test_verify_frontend_release_sync.py' -v
 
       - name: Verify current Frontend develop and release PR #80 match the pinned SHA
-        run: python3 scripts/verify_frontend_release_sync.py --expected 684977a7067638c564e74a72e93647f2f5a8f9c0
+        run: python3 scripts/verify_frontend_release_sync.py --expected 17365484e71b72411d1e24e55d38298863a9edf6
 
       - name: Checkout audited public Frontend at exact immutable SHA
         uses: actions/checkout@v4
         with:
           repository: VaftecPeru/Hipocratiq_Frontend
-          ref: 684977a7067638c564e74a72e93647f2f5a8f9c0
+          ref: 17365484e71b72411d1e24e55d38298863a9edf6
           path: frontend-src
           persist-credentials: false
 
       - name: Assert pinned Frontend release candidate SHA
         run: |
-          test "$(git -C frontend-src rev-parse HEAD)" = "684977a7067638c564e74a72e93647f2f5a8f9c0"
+          test "$(git -C frontend-src rev-parse HEAD)" = "17365484e71b72411d1e24e55d38298863a9edf6"
           echo "Frontend integration source SHA verified"
 
       - name: Install PHP 8.4 and Redis/PostgreSQL extensions
@@ -184,7 +184,7 @@ jobs:
       - name: Re-check Frontend develop and release SHA after full-stack smoke
         # Prevent a Frontend branch update during this job from being certified
         # by an integration test that started against an older commit.
-        run: python3 scripts/verify_frontend_release_sync.py --expected 684977a7067638c564e74a72e93647f2f5a8f9c0
+        run: python3 scripts/verify_frontend_release_sync.py --expected 17365484e71b72411d1e24e55d38298863a9edf6
 
       - name: Define scope explicitly
         if: success()
