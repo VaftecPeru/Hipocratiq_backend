@@ -18,11 +18,18 @@ import sys
 
 MAX_OBJECT_SIZE = 1024 * 1024
 MAX_CANDIDATES = 20000
+# Historical templates must cover every sensitive key checked in the
+# current .env.example, plus common legacy provider credential names.
+# Keep this list in sync with check_public_env_template.SENSITIVE.
 SECRET_ASSIGNMENTS = frozenset({
-    "DB_PASSWORD", "REDIS_PASSWORD", "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "APP_KEY",
-    "JWT_SECRET", "MAIL_PASSWORD", "SMTP_PASSWORD",
-    "TWILIO_AUTH_TOKEN", "STRIPE_SECRET", "SECRET_KEY",
+    "APP_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN", "BILLING_HTTP_TOKEN", "DB_PASSWORD",
+    "EPIDEMIOLOGICAL_AI_API_KEY", "GOOGLE_CLIENT_SECRET",
+    "HIPOCRATIQ_UAT_ACCESS_PASSWORD", "JWT_SECRET", "MAIL_PASSWORD",
+    "OPENAI_API_KEY", "OTP_HASH_KEY", "REDIS_PASSWORD",
+    "SECRET_KEY", "SMTP_PASSWORD", "STRIPE_SECRET",
+    "TELEMEDICINE_ROOM_SECRET", "TWILIO_AUTH_TOKEN",
+    "WHATSAPP_ACCESS_TOKEN",
 })
 EXAMPLE_NAMES = (".env.example", ".env.sample", ".env.template", ".env.dist")
 
