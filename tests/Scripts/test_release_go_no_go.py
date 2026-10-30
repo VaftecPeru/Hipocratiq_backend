@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from release_go_no_go import (  # noqa: E402
     REPOSITORY, FRONTEND_REPOSITORY, assess, assess_frontend_release,
     normalize_inventory_run, http_get_json, GateError,
-    SECURITY_ISSUE, assess_public_security_issue
+    SECURITY_ISSUE, assess_public_security_issue, BACKUP_ISSUE, assess_backup_issue
 )
 
 NOW = dt.datetime(2026, 10, 24, 20, tzinfo=dt.timezone.utc)
@@ -104,6 +104,23 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(
             assess_public_security_issue({"state": "closed"}), [],
         )
+
+    def test_backup_issue_113_must_have_real_closure_evidence(self):
+        self.assertEqual(BACKUP_ISSUE, 113)
+        for backup_issue in (None, {}, {"state": "open"}, {"state": "unknown"}):
+            reasons = assess_backup_issue(backup_issue)
+            self.assertTrue(any("#113" in reason for reason in reasons))
+            self.assertTrue(any("recovery evidence" in reason for reason in reasons))
+        self.assertEqual(assess_backup_issue({"state": "closed"}), [])
+
+    def test_live_gate_fetches_backup_issue_and_enforces_it(self):
+        source = (Path(__file__).resolve().parents[2] / "scripts" /
+                  "release_go_no_go.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'backup_issue = http_get_json(root + "/issues/" + str(BACKUP_ISSUE)',
+            source,
+        )
+        self.assertIn("blockers.extend(assess_backup_issue(backup_issue))", source)
 
     def test_live_release_gate_uses_security_p0_evidence(self):
         source = (Path(__file__).resolve().parents[2] / "scripts" /
