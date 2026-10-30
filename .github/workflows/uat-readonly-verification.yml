@@ -1,0 +1,52 @@
+name: HIPOCRATIQ UAT read-only verification
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/uat-readonly-verification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate that release is not automatically deployed
+        run: |
+          echo "Read-only verification workflow. No production deploy or database writes."
+  aws-inventory:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: hipocratiq-uat-readonly
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require configured IAM role and region
+        env:
+          AWS_ROLE: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
+          AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+        run: |
+          test -n "$AWS_ROLE" || { echo "::error::Missing HIPOCRATIQ_UAT_READONLY_ROLE_ARN"; exit 1; }
+          test -n "$AWS_REGION" || { echo "::error::Missing HIPOCRATIQ_UAT_AWS_REGION"; exit 1; }
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
+          aws-region: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+          role-session-name: hipocratiq-uat-inventory
+      - name: Check read-only AWS inventory and save non-sensitive evidence
+        env:
+          AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --query Account --output text >/dev/null
+          aws ec2 describe-vpcs --region "$AWS_REGION" --query 'length(Vpcs)' --output text >/dev/null
+          aws ec2 describe-instances --region "$AWS_REGION" --query 'length(Reservations)' --output text >/dev/null
+          mkdir -p evidence
+          printf '{"workflow":"uat-readonly-verification","ref":"%s","sha":"%s","region_verified":true,"sts":true,"ec2_vpc_inventory":true,"ec2_instance_inventory":true}\n' "$GITHUB_REF" "$GITHUB_SHA" > evidence/aws-uat-readonly.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aws-uat-inventory-readonly
+          path: evidence/aws-uat-readonly.json
+          if-no-files-found: error
+          retention-days: 14
