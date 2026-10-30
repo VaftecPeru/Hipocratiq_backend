@@ -37,6 +37,21 @@ class PublicEnvTemplateTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("REDIS_PASSWORD:MISSING_KEY", problems)
 
+
+    def test_legacy_provider_tokens_are_rejected_without_logging_values(self):
+        for key in ("AWS_SESSION_TOKEN", "GOOGLE_CLIENT_SECRET",
+                    "OPENAI_API_KEY", "JWT_SECRET", "SMTP_PASSWORD",
+                    "TWILIO_AUTH_TOKEN"):
+            with self.subTest(key=key):
+                fake = "synthetic_nonsecret_for_test_only"
+                ok, problems = module.verify_template(
+                    "DB_PASSWORD=\nREDIS_PASSWORD=\n"
+                    + key + "=" + fake + "\n"
+                )
+                self.assertFalse(ok)
+                self.assertIn(key + ":NONEMPTY_VALUE", problems)
+                self.assertNotIn(fake, repr(problems))
+
     def test_non_sensitive_runtime_flags_do_not_raise_false_positives(self):
         ok, problems = module.verify_template(
             "DB_PASSWORD=\nREDIS_PASSWORD=\nEPIDEMIOLOGICAL_AI_MAX_OUTPUT_TOKENS=2000\n"
