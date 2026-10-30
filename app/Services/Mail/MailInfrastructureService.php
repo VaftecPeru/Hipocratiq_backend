@@ -12,16 +12,28 @@ final class MailInfrastructureService
 {
     public function configured(): bool
     {
-        if ((string) config('mail.default') !== 'smtp') {
+        $driver = (string) config('mail.default');
+        $fromAddress = trim((string) config('mail.from.address'));
+
+        if (filter_var($fromAddress, FILTER_VALIDATE_EMAIL) === false) {
+            return false;
+        }
+
+        // The AWS default credential chain can use an EC2 task/instance role.
+        // Static configuration cannot prove IAM permission or email delivery.
+        if (in_array($driver, ['ses', 'ses-v2'], true)) {
+            return trim((string) config('services.ses.region')) !== '';
+        }
+
+        if ($driver !== 'smtp') {
             return false;
         }
 
         $host = trim((string) config('mail.mailers.smtp.host'));
         $port = (int) config('mail.mailers.smtp.port');
-        $fromAddress = trim((string) config('mail.from.address'));
         $authMode = (string) config('mail.infrastructure.auth_mode', 'credentials');
 
-        if ($host === '' || $port <= 0 || filter_var($fromAddress, FILTER_VALIDATE_EMAIL) === false) {
+        if ($host === '' || $port <= 0) {
             return false;
         }
 
@@ -37,29 +49,36 @@ final class MailInfrastructureService
     public function status(): array
     {
         $configured = $this->configured();
+        $driver = (string) config('mail.default', 'log');
+        $isSes = in_array($driver, ['ses', 'ses-v2'], true);
         $authMode = (string) config('mail.infrastructure.auth_mode', 'credentials');
 
         return [
             'configured' => $configured,
-            'driver' => (string) config('mail.default', 'log'),
-            'host' => $this->safeHost(),
-            'port' => (int) config('mail.mailers.smtp.port', 0),
-            'auth_mode' => $authMode,
+            'driver' => $driver,
+            'host' => $isSes ? null : $this->safeHost(),
+            'port' => $isSes ? null : (int) config('mail.mailers.smtp.port', 0),
+            'auth_mode' => $isSes ? 'aws_credential_chain' : $authMode,
+            'region' => $isSes ? (string) config('services.ses.region', '') : null,
             'from_address' => (string) config('mail.from.address', ''),
-            'ehlo_domain' => (string) config('mail.mailers.smtp.local_domain', ''),
-            'timeout_seconds' => (int) config('mail.mailers.smtp.timeout', 15),
-            'message' => $configured
-                ? ($authMode === 'ip_relay'
-                    ? 'SMTP configurado para relay autorizado por IP.'
-                    : 'SMTP configurado con credenciales protegidas por entorno.')
-                : 'SMTP no está completamente configurado.',
+            'ehlo_domain' => $isSes ? null : (string) config('mail.mailers.smtp.local_domain', ''),
+            'timeout_seconds' => $isSes ? null : (int) config('mail.mailers.smtp.timeout', 15),
+            'message' => $isSes
+                ? ($configured
+                    ? 'Amazon SES seleccionado. El envío y la recepción reales requieren verificación independiente.'
+                    : 'Amazon SES sin región o remitente válido.')
+                : ($configured
+                    ? ($authMode === 'ip_relay'
+                        ? 'SMTP configurado para relay autorizado por IP.'
+                        : 'SMTP configurado con credenciales protegidas por entorno.')
+                    : 'SMTP no está completamente configurado.'),
         ];
     }
 
     public function probe(?string $recipient = null): string
     {
         if (! $this->configured()) {
-            throw new RuntimeException('SMTP no está completamente configurado.');
+            throw new RuntimeException('El transporte de correo no está completamente configurado.');
         }
 
         $recipient ??= config('mail.infrastructure.probe_recipient');
