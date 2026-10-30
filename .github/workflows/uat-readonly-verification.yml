@@ -25,9 +25,14 @@ jobs:
         env:
           AWS_ROLE: ${{ vars.HIPOCRATIQ_UAT_READONLY_ROLE_ARN }}
           AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+          EXPECTED_ACCOUNT: ${{ vars.HIPOCRATIQ_UAT_ACCOUNT_ID }}
+          UAT_VPC: ${{ vars.HIPOCRATIQ_UAT_VPC_ID }}
+          PROD_VPC: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }}
         run: |
           test -n "$AWS_ROLE" || { echo "::error::Missing HIPOCRATIQ_UAT_READONLY_ROLE_ARN"; exit 1; }
           test -n "$AWS_REGION" || { echo "::error::Missing HIPOCRATIQ_UAT_AWS_REGION"; exit 1; }
+          test "$EXPECTED_ACCOUNT" != "" && test "$UAT_VPC" != "" && test "$PROD_VPC" != "" || { echo "::error::Missing verified account/VPC IDs"; exit 1; }
+          test "$UAT_VPC" != "$PROD_VPC" || { echo "::error::UAT VPC must be distinct from production VPC"; exit 1; }
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -37,10 +42,14 @@ jobs:
       - name: Check read-only AWS inventory and save non-sensitive evidence
         env:
           AWS_REGION: ${{ vars.HIPOCRATIQ_UAT_AWS_REGION }}
+          EXPECTED_ACCOUNT: ${{ vars.HIPOCRATIQ_UAT_ACCOUNT_ID }}
+          UAT_VPC: ${{ vars.HIPOCRATIQ_UAT_VPC_ID }}
         run: |
           set -euo pipefail
-          aws sts get-caller-identity --query Account --output text >/dev/null
-          aws ec2 describe-vpcs --region "$AWS_REGION" --query 'length(Vpcs)' --output text >/dev/null
+          ACTUAL_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          test "$ACTUAL_ACCOUNT" = "$EXPECTED_ACCOUNT" || { echo "::error::AWS account mismatch"; exit 1; }
+          UAT_VPC_FOUND="$(aws ec2 describe-vpcs --region "$AWS_REGION" --vpc-ids "$UAT_VPC" --query 'length(Vpcs)' --output text)"
+          test "$UAT_VPC_FOUND" = "1" || { echo "::error::UAT VPC not found"; exit 1; }
           aws ec2 describe-instances --region "$AWS_REGION" --query 'length(Reservations)' --output text >/dev/null
           mkdir -p evidence
           printf '{"workflow":"uat-readonly-verification","ref":"%s","sha":"%s","region_verified":true,"sts":true,"ec2_vpc_inventory":true,"ec2_instance_inventory":true}\n' "$GITHUB_REF" "$GITHUB_SHA" > evidence/aws-uat-readonly.json
