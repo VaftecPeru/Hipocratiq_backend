@@ -111,7 +111,8 @@ class DatabaseBackupRestoreSafetyTest extends TestCase
 
         (new DatabaseBackupManager)->restore(self::ID);
 
-        Process::assertRan('pg_restore *');
+        Process::assertRan(fn ($process): bool => is_string($process->command)
+            && str_starts_with($process->command, 'pg_restore '));
         $manifest = json_decode(
             Storage::disk('backup-drill')->get('hipocratiq-drill/manifests/'.self::ID.'.json'),
             true,
