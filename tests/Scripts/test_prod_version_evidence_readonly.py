@@ -51,7 +51,7 @@ class VersionEvidenceSafetyTest(unittest.TestCase):
         self.assertEqual(report["status"], "RUNTIME_SHA_NOT_VERIFIED")
         self.assertIsNone(report["endpoints"]["frontend"]["reported_sha"])
         self.assertIsNone(report["endpoints"]["backend"]["reported_sha"])
-        self.assertNotIn("patient", json.dumps(report))
+        self.assertNotIn("never print", json.dumps(report))
         self.assertEqual(sorted(opener.requests),
                          sorted([(url, "GET") for url in probe.TARGETS.values()]))
 
