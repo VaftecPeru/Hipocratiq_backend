@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hipocratiq-prod-version-evidence-${{ github.ref }
+  group: hipocratiq-prod-version-evidence-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -80,14 +80,14 @@ jobs:
       contents: read
       id-token: write
     env:
-      AUDIT_ENABLED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ENABLED }
-      AUDIT_PUSH_APPROVED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH }
-      AUDIT_ACKNOWLEDGEMENT: ${{ vars.HIPOCRATIQ_PROD_METADATA_ACK }
-      AUDIT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }
-      AUDIT_AWS_REGION: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }
-      AUDIT_AWS_INSTANCE_ID: ${{ vars.HIPOCRATIQ_PROD_INSTANCE_ID }
-      AUDIT_AWS_VPC_ID: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }
-      AUDIT_AWS_ROLE_ARN: ${{ vars.HIPOCRATIQ_PROD_READONLY_ROLE_ARN }
+      AUDIT_ENABLED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ENABLED }}
+      AUDIT_PUSH_APPROVED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH }}
+      AUDIT_ACKNOWLEDGEMENT: ${{ vars.HIPOCRATIQ_PROD_METADATA_ACK }}
+      AUDIT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }}
+      AUDIT_AWS_REGION: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }}
+      AUDIT_AWS_INSTANCE_ID: ${{ vars.HIPOCRATIQ_PROD_INSTANCE_ID }}
+      AUDIT_AWS_VPC_ID: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }}
+      AUDIT_AWS_ROLE_ARN: ${{ vars.HIPOCRATIQ_PROD_READONLY_ROLE_ARN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,10 +98,10 @@ jobs:
       - name: Assume temporary metadata-only IAM role (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.HIPOCRATIQ_PROD_READONLY_ROLE_ARN }
+          role-to-assume: ${{ vars.HIPOCRATIQ_PROD_READONLY_ROLE_ARN }}
           role-session-name: hipocratiqProdMetadata
-          aws-region: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }
-          allowed-account-ids: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }
+          aws-region: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }}
+          allowed-account-ids: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }}
           mask-aws-account-id: true
       - name: Describe approved EC2 and SSM status only
         env:
