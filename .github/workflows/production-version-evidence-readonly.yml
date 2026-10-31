@@ -1,0 +1,118 @@
+name: Production version evidence (HTTPS and AWS metadata, no deploy)
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/production-version-evidence-readonly.yml
+      - scripts/prod_version_evidence_readonly.py
+      - tests/Scripts/test_prod_version_evidence_readonly.py
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/production-version-evidence-readonly.yml
+      - scripts/prod_version_evidence_readonly.py
+      - tests/Scripts/test_prod_version_evidence_readonly.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hipocratiq-prod-version-evidence-${{ github.ref }
+  cancel-in-progress: false
+
+jobs:
+  safety-tests:
+    name: Offline production version evidence guards (no AWS credentials)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python syntax and security regression
+        run: |
+          python3 -m py_compile scripts/prod_version_evidence_readonly.py tests/Scripts/test_prod_version_evidence_readonly.py
+          python3 -m unittest discover -s tests/Scripts -p test_prod_version_evidence_readonly.py -v
+      - name: Separate version evidence from release authorization
+        run: |
+          echo "Tests use synthetic AWS fixtures only; deployment SHAs not inferred from GitHub."
+          echo "No database/SSH/SSM shell calls and no production writes."
+
+  public-https-evidence:
+    name: Public HTTPS status and release metadata (not a deploy proof)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: safety-tests
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Two allowlisted HTTPS GET probes only
+        env:
+          PROBE_REPORT: ${{ runner.temp }}/hipocratiq-prod-public-evidence.json
+        run: |
+          set -euo pipefail
+          python3 scripts/prod_version_evidence_readonly.py --mode public --report "$PROBE_REPORT"
+          echo "HTTPS evidence is not evidence of the running Docker code SHA."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-production-public-version-evidence
+          path: ${{ runner.temp }}/hipocratiq-prod-public-evidence.json
+          retention-days: 7
+          if-no-files-found: error
+
+  aws-prod-metadata:
+    name: Approved production EC2 and SSM metadata (no shell/PHI/deploy)
+    # PRs can NEVER assume AWS credentials. The owner must explicitly enable
+    # both opt-in variables and environment reviewers on protected develop.
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/develop' &&
+      vars.HIPOCRATIQ_PROD_METADATA_ENABLED == 'true' &&
+      vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH == 'true' &&
+      vars.HIPOCRATIQ_PROD_METADATA_ACK == 'READ_ONLY_PROD_METADATA'
+    needs: safety-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: hipocratiq-prod-readonly
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AUDIT_ENABLED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ENABLED }
+      AUDIT_PUSH_APPROVED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH }
+      AUDIT_ACKNOWLEDGEMENT: ${{ vars.HIPOCRATIQ_PROD_METADATA_ACK }
+      AUDIT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }
+      AUDIT_AWS_REGION: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }
+      AUDIT_AWS_INSTANCE_ID: ${{ vars.HIPOCRATIQ_PROD_INSTANCE_ID }
+      AUDIT_AWS_VPC_ID: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }
+      AUDIT_AWS_ROLE_ARN: ${{ vars.HIPOCRATIQ_PROD_READONLY_ROLE_ARN }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate opt-in, exact target and read-only role BEFORE OIDC
+        run: |
+          python3 scripts/prod_version_evidence_readonly.py --mode preflight --report /dev/null
+      - name: Assume temporary metadata-only IAM role (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.HIPOCRATIQ_PROD_READONLY_ROLE_ARN }
+          role-session-name: hipocratiqProdMetadata
+          aws-region: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }
+          allowed-account-ids: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }
+          mask-aws-account-id: true
+      - name: Describe approved EC2 and SSM status only
+        env:
+          PROBE_REPORT: ${{ runner.temp }}/hipocratiq-prod-aws-metadata.json
+        run: |
+          set -euo pipefail
+          python3 scripts/prod_version_evidence_readonly.py --mode aws --report "$PROBE_REPORT"
+          echo "No Docker image SHA is available from EC2/SSM metadata alone."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-production-aws-metadata-not-code-proof
+          path: ${{ runner.temp }}/hipocratiq-prod-aws-metadata.json
+          retention-days: 7
+          if-no-files-found: error
