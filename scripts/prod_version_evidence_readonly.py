@@ -109,8 +109,8 @@ def aws_call(command, runner=None):
     except (ValueError, TypeError):
         raise EvidenceError("Malformed AWS describe response") from None
 
-def aws_probe(env, runner=None):
-    """EC2 identification, NOT deployed source/version identification."""
+def aws_preflight(env):
+    """Validate all opt-ins before attempting any AWS credential assumption."""
     account = env.get("AUDIT_AWS_ACCOUNT_ID", "")
     region = env.get("AUDIT_AWS_REGION", "")
     instance = env.get("AUDIT_AWS_INSTANCE_ID", "")
@@ -128,6 +128,13 @@ def aws_probe(env, runner=None):
         raise EvidenceError("Invalid verified AWS target identifiers")
     if role != f"arn:aws:iam::{account}:role/HIPOCRATIQ-PROD-ReadOnly":
         raise EvidenceError("Only the exact approved production metadata role is allowed")
+    return {"account": account, "region": region, "instance": instance, "vpc": vpc, "role": role}
+
+def aws_probe(env, runner=None):
+    """EC2 identification, NOT deployed source/version identification."""
+    config = aws_preflight(env)
+    account, region, instance, vpc = (config[key] for key in
+                                      ("account", "region", "instance", "vpc"))
 
     # No credentials or arbitrary runtime command are requested by this script.
     previous_region = os.environ.get("AUDIT_AWS_REGION")
@@ -193,16 +200,19 @@ def aws_probe(env, runner=None):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["public", "aws"], required=True)
+    parser.add_argument("--mode", choices=["public", "aws", "preflight"], required=True)
     parser.add_argument("--report", required=True)
     args = parser.parse_args()
     try:
-        result = public_probe() if args.mode == "public" else aws_probe(os.environ)
+        result = (public_probe() if args.mode == "public" else
+                  {"status": "PRE_AWS_OPT_IN_VALIDATED", **aws_preflight(os.environ)}
+                  if args.mode == "preflight" else aws_probe(os.environ))
         from pathlib import Path
         target = Path(args.report)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n",
-                          encoding="utf-8")
+        if args.mode != "preflight":
+            target.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n",
+                              encoding="utf-8")
         print("EVIDENCE_STATUS=" + result["status"])
         print("SHA_VERIFIED=false")  # No supported production SHA proof in these modes.
         return 0
