@@ -95,6 +95,10 @@ jobs:
       - name: Validate opt-in, exact target and read-only role BEFORE OIDC
         run: |
           python3 scripts/prod_version_evidence_readonly.py --mode preflight --report /dev/null
+      - name: Verify protected develop and exact immutable SHA before AWS
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/uat_github_protected_develop_preflight.py
       - name: Assume temporary metadata-only IAM role (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
