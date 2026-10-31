@@ -369,6 +369,33 @@ class PatientPortalTest extends TestCase
         $this->assertDatabaseCount('patient_intake_drafts', 1);
     }
 
+    public function test_patient_triage_rejects_improbable_vital_signs_with_clear_errors(): void
+    {
+        $this->withSpaOrigin()->postJson('/api/v1/auth/patient/triage', [
+            'reason' => 'Datos sintéticos para validar bloqueo de captura.',
+            'temperature_c' => 26,
+            'systolic_bp' => 55,
+            'diastolic_bp' => 170,
+            'heart_rate' => 250,
+            'respiratory_rate' => 3,
+            'oxygen_saturation' => 20,
+            'triage_level' => 'IV',
+            'triage_status' => 'draft',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors([
+                'temperature_c',
+                'systolic_bp',
+                'diastolic_bp',
+                'heart_rate',
+                'respiratory_rate',
+                'oxygen_saturation',
+            ])
+            ->assertJsonPath('errors.temperature_c.0', 'Verifica la temperatura: el rango técnico aceptado es 30–45 °C.')
+            ->assertJsonPath('errors.oxygen_saturation.0', 'Verifica la saturación de oxígeno: el rango técnico aceptado es 70–100%.');
+
+        $this->assertDatabaseCount('patient_intakes', 0);
+    }
+
     public function test_patient_rejects_invalid_profile_and_triage_payloads(): void
     {
         $this->withSpaOrigin()->patchJson('/api/v1/auth/patient/profile', [

@@ -19,7 +19,7 @@ class MembershipPlanUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'key' => ['sometimes', 'string', 'max:60', 'regex:/^[a-z][a-z0-9\-_]*$/', Rule::unique('plans', 'key')->ignore($this->route('plan'))],
+            'key' => ['sometimes', 'string', 'max:60', 'regex:/^[a-z0-9][a-z0-9_-]*$/', Rule::unique('plans', 'key')->ignore($this->route('plan'))],
             'name' => ['sometimes', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:500'],
             'monthly_price_usd' => ['sometimes', 'numeric', 'min:0'],

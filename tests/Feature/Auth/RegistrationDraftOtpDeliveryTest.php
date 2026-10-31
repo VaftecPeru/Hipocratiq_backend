@@ -105,6 +105,35 @@ class RegistrationDraftOtpDeliveryTest extends TestCase
         $this->assertSame([true], $sender->lockAcquired);
     }
 
+    public function test_doctor_draft_preserves_previous_otp_when_email_resend_fails(): void
+    {
+        $sender = $this->lockAwareRegistrationSender();
+        $this->app->instance(RegistrationOtpSender::class, $sender);
+        $store = $this->app->make(DoctorRegistrationDraftStore::class);
+        $token = $store->create([
+            'practice_type' => 'independent',
+            'doctor_name' => 'Dr. UAT',
+            'doctor_email' => 'doctor@example.test',
+        ]);
+        $store->selectPlan($token, ['key' => 'basic']);
+
+        $firstChallenge = $store->issueOtp($token);
+        $this->travel(config('authentication.otp.resend_seconds') + 1)->seconds();
+        $sender->shouldFail = true;
+
+        try {
+            $store->issueOtp($token, true);
+            $this->fail('A failed e-mail resend must not be accepted.');
+        } catch (ServiceUnavailableHttpException) {
+            // Expected delivery failure.
+        }
+
+        $draft = $store->get($token);
+        $this->assertSame($firstChallenge['challenge_id'], $draft['otp']['challenge_id']);
+        $this->assertSame('sent', $draft['otp']['delivery_status']);
+        $this->assertSame(0, $draft['resend_count']);
+    }
+
     private function lockAwareRegistrationSender(): object
     {
         return new class implements RegistrationOtpSender
