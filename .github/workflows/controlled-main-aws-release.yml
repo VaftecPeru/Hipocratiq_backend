@@ -1,0 +1,165 @@
+name: Controlled HIPOCRATIQ main to AWS (manual SSM, default NO-GO)
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - .github/workflows/controlled-main-aws-release.yml
+      - scripts/release_main_gate.py
+      - scripts/ssm_approved_release.py
+      - tests/Scripts/test_release_main_gate.py
+      - tests/Scripts/test_ssm_approved_release.py
+      - infra/aws/prod-deploy-oidc-role.json
+  push:
+    branches: [main]
+    paths:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      acknowledgement:
+        description: 'Exact value APPROVED_HIPOCRATIQ_CONTROLLED_PRODUCTION'
+        type: string
+        required: true
+      approved_frontend_sha:
+        description: 'Full 40-character Frontend main SHA, verified independently'
+        type: string
+        required: true
+      change_id:
+        description: 'Reviewed change record (no PHI/secrets)'
+        type: string
+        required: true
+      clinical_uat_evidence:
+        description: 'Signed UAT clinical 36/36 evidence reference (no patient data)'
+        type: string
+        required: true
+      security_review_evidence:
+        description: 'Private security audit / rotation sign-off reference'
+        type: string
+        required: true
+      restore_evidence:
+        description: 'Isolated PostgreSQL restore sign-off reference'
+        type: string
+        required: true
+      backup_encryption_evidence:
+        description: 'Verified at-rest encryption evidence reference'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: hipocratiq-controlled-production-release
+  cancel-in-progress: false
+
+jobs:
+  offline-safety:
+    name: Synthetic release safety and SSM command protection (NO AWS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile scripts and test all forbidden actions
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/release_main_gate.py scripts/ssm_approved_release.py
+          python3 -m unittest discover -s tests/Scripts -p 'test_release_main_gate.py' -v
+          python3 -m unittest discover -s tests/Scripts -p 'test_ssm_approved_release.py' -v
+          python3 -m unittest discover -s tests/Scripts -p 'test_prod_deploy_oidc_role.py' -v
+          bash -n scripts/deploy-production.sh
+          bash scripts/test-deploy-preflight-failclosed.sh
+
+  main-release-evidence:
+    name: Main release GO or NO-GO based on exact source and open P0 issues
+    if: github.event_name != 'pull_request'
+    needs: offline-safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      RELEASE_DEPLOY_ENABLED: ${{ vars.HIPOCRATIQ_PROD_DEPLOY_ENABLED }}
+      RELEASE_ACK: ${{ inputs.acknowledgement }}
+      APPROVED_FRONTEND_SHA: ${{ inputs.approved_frontend_sha }}
+      RELEASE_CHANGE_ID: ${{ inputs.change_id }}
+      UAT_CLINICAL_EVIDENCE: ${{ inputs.clinical_uat_evidence }}
+      SECURITY_EVIDENCE: ${{ inputs.security_review_evidence }}
+      UAT_RESTORE_EVIDENCE: ${{ inputs.restore_evidence }}
+      BACKUP_AT_REST_EVIDENCE: ${{ inputs.backup_encryption_evidence }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check main SHA/branch protection and all P0 issues; NEVER deploy on push
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            python3 scripts/release_main_gate.py --mode deploy
+          else
+            python3 scripts/release_main_gate.py --mode readiness
+          fi
+
+  approved-ssm-release:
+    name: Approved SSM production deployment: Backend then Frontend
+    # No push to main can deploy. Default vars are unset => always SKIPPED.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      needs.main-release-evidence.result == 'success' &&
+      vars.HIPOCRATIQ_PROD_DEPLOY_ENABLED == 'true'
+    needs: [offline-safety, main-release-evidence]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 135
+    environment: hipocratiq-production
+    permissions:
+      contents: read
+      issues: read
+      id-token: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      RELEASE_DEPLOY_ENABLED: ${{ vars.HIPOCRATIQ_PROD_DEPLOY_ENABLED }}
+      DEPLOY_ENABLED: ${{ vars.HIPOCRATIQ_PROD_DEPLOY_ENABLED }}
+      RELEASE_ACK: ${{ inputs.acknowledgement }}
+      APPROVED_FRONTEND_SHA: ${{ inputs.approved_frontend_sha }}
+      RELEASE_CHANGE_ID: ${{ inputs.change_id }}
+      UAT_CLINICAL_EVIDENCE: ${{ inputs.clinical_uat_evidence }}
+      SECURITY_EVIDENCE: ${{ inputs.security_review_evidence }}
+      UAT_RESTORE_EVIDENCE: ${{ inputs.restore_evidence }}
+      BACKUP_AT_REST_EVIDENCE: ${{ inputs.backup_encryption_evidence }}
+      RELEASE_BACKUP_AT_REST_VERIFIED: ${{ vars.HIPOCRATIQ_BACKUP_ENCRYPTION_ADMIN_VERIFIED }}
+      DEPLOY_BACKEND_SHA: ${{ github.sha }}
+      DEPLOY_FRONTEND_SHA: ${{ inputs.approved_frontend_sha }}
+      PROD_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }}
+      PROD_AWS_REGION: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }}
+      PROD_INSTANCE_ID: ${{ vars.HIPOCRATIQ_PROD_INSTANCE_ID }}
+      PROD_VPC_ID: ${{ vars.HIPOCRATIQ_PROD_VPC_ID }}
+      PROD_ROLE_ARN: ${{ vars.HIPOCRATIQ_PROD_DEPLOY_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Repeat GitHub P0 and exact main SHA checks AFTER Environment approval
+        run: |
+          set -euo pipefail
+          python3 scripts/release_main_gate.py --mode deploy
+          python3 scripts/ssm_approved_release.py --mode validate
+      - name: Assume short-lived approved AWS deploy role via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.HIPOCRATIQ_PROD_DEPLOY_ROLE_ARN }}
+          role-session-name: hipocratiqApprovedMainRelease
+          aws-region: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }}
+          allowed-account-ids: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+      - name: Execute approved backend and frontend scripts through AWS SSM
+        run: |
+          set -euo pipefail
+          python3 scripts/ssm_approved_release.py --mode deploy
+      - name: Verify public application responds without PHI or authentication
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 https://hipocratiq.com/ >/dev/null
+          curl --fail --silent --show-error --max-time 20 https://hipocratiq.com/backend/api/health/ready >/dev/null
+          echo "HTTPS_HEALTH=PASS; DOCKER_RUNTIME_SHA_REQUIRES_INDEPENDENT_EVIDENCE"
