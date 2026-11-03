@@ -49,10 +49,10 @@ class ActionsMetadataAuditTest(unittest.TestCase):
         def fetch(path, _token):
             seen.append(path)
             if "actions/artifacts?" in path:
-                if "page=1" in path:
+                if path.endswith("&page=1"):
                     return {"total_count": 101, "artifacts": [
                         {"expired": False} for _ in range(100)]}
-                if "page=2" in path:
+                if path.endswith("&page=2"):
                     return {"total_count": 101, "artifacts": [{"expired": False}]}
                 self.fail("Unexpected artifact page")
             return []
