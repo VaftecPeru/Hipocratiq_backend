@@ -49,6 +49,8 @@ class ControlledReleaseSafetyTests(unittest.TestCase):
         commands = deploy.command_lines(deploy.B, BE_SHA, env, False)
         joined = "\n".join(commands)
         self.assertIn("git rev-parse origin/main", joined)
+        self.assertEqual(len(commands), 1)
+        self.assertTrue(commands[0].startswith("bash -lc "))
         self.assertIn("git show", joined)
         self.assertIn("APPROVED_FOR_PRODUCTION", joined)
         self.assertNotIn("UAT-36-signed", deploy.command_lines(deploy.B, BE_SHA, env, False)[0])
