@@ -93,6 +93,8 @@ def aws_call(command, runner=None):
         ("sts", "get-caller-identity"),
         ("ec2", "describe-instances"),
         ("ec2", "describe-instance-status"),
+        ("ec2", "describe-volumes"),
+        ("ec2", "describe-snapshots"),
         ("ssm", "describe-instance-information"),
     }
     if tuple(command[:2]) not in safe:
