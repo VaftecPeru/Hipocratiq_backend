@@ -70,7 +70,7 @@ class ActionsMetadataAuditTest(unittest.TestCase):
             with self.subTest(response=str(response)):
                 def fetch(path, _token):
                     if "actions/artifacts?" in path:
-                        return response if "page=1" in path else {"total_count": 3, "artifacts": []}
+                        return response if path.endswith("&page=1") else {"total_count": 3, "artifacts": []}
                     return []
                 with self.assertRaises(audit.InventoryError):
                     audit.collect("synthetic-token", fetch=fetch)
