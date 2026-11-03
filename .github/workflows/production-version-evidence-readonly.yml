@@ -8,6 +8,8 @@ on:
       - tests/Scripts/test_prod_version_evidence_readonly.py
       - scripts/prod_backup_metadata_readonly.py
       - tests/Scripts/test_prod_backup_metadata_readonly.py
+      - infra/aws/prod-readonly-oidc-role.json
+      - tests/Scripts/test_prod_oidc_readonly_role.py
   push:
     branches: [develop]
     paths:
@@ -16,6 +18,8 @@ on:
       - tests/Scripts/test_prod_version_evidence_readonly.py
       - scripts/prod_backup_metadata_readonly.py
       - tests/Scripts/test_prod_backup_metadata_readonly.py
+      - infra/aws/prod-readonly-oidc-role.json
+      - tests/Scripts/test_prod_oidc_readonly_role.py
   workflow_dispatch:
 
 permissions:
@@ -40,6 +44,7 @@ jobs:
           python3 -m unittest discover -s tests/Scripts -p test_prod_version_evidence_readonly.py -v
           python3 -m py_compile scripts/prod_backup_metadata_readonly.py tests/Scripts/test_prod_backup_metadata_readonly.py
           python3 -m unittest discover -s tests/Scripts -p test_prod_backup_metadata_readonly.py -v
+          python3 -m unittest discover -s tests/Scripts -p test_prod_oidc_readonly_role.py -v
       - name: Separate version evidence from release authorization
         run: |
           echo "Tests use synthetic AWS fixtures only; deployment SHAs not inferred from GitHub."

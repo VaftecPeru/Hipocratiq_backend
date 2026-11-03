@@ -7,6 +7,7 @@ current Frontend develop and release PR #80 commit, not an earlier build.
 """
 import argparse
 import json
+import os
 import re
 import sys
 from urllib.error import HTTPError, URLError
@@ -34,11 +35,19 @@ def fetch_public_json(path):
     }
     if path not in allowed:
         raise ReleaseSyncError("Disallowed GitHub evidence path.")
-    request = Request(GITHUB_API + path, headers={
+    headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "HIPOCRATIQ-FullStack-Release-Sync",
-    })
+    }
+    # GitHub-hosted CI should use its ephemeral, read-only token instead of the
+    # 60 req/hour anonymous API quota. Never include token or API bodies in logs.
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true" and not token:
+        raise ReleaseSyncError("GitHub Actions read-only API token is required.")
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    request = Request(GITHUB_API + path, headers=headers)
     try:
         with urlopen(request, timeout=12) as response:
             data = response.read(200001)

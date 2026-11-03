@@ -64,6 +64,9 @@ jobs:
           python3 -m unittest discover -s tests/Scripts -p 'test_check_current_tracked_credentials.py' -v
           python3 scripts/check_current_tracked_credentials.py --repository .
 
+      - name: Validate production OIDC IAM contract (offline, no AWS credentials)
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_prod_oidc_readonly_role.py' -v
+
       - name: Create environment file
         run: cp .env.example .env
 

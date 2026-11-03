@@ -1,7 +1,9 @@
 """Offline fail-closed Frontend SHA coherence tests (no HTTP requests)."""
 import importlib.util
 import pathlib
+import os
 import unittest
+from unittest.mock import patch
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "verify_frontend_release_sync.py"
 spec = importlib.util.spec_from_file_location("release_sync", SCRIPT)
@@ -60,6 +62,51 @@ class FrontendReleaseSyncTests(unittest.TestCase):
     def test_rejects_non_whitelisted_api_requests(self):
         with self.assertRaises(module.ReleaseSyncError):
             module.fetch_public_json("/user")
+
+
+    def test_ci_uses_temporary_read_only_token_for_whitelisted_public_api(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self, max_bytes):
+                self.max_bytes = max_bytes
+                return b'{"commit":{"sha":"synthetic"}}'
+        class FakeHttp:
+            def __init__(self):
+                self.requests = []
+            def __call__(self, req, timeout):
+                self.requests.append((req, timeout))
+                return FakeResponse()
+        fake = FakeHttp()
+        with patch.dict(os.environ, {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_TOKEN": "synthetic-ephemeral-token"
+        }, clear=True), patch.object(module, "urlopen", fake):
+            got = module.fetch_public_json(
+                "/repos/VaftecPeru/Hipocratiq_Frontend/branches/develop"
+            )
+        self.assertEqual(got["commit"]["sha"], "synthetic")
+        self.assertEqual(len(fake.requests), 1)
+        request, timeout = fake.requests[0]
+        self.assertEqual(timeout, 12)
+        self.assertEqual(
+            request.get_header("Authorization"), "Bearer synthetic-ephemeral-token"
+        )
+        self.assertEqual(
+            request.full_url,
+            "https://api.github.com/repos/VaftecPeru/Hipocratiq_Frontend/branches/develop"
+        )
+
+    def test_ci_missing_token_fails_without_network(self):
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}, clear=True), \
+             patch.object(module, "urlopen") as http:
+            with self.assertRaisesRegex(module.ReleaseSyncError, "token is required"):
+                module.fetch_public_json(
+                    "/repos/VaftecPeru/Hipocratiq_Frontend/branches/develop"
+                )
+            http.assert_not_called()
 
 
 if __name__ == "__main__":
