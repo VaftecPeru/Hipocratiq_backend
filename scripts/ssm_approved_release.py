@@ -127,7 +127,7 @@ def command_lines(repo_dir, sha, e, is_frontend):
         variables["WEB_UAT_EVIDENCE"] = e["UAT_CLINICAL_EVIDENCE"]
     env_prefix = " ".join(k + "=" + shlex.quote(v) for k, v in variables.items())
     qdir, qsha = shlex.quote(repo_dir), shlex.quote(sha)
-    return [
+    lines = [
         "set -Eeuo pipefail",
         "umask 077",
         f"cd {qdir}",
@@ -142,6 +142,9 @@ def command_lines(repo_dir, sha, e, is_frontend):
         "chmod 700 \"$script_file\"",
         f"{env_prefix} bash \"$script_file\"",
     ]
+    # AWS-RunShellScript may use /bin/sh (dash), not Bash. Always invoke
+    # explicit bash so pipefail, traps and strict mode cannot silently fail.
+    return ["bash -lc " + shlex.quote("\n".join(lines))]
 
 def send_and_wait(cfg, commands, label, runner=subprocess.run, sleep=time.sleep):
     # AWS-RunShellScript runs on ONE verified SSM-enabled instance only.
