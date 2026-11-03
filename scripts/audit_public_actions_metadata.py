@@ -55,6 +55,8 @@ def collect(token: str, fetch=github_json):
             raise InventoryError("INVALID_ARTIFACT_TOTAL")
         if expected_artifact_total is None:
             expected_artifact_total = reported
+        elif reported != expected_artifact_total:
+            raise InventoryError("ARTIFACT_TOTAL_CHANGED_DURING_SCAN")
         artifacts = payload["artifacts"]
         if len(artifacts) > PAGE_SIZE:
             raise InventoryError("INVALID_PAGE_SIZE")
@@ -64,7 +66,9 @@ def collect(token: str, fetch=github_json):
             artifacts_total += 1
             expired_total += int(artifact["expired"])
         metadata_pages += 1
-        if artifacts_total >= reported and len(artifacts) < PAGE_SIZE:
+        if artifacts_total > expected_artifact_total:
+            raise InventoryError("ARTIFACT_COUNT_EXCEEDS_REPORTED_TOTAL")
+        if artifacts_total == expected_artifact_total:
             break
         if not artifacts:
             break
