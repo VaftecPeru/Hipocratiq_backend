@@ -57,6 +57,13 @@ jobs:
           python3 -m unittest discover -s tests/Scripts -p 'test_public_env_template.py' -v
           python3 scripts/check_public_env_template.py .env.example
 
+      - name: Reject tracked credential files and high-confidence token formats
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests/Scripts -p 'test_check_current_tracked_credentials.py' -v
+          python3 scripts/check_current_tracked_credentials.py --repository .
+
       - name: Create environment file
         run: cp .env.example .env
 
