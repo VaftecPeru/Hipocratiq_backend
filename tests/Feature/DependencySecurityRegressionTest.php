@@ -14,7 +14,7 @@ final class DependencySecurityRegressionTest extends TestCase
 {
     public function test_safe_synthetic_xlsx_round_trip_remains_compatible(): void
     {
-        $workbook = new Spreadsheet();
+        $workbook = new Spreadsheet;
         $sheet = $workbook->getActiveSheet();
         $sheet->setCellValue('A1', 'Registro sintético');
         $sheet->setCellValue('B1', 42);
@@ -25,7 +25,7 @@ final class DependencySecurityRegressionTest extends TestCase
         try {
             $writer = new XlsxWriter($workbook);
             $writer->save($path);
-            $reader = new XlsxReader();
+            $reader = new XlsxReader;
             $readBack = $reader->load($path);
             try {
                 self::assertSame('Registro sintético', $readBack->getActiveSheet()->getCell('A1')->getValue());
@@ -41,7 +41,7 @@ final class DependencySecurityRegressionTest extends TestCase
 
     public function test_mime_email_with_synthetic_attachment_serializes_safely(): void
     {
-        $email = new Email();
+        $email = new Email;
         $email->from('qa@example.test')
             ->to('test@example.test')
             ->subject('Prueba de correo')
