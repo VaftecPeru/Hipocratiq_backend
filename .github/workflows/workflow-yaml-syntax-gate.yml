@@ -47,8 +47,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           ruby -r yaml <<'RUBY'
-          invalid = "jobs:\\n  deploy:\\n    name: Production release: Backend then Frontend\\n"
-          valid = "jobs:\\n  deploy:\\n    name: 'Production release: Backend then Frontend'\\n"
+          invalid = ["jobs:", "  deploy:", "    name: Production release: Backend then Frontend"].join(10.chr)
+          valid = ["jobs:", "  deploy:", "    name: 'Production release: Backend then Frontend'"].join(10.chr)
           begin
             YAML.parse(invalid)
             abort('REGRESSION=FAIL invalid scalar accepted')
