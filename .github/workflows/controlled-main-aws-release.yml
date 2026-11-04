@@ -102,7 +102,7 @@ jobs:
           fi
 
   approved-ssm-release:
-    name: Approved SSM production deployment: Backend then Frontend
+    name: "Approved SSM production deployment: Backend then Frontend"
     # No push to main can deploy. Default vars are unset => always SKIPPED.
     if: >-
       github.event_name == 'workflow_dispatch' &&
