@@ -23,8 +23,10 @@ final class DependencySecurityRegressionTest extends TestCase
         self::assertNotFalse($path);
 
         try {
-            (new XlsxWriter($workbook))->save($path);
-            $readBack = (new XlsxReader())->load($path);
+            $writer = new XlsxWriter($workbook);
+            $writer->save($path);
+            $reader = new XlsxReader();
+            $readBack = $reader->load($path);
             try {
                 self::assertSame('Registro sintético', $readBack->getActiveSheet()->getCell('A1')->getValue());
                 self::assertSame(42, $readBack->getActiveSheet()->getCell('B1')->getValue());
@@ -39,8 +41,8 @@ final class DependencySecurityRegressionTest extends TestCase
 
     public function test_mime_email_with_synthetic_attachment_serializes_safely(): void
     {
-        $email = (new Email())
-            ->from('qa@example.test')
+        $email = new Email();
+        $email->from('qa@example.test')
             ->to('test@example.test')
             ->subject('Prueba de correo')
             ->text('Contenido de prueba, sin datos clínicos')
