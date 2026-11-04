@@ -6,6 +6,12 @@ on:
       - scripts/phase2_oidc_contract_offline.py
       - tests/Scripts/test_phase2_oidc_contract_offline.py
       - .github/workflows/phase2-oidc-contract-offline.yml
+  push:
+    branches: [develop]
+    paths:
+      - scripts/phase2_oidc_contract_offline.py
+      - tests/Scripts/test_phase2_oidc_contract_offline.py
+      - .github/workflows/phase2-oidc-contract-offline.yml
   workflow_dispatch:
 
 permissions:
