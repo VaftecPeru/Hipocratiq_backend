@@ -54,7 +54,14 @@ def sensitive_path_category(path: str) -> str | None:
         return "TRACKED_RUNTIME_ENV"
     if name in {"auth.json", "credentials.json", "id_rsa", "id_ed25519", "id_ecdsa"}:
         return "TRACKED_CREDENTIAL_FILE"
-    if name.endswith((".p12", ".pfx", ".key", ".dump", ".sql.gz", ".sqlite3")):
+    # Suspicious credential containers and database exports are blocked even
+    # when binary, oversized, or lacking a recognisable token signature.
+    # Public .pub/.crt certificates are intentionally not included.
+    if name.endswith((
+        ".p8", ".p12", ".pfx", ".pem", ".key", ".jks", ".keystore",
+        ".dump", ".backup", ".pgdump", ".sql.gz", ".sql.zip",
+        ".sqlite", ".sqlite3", ".db", ".db.gz",
+    )):
         return "TRACKED_SENSITIVE_EXPORT_OR_KEY"
     return None
 
