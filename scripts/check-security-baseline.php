@@ -9,6 +9,9 @@ require dirname(__DIR__).'/vendor/autoload.php';
 $requirements = [
     'laravel/framework' => '13.30.0',
     'league/flysystem' => '3.35.3',
+    // #116 / #127: minimum fixed versions; never waive Composer advisories.
+    'phpoffice/phpspreadsheet' => '5.10.0',
+    'symfony/mime' => '8.1.10',
 ];
 
 $failed = false;
