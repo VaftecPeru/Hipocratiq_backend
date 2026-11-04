@@ -1,0 +1,34 @@
+name: "Phase 2 #156 oidc-contract offline CI (NO AWS)"
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - scripts/phase2_oidc_contract_offline.py
+      - tests/Scripts/test_phase2_oidc_contract_offline.py
+      - .github/workflows/phase2-oidc-contract-offline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety:
+    name: "P2 #156 synthetic offline regression"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile and test without AWS or database credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/phase2_oidc_contract_offline.py tests/Scripts/test_phase2_oidc_contract_offline.py
+          python3 -m unittest discover -s tests/Scripts -p 'test_phase2_oidc_contract_offline.py' -v
+      - name: Check OIDC role and workflow contract in repository
+        run: python3 scripts/phase2_oidc_contract_offline.py --repository .
+      - name: Do not grant production approval
+        run: |
+          echo "Phase 2 CI is synthetic; actual AWS, PostgreSQL restore and EBS migration remain unverified."
+          echo "No changes to main or AWS production; release GO requires independent approval."
