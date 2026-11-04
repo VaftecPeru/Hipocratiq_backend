@@ -3,6 +3,8 @@ name: P0-102 Security & Composer PR gates (redacted)
 on:
   pull_request:
     branches: [develop, main]
+  push:
+    branches: [develop]
   workflow_dispatch:
 
 permissions:
