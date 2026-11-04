@@ -1,0 +1,60 @@
+name: Workflow YAML syntax gate (offline, no AWS)
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-yaml-parse:
+    name: Parse all GitHub Actions YAML (read-only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Detect invalid YAML in any workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -r yaml <<'RUBY'
+          files = Dir.glob('.github/workflows/*.{yml,yaml}').sort
+          abort('WORKFLOW_YAML=NO_FILES_FOUND') if files.empty?
+          errors = 0
+          files.each do |path|
+            begin
+              YAML.parse_file(path)
+            rescue Psych::SyntaxError => e
+              warn "WORKFLOW_YAML=INVALID path=#{path} line=#{e.line} column=#{e.column}"
+              errors += 1
+            end
+          end
+          abort("WORKFLOW_YAML=FAIL count=#{errors}") unless errors.zero?
+          puts "WORKFLOW_YAML=PASS checked=#{files.length}"
+          RUBY
+      - name: Regression guard for unquoted colon in job name
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -r yaml <<'RUBY'
+          invalid = "jobs:\\n  deploy:\\n    name: Production release: Backend then Frontend\\n"
+          valid = "jobs:\\n  deploy:\\n    name: 'Production release: Backend then Frontend'\\n"
+          begin
+            YAML.parse(invalid)
+            abort('REGRESSION=FAIL invalid scalar accepted')
+          rescue Psych::SyntaxError
+            # Expected: colon-space in an unquoted scalar is not YAML.
+          end
+          YAML.parse(valid)
+          puts 'REGRESSION=PASS; NO AWS CALLS'
+          RUBY
