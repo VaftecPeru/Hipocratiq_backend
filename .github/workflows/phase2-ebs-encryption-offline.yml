@@ -6,6 +6,12 @@ on:
       - scripts/phase2_ebs_encryption_assessment.py
       - tests/Scripts/test_phase2_ebs_encryption_assessment.py
       - .github/workflows/phase2-ebs-encryption-offline.yml
+  push:
+    branches: [develop]
+    paths:
+      - scripts/phase2_ebs_encryption_assessment.py
+      - tests/Scripts/test_phase2_ebs_encryption_assessment.py
+      - .github/workflows/phase2-ebs-encryption-offline.yml
   workflow_dispatch:
 
 permissions:
