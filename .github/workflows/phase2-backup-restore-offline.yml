@@ -6,6 +6,12 @@ on:
       - scripts/phase2_backup_drill_evidence.py
       - tests/Scripts/test_phase2_backup_drill_evidence.py
       - .github/workflows/phase2-backup-restore-offline.yml
+  push:
+    branches: [develop]
+    paths:
+      - scripts/phase2_backup_drill_evidence.py
+      - tests/Scripts/test_phase2_backup_drill_evidence.py
+      - .github/workflows/phase2-backup-restore-offline.yml
   workflow_dispatch:
 
 permissions:
