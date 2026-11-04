@@ -72,6 +72,32 @@ class CurrentTrackedCredentialsTest(unittest.TestCase):
             self.assertNotIn("ghp_" + "b" * 36, json.dumps(report))
             self.assertFalse(report["filenames_or_credentials_recorded"])
 
+    def test_flags_pem_signing_keys_and_database_exports_without_leaking_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            self.build_repo(root, {
+                "keys/certificate-signing.pem": b"synthetic-only-not-a-key",
+                "keys/ios-signing.p8": b"synthetic-only-not-a-key",
+                "backups/patients.backup": b"synthetic-not-a-database",
+                "backups/patients.sqlite": b"synthetic-not-a-database",
+                "backups/patients.db.gz": b"synthetic-not-a-database",
+                "certificates/ca.pub": b"synthetic-public-key",
+                ".env.template": b"DB_PASSWORD=\n",
+            })
+            report = guard.scan(root)
+            self.assertEqual(report["status"], "NO_GO")
+            self.assertEqual(
+                report["findings_by_category"]["TRACKED_SENSITIVE_EXPORT_OR_KEY"], 5
+            )
+            self.assertEqual(report["tracked_files"], 7)
+            self.assertFalse(report["filenames_or_credentials_recorded"])
+            self.assertFalse(report["security_clearance_granted"])
+            self.assertNotIn("patients", json.dumps(report))
+
+    def test_public_keys_and_example_env_are_not_classified_as_secrets(self):
+        for path in ("readme.pub", ".env.example", ".env.sample", ".env.template"):
+            self.assertIsNone(guard.sensitive_path_category(path))
+
     def test_source_string_concatenations_are_not_leaks(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
