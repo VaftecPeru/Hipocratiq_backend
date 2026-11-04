@@ -1,0 +1,127 @@
+name: P0-102 Security & Composer PR gates (redacted)
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-102-phase1-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tracked-secrets-and-history:
+    name: Tracked secrets and redacted history (NOT clearance)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout all reachable Git history, without persistent token
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test current-tree and history scanners with synthetic fixtures
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m unittest discover -s tests/Scripts -p 'test_public_env_template.py' -v
+          python3 -m unittest discover -s tests/Scripts -p 'test_check_current_tracked_credentials.py' -v
+          python3 -m unittest discover -s tests/Scripts -p 'test_audit_public_git_history.py' -v
+      - name: Reject current tracked secret candidates and non-empty template credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/check_public_env_template.py .env.example
+          python3 scripts/check_current_tracked_credentials.py --repository .
+      - name: Audit reachable historical indicators (redacted, diagnostic)
+        shell: bash
+        env:
+          HISTORY_REPORT: ${{ runner.temp }}/history-audit-counts-only.json
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/audit_public_git_history.py --repository . --report "$HISTORY_REPORT"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          result = json.loads(Path(os.environ["HISTORY_REPORT"]).read_text())
+          assert result["secret_values_recorded"] is False
+          assert result["sensitive_paths_recorded"] is False
+          assert result["aws_calls"] == 0
+          assert result["status"] in {"PRIVATE_REVIEW_REQUIRED", "NO_SCANNER_SIGNAL_NOT_CLEARANCE"}
+          print("HISTORY=COUNTS_ONLY; SECURITY_CLEARANCE=NOT_GRANTED")
+          PY
+      - name: Explain limits
+        run: |
+          echo 'Current tracked secrets block the PR. Historical indicators require private review.'
+          echo 'No artifacts containing credential values, code paths, PHI or AWS metadata are uploaded.'
+          echo 'P0 #102, UAT #92 and production release gates remain independent.'
+
+  gitleaks-pr-delta:
+    name: Gitleaks PR changeset (no findings in public logs)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout complete history without credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan changed commits with pinned open-source Gitleaks CLI
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -Eeuo pipefail
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo 'GITLEAKS=FAIL_CLOSED_BASE_UNAVAILABLE'
+            exit 2
+          fi
+          merge_base="$(git merge-base "$BASE_SHA" HEAD)"
+          if [ -z "$merge_base" ]; then
+            echo 'GITLEAKS=FAIL_CLOSED_MERGE_BASE_UNAVAILABLE'
+            exit 2
+          fi
+          # Suppress ALL scanner stdout/stderr; even redacted output may expose paths.
+          # No SARIF, untrusted PR comments, reports or artifact uploads.
+          set +e
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner "--log-opts=${merge_base}..HEAD" . \
+            > "$RUNNER_TEMP/gitleaks-redacted-private.log" 2>&1
+          code=$?
+          set -e
+          rm -f "$RUNNER_TEMP/gitleaks-redacted-private.log"
+          if [ "$code" -ne 0 ]; then
+            echo 'GITLEAKS=BLOCKED_OR_SCANNER_ERROR; private triage required'
+            exit 1
+          fi
+          echo 'GITLEAKS=NO_CHANGESET_SIGNAL_NOT_SECURITY_CLEARANCE'
+
+  dependency-advisories:
+    name: Composer locked advisories (PhpSpreadsheet and Symfony)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Validate Composer manifest and lock
+        run: composer validate --no-interaction --no-check-publish
+      - name: Fail on locked dependency advisories; never suppress CVEs
+        run: composer audit --locked --no-interaction
+      - name: Security release is still NO-GO without human review
+        run: echo 'Composer audit pass is not P0-102 private approval or P0-92 clinical UAT.'
