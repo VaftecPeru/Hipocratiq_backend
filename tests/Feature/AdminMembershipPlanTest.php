@@ -150,6 +150,33 @@ class AdminMembershipPlanTest extends TestCase
             ->assertJsonPath('data.name', 'Básico Renombrado');
     }
 
+    public function test_plan_creation_rejects_a_slug_starting_with_a_hyphen(): void
+    {
+        $this->authenticateAdmin();
+
+        $this->withSpaOrigin()
+            ->postJson('/api/v1/auth/admin/memberships/plans', [
+                'key' => '-startup',
+                'name' => 'Clave inválida',
+                'monthly_price_usd' => 49,
+                'annual_price_usd' => 499,
+                'features' => ['agenda'],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['key']);
+    }
+
+    public function test_plan_update_rejects_a_slug_starting_with_a_hyphen(): void
+    {
+        $plan = Plan::factory()->create(['key' => 'basic']);
+        $this->authenticateAdmin();
+
+        $this->withSpaOrigin()
+            ->patchJson("/api/v1/auth/admin/memberships/plans/{$plan->id}", ['key' => '-startup'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['key']);
+    }
+
     private function authenticateAdmin(): void
     {
         User::factory()->superAdmin()->create([

@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\AdminSupportTicketController;
 use App\Http\Controllers\Api\V1\AdminSystemIncidentController;
 use App\Http\Controllers\Api\V1\AdminUserController;
 use App\Http\Controllers\Api\V1\Auth\ClinicRegistrationController;
+use App\Http\Controllers\Api\V1\Auth\DiagnosticProviderRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\DoctorRegistrationController;
 use App\Http\Controllers\Api\V1\Auth\LoginController;
 use App\Http\Controllers\Api\V1\Auth\OtpAuthenticationController;
@@ -82,6 +83,10 @@ Route::prefix('v1/fhir')->name('api.v1.fhir.')->group(function (): void {
 });
 
 Route::prefix('v1/auth')->name('api.v1.auth.')->group(function (): void {
+    Route::post('/register/diagnostic-provider/request', [DiagnosticProviderRegistrationController::class, 'request'])
+        ->middleware('throttle:auth-register')
+        ->name('register.diagnostic-provider.request');
+
     Route::prefix('register/clinic')->name('register.clinic.')->group(function (): void {
         Route::get('/plans', [ClinicRegistrationController::class, 'plans'])->name('plans');
         Route::post('/draft', [ClinicRegistrationController::class, 'draft'])->middleware('throttle:clinic-registration')->name('draft');

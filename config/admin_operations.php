@@ -10,6 +10,9 @@ return [
         'prefix' => env('BACKUP_PREFIX', 'hipocratiq'),
         'timeout_seconds' => (int) env('BACKUP_TIMEOUT_SECONDS', 300),
         'restore_timeout_seconds' => (int) env('BACKUP_RESTORE_TIMEOUT_SECONDS', 600),
+        'restore_enabled' => (bool) env('BACKUP_RESTORE_ENABLED', false),
+        'restore_target_database' => env('BACKUP_RESTORE_TARGET_DATABASE', ''),
+        'restore_target_host' => env('BACKUP_RESTORE_TARGET_HOST', ''),
     ],
     'ai' => [
         'enabled' => (bool) env('EPIDEMIOLOGICAL_AI_ENABLED', false),

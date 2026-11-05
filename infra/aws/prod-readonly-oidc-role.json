@@ -1,0 +1,82 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "HIPOCRATIQ: prospective PROD GitHub OIDC metadata role template ONLY; requires explicit AWS administrator approval. No actions or resources deployed by this file.",
+  "Resources": {
+    "HipocratiqProdReadOnlyRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "HIPOCRATIQ-PROD-ReadOnly",
+        "Description": "Describe-only production EC2 and optional EBS snapshots. Approval-gated; never read clinical data or run remote commands.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "GitHubApprovedBackendProdReadOnlyEnvironmentOnly",
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:VaftecPeru/Hipocratiq_backend:environment:hipocratiq-prod-readonly"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "HIPOCRATIQ-PROD-Metadata-Describe-Only",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "DescribeOnlyProductionEC2VolumesSnapshotsSSM",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeInstanceStatus",
+                    "ec2:DescribeVolumes",
+                    "ec2:DescribeSnapshots",
+                    "ssm:DescribeInstanceInformation"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "HIPOCRATIQ"
+          },
+          {
+            "Key": "Environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Access",
+            "Value": "readonly"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ProdReadOnlyRoleArn": {
+      "Description": "Use only in an approved GitHub Environment var HIPOCRATIQ_PROD_READONLY_ROLE_ARN; no AWS secret keys.",
+      "Value": {
+        "Fn::GetAtt": [
+          "HipocratiqProdReadOnlyRole",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

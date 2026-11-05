@@ -1,0 +1,48 @@
+name: Frontend public history sanitized diagnostic (P0-102)
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-history-review:
+    name: Frontend reachable-history sanitized signals (not security clearance)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Backend scanner (no persisted token)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout public Frontend repository
+        uses: actions/checkout@v4
+        with:
+          repository: VaftecPeru/Hipocratiq_Frontend
+          path: frontend-security-source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify Frontend history is not shallow
+        run: test "$(git -C frontend-security-source rev-parse --is-shallow-repository)" = false
+      - name: Test scanner against synthetic Git fixtures
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_audit_public_git_history.py' -v
+      - name: Analyze reachable Frontend objects without disclosing sensitive values
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/audit_public_git_history.py --repository frontend-security-source --report "$RUNNER_TEMP/frontend-history-redacted.json"
+          python3 -c 'import json,os,pathlib; r=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"frontend-history-redacted.json").read_text()); assert r["secret_values_recorded"] is False and r["sensitive_paths_recorded"] is False and r["aws_calls"] == 0; print("FRONTEND_SANITIZATION=PASS; SECURITY_APPROVAL=NOT_GRANTED")'
+      - name: Upload counts-only report (not secrets)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-frontend-history-redacted
+          path: ${{ runner.temp }}/frontend-history-redacted.json
+          retention-days: 7
+          if-no-files-found: error
+      - name: Preserve P0-102 human review requirement
+        run: |
+          echo 'This is only a redacted scan of Frontend objects reachable in this checkout.'
+          echo 'Releases, artifacts, forks and historical credentials still require confidential independent review.'
+          echo 'A successful check never authorizes production release or closes P0 #102.'

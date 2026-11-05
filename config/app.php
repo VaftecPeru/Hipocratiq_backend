@@ -54,6 +54,9 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // Mercado principal de HIPOCRATIQ. No limita países secundarios soportados.
+    'primary_country' => env('APP_PRIMARY_COUNTRY', 'MX'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone
