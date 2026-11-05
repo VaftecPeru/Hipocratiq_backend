@@ -56,6 +56,21 @@ class DrillEvidenceTests(unittest.TestCase):
         with self.assertRaises(audit.AttestationError):
             audit.assess(data)
 
+    def test_duplicate_json_fields_are_rejected_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duplicate.json"
+            raw = json.dumps(fixture())
+            # A conflicting, repeated control must not be silently accepted.
+            raw = raw.replace('"restore_command_succeeded": true',
+                              '"restore_command_succeeded": false, "restore_command_succeeded": true')
+            path.write_text(raw, encoding="utf-8")
+            self.assertEqual(audit.main(["--attestation", str(path)]), 2)
+
+    def test_duplicate_nested_json_keys_are_rejected(self):
+        with self.assertRaisesRegex(audit.AttestationError, "DUPLICATE_EVIDENCE_FIELD"):
+            json.loads('{"wrapper":{"flag":false,"flag":true}}',
+                       object_pairs_hook=audit.reject_duplicate_keys)
+
     def test_cli_invalid_input_fails_closed_without_echoing_contents(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.json"
