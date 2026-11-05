@@ -98,19 +98,19 @@ jobs:
       - name: Verify current Frontend develop and release PR #80 match the pinned SHA
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/verify_frontend_release_sync.py --expected 056ed7a57ba3315f0261e8df0301aa4e9332eed0
+        run: python3 scripts/verify_frontend_release_sync.py --expected 75f56b5edfa4b0f5add80132ac940a46abb8e242
 
       - name: Checkout audited public Frontend at exact immutable SHA
         uses: actions/checkout@v4
         with:
           repository: VaftecPeru/Hipocratiq_Frontend
-          ref: 056ed7a57ba3315f0261e8df0301aa4e9332eed0
+          ref: 75f56b5edfa4b0f5add80132ac940a46abb8e242
           path: frontend-src
           persist-credentials: false
 
       - name: Assert pinned Frontend release candidate SHA
         run: |
-          test "$(git -C frontend-src rev-parse HEAD)" = "056ed7a57ba3315f0261e8df0301aa4e9332eed0"
+          test "$(git -C frontend-src rev-parse HEAD)" = "75f56b5edfa4b0f5add80132ac940a46abb8e242"
           echo "Frontend integration source SHA verified"
 
       - name: Install PHP 8.4 and Redis/PostgreSQL extensions
@@ -188,7 +188,7 @@ jobs:
         # by an integration test that started against an older commit.
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 scripts/verify_frontend_release_sync.py --expected 056ed7a57ba3315f0261e8df0301aa4e9332eed0
+        run: python3 scripts/verify_frontend_release_sync.py --expected 75f56b5edfa4b0f5add80132ac940a46abb8e242
 
       - name: Define scope explicitly
         if: success()
