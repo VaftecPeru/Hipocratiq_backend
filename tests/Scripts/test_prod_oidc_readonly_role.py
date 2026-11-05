@@ -25,6 +25,10 @@ def enforce_contract(document):
     if resource.get("Type") != "AWS::IAM::Role":
         raise ValueError("No infrastructure resource is authorized")
     props = resource.get("Properties", {})
+    allowed_props = {"RoleName", "Description", "MaxSessionDuration",
+                     "AssumeRolePolicyDocument", "Policies", "Tags"}
+    if set(props) - allowed_props:
+        raise ValueError("Unexpected IAM role property may grant extra privileges")
     if props.get("RoleName") != "HIPOCRATIQ-PROD-ReadOnly":
         raise ValueError("Unexpected production IAM role")
     if props.get("MaxSessionDuration") != 3600:
@@ -115,6 +119,17 @@ class ProdOidcReadOnlyContractTest(unittest.TestCase):
             doc = copy.deepcopy(self.document)
             doc["Resources"][key] = {"Type": kind}
             with self.subTest(resource=key), self.assertRaises(ValueError):
+                enforce_contract(doc)
+
+    def test_rejects_additional_managed_permissions_or_insecure_role_features(self):
+        for key, value in (
+            ("ManagedPolicyArns", ["arn:aws:iam::aws:policy/AdministratorAccess"]),
+            ("PermissionsBoundary", "arn:aws:iam::aws:policy/AdministratorAccess"),
+            ("Path", "/unreviewed/"),
+        ):
+            doc = copy.deepcopy(self.document)
+            doc["Resources"][RESOURCE]["Properties"][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
                 enforce_contract(doc)
 
     def test_cannot_use_long_sessions_or_duplicate_privileges(self):
