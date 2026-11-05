@@ -1,151 +1,187 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_issue": 92,
   "master_matrix_url": "https://docs.google.com/spreadsheets/d/1SwuLEHgvPyDVfQC3xic-Fg4d1NzUY4vrl0WCEfEBhls/edit",
-  "scope": "36 matrix positions; scenario definitions and signed evidence remain in authorized private master",
+  "scope": "36 canonical UAT-001..UAT-036 IDs mapped to master sheet positions; real clinical evidence remains private and unexecuted",
   "rows": [
     {
       "position": 1,
+      "case_id": "UAT-001",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 2,
+      "case_id": "UAT-002",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 3,
+      "case_id": "UAT-003",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 4,
+      "case_id": "UAT-004",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 5,
+      "case_id": "UAT-005",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 6,
+      "case_id": "UAT-006",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 7,
+      "case_id": "UAT-007",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 8,
+      "case_id": "UAT-008",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 9,
+      "case_id": "UAT-009",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 10,
+      "case_id": "UAT-010",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 11,
+      "case_id": "UAT-011",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 12,
+      "case_id": "UAT-012",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 13,
+      "case_id": "UAT-013",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 14,
+      "case_id": "UAT-014",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 15,
+      "case_id": "UAT-015",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 16,
+      "case_id": "UAT-016",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 17,
+      "case_id": "UAT-017",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 18,
+      "case_id": "UAT-018",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 19,
+      "case_id": "UAT-019",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 20,
+      "case_id": "UAT-020",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 21,
+      "case_id": "UAT-021",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 22,
+      "case_id": "UAT-022",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 23,
+      "case_id": "UAT-023",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 24,
+      "case_id": "UAT-024",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 25,
+      "case_id": "UAT-025",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 26,
+      "case_id": "UAT-026",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 27,
+      "case_id": "UAT-027",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 28,
+      "case_id": "UAT-028",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 29,
+      "case_id": "UAT-029",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 30,
+      "case_id": "UAT-030",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 31,
+      "case_id": "UAT-031",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 32,
+      "case_id": "UAT-032",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 33,
+      "case_id": "UAT-033",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 34,
+      "case_id": "UAT-034",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 35,
+      "case_id": "UAT-035",
       "status": "NOT_EXECUTED"
     },
     {
       "position": 36,
+      "case_id": "UAT-036",
       "status": "NOT_EXECUTED"
     }
   ]
