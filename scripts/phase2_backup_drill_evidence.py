@@ -27,6 +27,16 @@ class AttestationError(Exception):
     pass
 
 
+def reject_duplicate_keys(pairs):
+    """Reject conflicting or repeated evidence fields before dict normalization."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise AttestationError("DUPLICATE_EVIDENCE_FIELD")
+        result[key] = value
+    return result
+
+
 def assess(data: object) -> dict:
     if not isinstance(data, dict) or set(data) != FIELDS:
         raise AttestationError("REJECT_UNEXPECTED_OR_MISSING_FIELDS")
@@ -59,7 +69,8 @@ def main(argv=None) -> int:
         path = args.attestation
         if path.stat().st_size > 4096:
             raise AttestationError("UNEXPECTED_SIZE")
-        report = assess(json.loads(path.read_text(encoding="utf-8")))
+        report = assess(json.loads(path.read_text(encoding="utf-8"),
+                                   object_pairs_hook=reject_duplicate_keys))
     except (OSError, ValueError, AttestationError):
         print("RESTORE_DRILL=NO_GO_INVALID_EVIDENCE")
         return 2
