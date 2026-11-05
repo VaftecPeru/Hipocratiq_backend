@@ -21,10 +21,10 @@ MASTER_MATRIX = (
 )
 ALLOWED_STATUSES = {"NOT_EXECUTED", "PASS", "FAIL", "BLOCKED"}
 EXECUTED_KEYS = {
-    "position", "status", "backend_sha", "frontend_sha",
+    "position", "case_id", "status", "backend_sha", "frontend_sha",
     "executed_at_utc", "executor_ref", "evidence_ref",
 }
-PENDING_KEYS = {"position", "status"}
+PENDING_KEYS = {"position", "case_id", "status"}
 SHA = re.compile(r"^[a-f0-9]{40}$")
 PRIVATE_REF = re.compile(r"^[A-Z]{2,8}-[A-Z0-9-]{3,64}$")
 
@@ -53,7 +53,7 @@ def validate(ledger: object) -> dict[str, object]:
     required = {"schema_version", "source_issue", "master_matrix_url", "scope", "rows"}
     if set(ledger) != required:
         raise LedgerError("unexpected or missing top-level fields")
-    if type(ledger["schema_version"]) is not int or ledger["schema_version"] != 1:
+    if type(ledger["schema_version"]) is not int or ledger["schema_version"] != 2:
         raise LedgerError("unsupported schema version")
     if type(ledger["source_issue"]) is not int or ledger["source_issue"] != 92:
         raise LedgerError("incorrect issue reference")
@@ -75,6 +75,10 @@ def validate(ledger: object) -> dict[str, object]:
         if type(number) is not int or number not in EXPECTED_POSITIONS or number in positions:
             raise LedgerError("matrix position is missing, duplicated, or out of range")
         positions.add(number)
+        # The master sheet indexes positions 1..36 as UAT-001..UAT-036.
+        # Only opaque case IDs are stored in this public repository.
+        if row.get("case_id") != f"UAT-{number:03d}":
+            raise LedgerError("case ID does not match master matrix position")
         status = row.get("status")
         if status not in ALLOWED_STATUSES:
             raise LedgerError("invalid UAT result state")
@@ -105,6 +109,7 @@ def validate(ledger: object) -> dict[str, object]:
     # Signatures, evidence authenticity, scope and ethics need independent review.
     return {
         "matrix_positions": 36,
+        "master_case_ids_validated": 36,
         "not_executed": counts["NOT_EXECUTED"],
         "self_reported_pass": counts["PASS"],
         "self_reported_fail": counts["FAIL"],
