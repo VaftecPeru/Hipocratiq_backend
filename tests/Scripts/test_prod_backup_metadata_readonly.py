@@ -161,6 +161,12 @@ class SnapshotMetadataInventoryTests(unittest.TestCase):
                 with self.assertRaises(audit.EvidenceError):
                     audit.probe(approved_env(), mocked_runner(data, []), NOW)
 
+    def test_duplicate_snapshot_id_fails_closed_in_one_page(self):
+        data = base_data()
+        data["snapshots"]["Snapshots"].append(dict(data["snapshots"]["Snapshots"][0]))
+        with self.assertRaisesRegex(audit.EvidenceError, "DUPLICATE_SNAPSHOT_ID"):
+            audit.probe(approved_env(), mocked_runner(data, []), NOW)
+
     def test_repeated_page_token_fails_closed(self):
         data = base_data()
         data["snapshots"] = {"Snapshots": [], "NextToken": "same-token"}
