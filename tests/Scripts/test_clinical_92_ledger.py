@@ -21,6 +21,9 @@ class Clinical92LedgerContractTest(unittest.TestCase):
     def test_canonical_ledger_is_no_go_and_all_36_are_unexecuted(self):
         report = validate(self.ledger)
         self.assertEqual(report["matrix_positions"], 36)
+        self.assertEqual(report["master_case_ids_validated"], 36)
+        self.assertEqual([row["case_id"] for row in self.ledger["rows"]],
+                         [f"UAT-{n:03d}" for n in range(1, 37)])
         self.assertEqual(report["not_executed"], 36)
         self.assertEqual(report["self_reported_pass"], 0)
         self.assertEqual(report["release_decision"], "NO_GO")
@@ -32,6 +35,26 @@ class Clinical92LedgerContractTest(unittest.TestCase):
         with self.assertRaises(LedgerError):
             validate(altered)
         altered["rows"].pop()
+        with self.assertRaises(LedgerError):
+            validate(altered)
+
+    def test_misaligned_master_case_id_fails_closed(self):
+        altered = copy.deepcopy(self.ledger)
+        altered["rows"][0]["case_id"] = "UAT-002"
+        with self.assertRaises(LedgerError):
+            validate(altered)
+        altered = copy.deepcopy(self.ledger)
+        altered["rows"][0]["case_id"] = "UAT-01"
+        with self.assertRaises(LedgerError):
+            validate(altered)
+
+    def test_legacy_unkeyed_ledger_cannot_be_silently_accepted(self):
+        altered = copy.deepcopy(self.ledger)
+        altered["schema_version"] = 1
+        with self.assertRaises(LedgerError):
+            validate(altered)
+        altered["schema_version"] = 2
+        del altered["rows"][0]["case_id"]
         with self.assertRaises(LedgerError):
             validate(altered)
 
@@ -74,6 +97,7 @@ class Clinical92LedgerContractTest(unittest.TestCase):
     def synthetic_pass(position):
         return {
             "position": position,
+            "case_id": f"UAT-{position:03d}",
             "status": "PASS",
             "backend_sha": "a" * 40,
             "frontend_sha": "b" * 40,
