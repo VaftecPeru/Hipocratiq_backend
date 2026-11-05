@@ -89,6 +89,7 @@ def probe(env, runner=None, at=None):
     completed_by_volume = defaultdict(int)
     recent_encrypted_by_volume = defaultdict(int)
     snapshot_total = 0
+    seen_snapshot_ids = set()
     completed_total = 0
     encrypted_completed_total = 0
     for volume in ids:
@@ -119,6 +120,9 @@ def probe(env, runner=None, at=None):
                     and entry.get("OwnerId") == account,
                     "SNAPSHOT_OWNER_OR_VOLUME_MISMATCH",
                 )
+                require(entry["SnapshotId"] not in seen_snapshot_ids,
+                        "DUPLICATE_SNAPSHOT_ID")
+                seen_snapshot_ids.add(entry["SnapshotId"])
                 snapshot_total += 1
                 volume_count += 1
                 state = entry.get("State")
