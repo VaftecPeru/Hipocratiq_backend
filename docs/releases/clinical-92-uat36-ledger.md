@@ -3,7 +3,7 @@
 Este registro **NO define ni sustituye los escenarios del cliente**. La matriz oficial de 36 casos está en la [hoja maestra](https://docs.google.com/spreadsheets/d/1SwuLEHgvPyDVfQC3xic-Fg4d1NzUY4vrl0WCEfEBhls/edit).
 Este repositorio conserva otra **submatriz web de 12 escenarios** en clinical-92-web-acceptance-matrix.md; **12 no son 36**, ni la ejecución de pruebas Laravel equivale a UAT firmada.
 
-El archivo clinical-92-uat36-ledger.json enumera posiciones ordinales 1..36, sin atribuir nombres ficticios ni afirmar una correspondencia detallada todavía no validada contra la hoja maestra. Todos están NOT_EXECUTED inicialmente.
+El archivo clinical-92-uat36-ledger.json (esquema v2) vincula cada posición 1..36 con el identificador oficial **UAT-001..UAT-036**, comprobado con la pestaña privada `UAT CLINICA PRODUCCION` de la hoja maestra el 05/11/2026. No reproduce descripciones, responsables, resultados ni evidencia privada. **Los 36 registros siguen NOT_EXECUTED en términos de aceptación UAT real**, incluso cuando la hoja maestra marca cobertura parcial de CI. El validador rechaza posiciones duplicadas, IDs desplazados o el esquema anterior sin identificadores.
 
 ## Para ejecutar, fuera de producción y con datos 100 % sintéticos
 
