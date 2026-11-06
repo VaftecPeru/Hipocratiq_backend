@@ -71,6 +71,23 @@ class DrillEvidenceTests(unittest.TestCase):
             json.loads('{"wrapper":{"flag":false,"flag":true}}',
                        object_pairs_hook=audit.reject_duplicate_keys)
 
+    def test_nonstandard_json_constants_are_rejected(self):
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(constant=constant):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "nonstandard.json"
+                    raw = json.dumps(fixture())
+                    raw = raw.replace('"schema_version": 1',
+                                      '"schema_version": ' + constant)
+                    path.write_text(raw, encoding="utf-8")
+                    self.assertEqual(audit.main(["--attestation", str(path)]), 2)
+
+    def test_nested_nonstandard_constant_is_rejected_before_schema_validation(self):
+        with self.assertRaisesRegex(audit.AttestationError, "NON_STANDARD_JSON_CONSTANT"):
+            json.loads('{"nested":{"value":NaN}}',
+                       object_pairs_hook=audit.reject_duplicate_keys,
+                       parse_constant=audit.reject_nonfinite_constant)
+
     def test_cli_invalid_input_fails_closed_without_echoing_contents(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.json"

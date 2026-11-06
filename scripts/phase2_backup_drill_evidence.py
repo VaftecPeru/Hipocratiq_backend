@@ -37,6 +37,11 @@ def reject_duplicate_keys(pairs):
     return result
 
 
+def reject_nonfinite_constant(value):
+    """Python JSON accepts NaN/Infinity by default; attestation JSON must not."""
+    raise AttestationError("NON_STANDARD_JSON_CONSTANT")
+
+
 def assess(data: object) -> dict:
     if not isinstance(data, dict) or set(data) != FIELDS:
         raise AttestationError("REJECT_UNEXPECTED_OR_MISSING_FIELDS")
@@ -70,7 +75,8 @@ def main(argv=None) -> int:
         if path.stat().st_size > 4096:
             raise AttestationError("UNEXPECTED_SIZE")
         report = assess(json.loads(path.read_text(encoding="utf-8"),
-                                   object_pairs_hook=reject_duplicate_keys))
+                                   object_pairs_hook=reject_duplicate_keys,
+                                   parse_constant=reject_nonfinite_constant))
     except (OSError, ValueError, AttestationError):
         print("RESTORE_DRILL=NO_GO_INVALID_EVIDENCE")
         return 2
