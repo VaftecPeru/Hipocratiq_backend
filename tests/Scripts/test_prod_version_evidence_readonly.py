@@ -137,6 +137,45 @@ class VersionEvidenceSafetyTest(unittest.TestCase):
         self.assertTrue(all(cmd[1] in {"sts", "ec2", "ssm"} for cmd in seen))
         self.assertTrue(report["no_ssm_commands_or_ssh"])
 
+    def test_manual_readonly_dispatch_requires_exact_ack_and_protected_develop(self):
+        config = {
+            "GITHUB_REPOSITORY": "VaftecPeru/Hipocratiq_backend",
+            "GITHUB_REF": "refs/heads/develop",
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "AUDIT_ENABLED": "true",
+            "AUDIT_PUSH_APPROVED": "false",
+            "AUDIT_ACKNOWLEDGEMENT": "READ_ONLY_PROD_METADATA",
+            "AUDIT_MANUAL_ACK": "READ_ONLY_PROD_METADATA",
+            "AUDIT_AWS_ACCOUNT_ID": "390736325457",
+            "AUDIT_AWS_REGION": "us-east-2",
+            "AUDIT_AWS_INSTANCE_ID": "i-0f6789726d40b4122",
+            "AUDIT_AWS_VPC_ID": "vpc-0245b564a2e609bf6",
+            "AUDIT_AWS_ROLE_ARN": "arn:aws:iam::390736325457:role/HIPOCRATIQ-PROD-ReadOnly",
+        }
+        self.assertEqual(probe.aws_preflight(config)["region"], "us-east-2")
+        for key, value in [
+            ("AUDIT_MANUAL_ACK", "NOT_APPROVED"),
+            ("AUDIT_ENABLED", "false"),
+            ("GITHUB_REF", "refs/heads/main"),
+            ("GITHUB_EVENT_NAME", "pull_request"),
+        ]:
+            invalid = {**config, key: value}
+            with self.subTest(key=key), self.assertRaises(probe.EvidenceError):
+                probe.aws_preflight(invalid)
+
+    def test_push_still_requires_separate_opt_in(self):
+        config = {
+            "GITHUB_REPOSITORY": "VaftecPeru/Hipocratiq_backend",
+            "GITHUB_REF": "refs/heads/develop",
+            "GITHUB_EVENT_NAME": "push",
+            "AUDIT_ENABLED": "true",
+            "AUDIT_PUSH_APPROVED": "false",
+            "AUDIT_ACKNOWLEDGEMENT": "READ_ONLY_PROD_METADATA",
+            "AUDIT_MANUAL_ACK": "READ_ONLY_PROD_METADATA",
+        }
+        with self.assertRaises(probe.EvidenceError):
+            probe.aws_preflight(config)
+
     def test_never_uses_production_workflow_on_pr_or_wrong_account(self):
         config = {
             "GITHUB_REPOSITORY": "VaftecPeru/Hipocratiq_backend",
