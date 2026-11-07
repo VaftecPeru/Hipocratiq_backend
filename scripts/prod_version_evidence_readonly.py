@@ -26,6 +26,16 @@ ID_PATTERN = re.compile(r"i-[0-9a-f]{8,17}\Z")
 VPC_PATTERN = re.compile(r"vpc-[0-9a-f]{8,17}\Z")
 REGION_PATTERN = re.compile(r"[a-z]{2}-[a-z]+-\d\Z")
 
+# Immutable production inventory target verified in AWS; never trust editable vars
+# alone to choose another instance, VPC or region for the read-only probe.
+APPROVED_PROD_TARGET = {
+    "account": "390736325457",
+    "region": "us-east-2",
+    "instance": "i-0f6789726d40b4122",
+    "vpc": "vpc-0245b564a2e609bf6",
+}
+
+
 class EvidenceError(Exception):
     pass
 
@@ -130,6 +140,9 @@ def aws_preflight(env):
     if not (ACCOUNT_PATTERN.fullmatch(account) and REGION_PATTERN.fullmatch(region)
             and ID_PATTERN.fullmatch(instance) and VPC_PATTERN.fullmatch(vpc)):
         raise EvidenceError("Invalid verified AWS target identifiers")
+    if ({"account": account, "region": region, "instance": instance, "vpc": vpc}
+            != APPROVED_PROD_TARGET):
+        raise EvidenceError("AWS production target differs from independently verified identifiers")
     if role != f"arn:aws:iam::{account}:role/HIPOCRATIQ-PROD-ReadOnly":
         raise EvidenceError("Only the exact approved production metadata role is allowed")
     return {"account": account, "region": region, "instance": instance, "vpc": vpc, "role": role}
