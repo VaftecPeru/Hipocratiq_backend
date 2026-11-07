@@ -182,13 +182,11 @@ class VersionEvidenceSafetyTest(unittest.TestCase):
             ("AUDIT_PUSH_APPROVED", "false"),
             ("AUDIT_ACKNOWLEDGEMENT", "NOT_APPROVED"),
             ("AUDIT_AWS_ROLE_ARN", "arn:aws:iam::390736325457:role/DeployRole"),
+            ("AUDIT_AWS_REGION", "us-east-1"),
+            ("AUDIT_AWS_INSTANCE_ID", "i-aaaaaaaaaaaaaaaaa"),
+            ("AUDIT_AWS_VPC_ID", "vpc-aaaaaaaaaaaaaaaaa"),
         ]:
             invalid = {**config, key: value}
-            if key == "AUDIT_AWS_REGION":
-                # A different syntactically valid region must not be conflated
-                # with the externally verified target; checks only role shape.
-                self.assertEqual(probe.aws_preflight(invalid)["region"], value)
-                continue
             with self.subTest(key=key), self.assertRaises(probe.EvidenceError):
                 probe.aws_preflight(invalid)
 
