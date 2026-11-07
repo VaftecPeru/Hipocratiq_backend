@@ -29,3 +29,27 @@ Cada registro del manifiesto debe tener `status: approved`, `backend_sha`, `fron
 
 ## Criterios de rechazo
 Sin aceptación clínica, con auditoría de secretos pendiente, sin cifrado o restauración comprobada, AWS OIDC de producción ausente, SHA distinto o evidencia no verificable: **NO-GO**. No desactivar ni simular el gate UAT anterior hasta que el nuevo sea aprobado y efectivo.
+
+## Mantenimiento del gate — 30/10/2026
+
+**Invariante:** no cerrar incidencias P0 sin pruebas ni sustituir aprobaciones clínicas o restauración real por CI sintético. La ruta UAT original sigue vigente mientras no se apruebe una política web alternativa por responsables autorizados.
+
+### Corrección de cobertura P0
+
+El gate `scripts/release_go_no_go.py` del Backend verifica ahora el estado de **#113 (backup/restauración)** además de #92 (clínica) y #102 (seguridad). Antes la comprobación de #113 estaba únicamente en el preflight web; ambos deben rechazar cambios con recuperación no acreditada. Su estado diferido se registra como pendiente, **no como restauración demostrada**. Las pruebas sintéticas verifican apertura/fallo, cierre documental y evaluación sobre la API GitHub; tampoco validan la existencia de backups.
+
+### Por qué el preflight web permanece NO-GO
+
+`scripts/controlled_web_live_gate.py` requiere actualmente **verificación manual independiente** fuera del flujo automático y retorna NO-GO aunque se cierren los issues. Se trata de un cierre intencional: ningún valor de un manifiesto autocreado, ni un comentario, ni un `SUCCESS` sintético acredita por sí solo aceptación clínica, auditoría de seguridad, backup/restauración ni autorización de despliegue.
+
+Para hacer viable un GO futuro sin debilitar los gates, primero formalizar y aprobar un cambio de política con: evidencia clínica por rol/tenant, auditoría privada #102, comprobación de IAM/EC2/volúmenes, copia cifrada restaurada en destino aislado, rollback probado, aprobación de cambio y aprobación de release por revisores independientes. Implementar la verificación de esas evidencias en un **PR independiente**, con pruebas negativas sobre falsificación, SHAs incorrectos, caducidad y ausencia de revisores. Hasta la aprobación de esa política, mantener fallando el gate.
+
+### Secuencia de cierre
+
+1. Confirmar que los SHA de Frontend y Backend son los candidatos exactos, con checks obligatorios y ramas protegidas.
+2. Cerrar #92 con acta clínica sobre datos ficticios y #102 tras auditoría privada y remediación.
+3. Inspeccionar respaldo real, ejecutar restauración aislada y cerrar #113 únicamente después de evidencia.
+4. Disponer de inventario AWS real de solo lectura. No presentar recursos productivos como si fueran UAT; si UAT no se financia (#111), documentar, aprobar e implementar la política alternativa propuesta antes de permitir publicación.
+5. Registrar autorización final del responsable sobre los SHAs y una ventana de despliegue, *separada* del merge a `main`.
+
+**Prohibido** modificar `main` o publicar AWS únicamente porque los scripts y las pruebas del propio gate están en verde.

@@ -1,0 +1,75 @@
+name: "P2 #113 PostgreSQL isolated synthetic restore drill (NO AWS)"
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/phase2-postgres-isolated-restore.yml
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/phase2-postgres-isolated-restore.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-restore:
+    name: "PostgreSQL 17 synthetic dump and restore — NO production"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      DOCKER_NAME: "hipocratiq-p113-synthetic-${{ github.run_id }}"
+    steps:
+      - name: Assert no production credentials or services are required
+        run: |
+          echo "Only synthetic data, temporary Docker container, no AWS or production endpoints."
+          echo "This is NOT evidence of restoration of actual production data."
+
+      - name: Start temporary isolated PostgreSQL 17
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run -d --name "$DOCKER_NAME" --pull always \
+            --network none \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=synthetic-ci-only \
+            -e POSTGRES_DB=hipocratiq_fixture \
+            postgres:17-alpine
+          for i in $(seq 1 40); do
+            if docker exec "$DOCKER_NAME" pg_isready -U postgres -d hipocratiq_fixture >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Temporary PostgreSQL failed readiness"
+          docker logs "$DOCKER_NAME" 2>&1 | tail -30
+          exit 1
+
+      - name: Create synthetic fixture, dump, restore and verify
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "$temp_dir"' EXIT
+          docker exec "$DOCKER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d hipocratiq_fixture -c \
+            "CREATE TABLE synthetic_restore_fixture (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO synthetic_restore_fixture VALUES (1, 'fixture-only'), (2, 'fixture-only');"
+          docker exec "$DOCKER_NAME" pg_dump -U postgres -d hipocratiq_fixture -Fc > "$temp_dir/fixture.dump"
+          test -s "$temp_dir/fixture.dump"
+          sha256sum "$temp_dir/fixture.dump" | sed 's@ .*@  [synthetic-dump]@'
+          docker exec "$DOCKER_NAME" createdb -U postgres hipocratiq_restored
+          docker exec -i "$DOCKER_NAME" pg_restore -U postgres -d hipocratiq_restored --exit-on-error < "$temp_dir/fixture.dump"
+          expected="$(docker exec "$DOCKER_NAME" psql -U postgres -d hipocratiq_fixture -Atc \
+            "SELECT count(*) || ':' || count(DISTINCT id) || ':' || min(marker) FROM synthetic_restore_fixture")"
+          actual="$(docker exec "$DOCKER_NAME" psql -U postgres -d hipocratiq_restored -Atc \
+            "SELECT count(*) || ':' || count(DISTINCT id) || ':' || min(marker) FROM synthetic_restore_fixture")"
+          test "$expected" = "2:2:fixture-only"
+          test "$expected" = "$actual"
+          echo "SYNTHETIC_RESTORE=PASS"
+          echo "SCOPE=CI_EPHEMERAL_DATA_ONLY"
+          echo "PRODUCTION_RESTORE_CERTIFIED=false"
+
+      - name: Remove isolated database container
+        if: always()
+        shell: bash
+        run: docker rm -f "$DOCKER_NAME" >/dev/null 2>&1 || true

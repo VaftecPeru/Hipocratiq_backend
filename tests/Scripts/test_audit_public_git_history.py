@@ -35,6 +35,26 @@ class RedactedGitHistoryAuditTest(unittest.TestCase):
             b"DB_PASSWORD=synthetic_only_123\nDB_PASSWORD=synthetic_only_123\n"
         ), 1)
 
+    def test_historical_security_keys_cannot_be_omitted_from_audit(self):
+        from scripts.check_public_env_template import SENSITIVE
+
+        self.assertTrue(SENSITIVE.issubset(audit.SECRET_ASSIGNMENTS))
+        self.assertEqual(
+            audit.template_sensitive_assignments(
+                b"OTP_HASH_KEY=synthetic-otp-only\n"
+                b"HIPOCRATIQ_UAT_ACCESS_PASSWORD=synthetic-uat-only\n"
+                b"WHATSAPP_ACCESS_TOKEN=synthetic-token-only\n"
+                b"GOOGLE_CLIENT_SECRET=synthetic-oauth-only\n"
+            ),
+            4,
+        )
+        self.assertEqual(
+            audit.template_sensitive_assignments(
+                b"OTP_HASH_KEY=\nHIPOCRATIQ_UAT_ACCESS_PASSWORD=''\n"
+            ),
+            0,
+        )
+
     def test_tracked_example_history_still_warns_after_current_file_is_clean(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

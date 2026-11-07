@@ -29,6 +29,8 @@ class AdminMembershipIndexTest extends TestCase
 
     public function test_super_admin_receives_membership_dashboard(): void
     {
+        // Anchor historical starts to calendar boundaries: subMonth() from
+        // the 31st can overflow into this month and corrupt the KPI fixture.
         $this->seedPlans();
 
         $clinicPeru = Clinic::factory()->create(['country_code' => 'PE']);
@@ -40,7 +42,7 @@ class AdminMembershipIndexTest extends TestCase
             'plan_id' => $this->plan(PlanKey::Basic)->id,
             'billing_cycle' => BillingCycle::Monthly,
             'auto_renew' => true,
-            'starts_at' => now()->subMonth(),
+            'starts_at' => now()->startOfMonth()->subDay(),
             'ends_at' => now()->addDays(10),
         ]);
         ClinicSubscription::factory()->create([
@@ -48,7 +50,7 @@ class AdminMembershipIndexTest extends TestCase
             'plan_id' => $this->plan(PlanKey::Professional)->id,
             'billing_cycle' => BillingCycle::Annual,
             'auto_renew' => false,
-            'starts_at' => now()->subMonths(2),
+            'starts_at' => now()->startOfMonth()->subMonthsNoOverflow(2),
             'ends_at' => now()->addDays(20),
         ]);
         $recentStart = now()->subDays(min(5, now()->day - 1));

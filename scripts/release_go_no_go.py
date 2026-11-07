@@ -17,6 +17,7 @@ FRONTEND_REPOSITORY = "VaftecPeru/Hipocratiq_Frontend"
 FRONTEND_RELEASE_PR = 85
 ISSUE = 92
 SECURITY_ISSUE = 102
+BACKUP_ISSUE = 113
 AWS_JOB_NAME = "Approved AWS UAT instance metadata ONLY"
 AWS_ARTIFACT = "hipocratiq-uat-aws-readonly-metadata"
 MAX_INVENTORY_AGE_DAYS = 7
@@ -134,6 +135,20 @@ def assess_public_security_issue(security_issue):
     return []
 
 
+def assess_backup_issue(backup_issue):
+    """Backups/restoration are P0: deferral cannot certify recoverability.
+
+    Closure alone is NOT proof: release owner must independently verify
+    encrypted backup, isolated restoration and rollback before merge.
+    """
+    if not isinstance(backup_issue, dict) or backup_issue.get("state") != "closed":
+        return [
+            "P0 production backup/restore evidence issue #113 remains open or "
+            "unverifiable; a deferred snapshot review is not recovery evidence."
+        ]
+    return []
+
+
 def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
     """Require the reviewed Web-only PR #85 to be merged into protected main.
 
@@ -167,6 +182,7 @@ def collect_evidence(token, number):
     develop = http_get_json(root + "/branches/develop", token)
     issue = http_get_json(root + "/issues/" + str(ISSUE), token)
     security_issue = http_get_json(root + "/issues/" + str(SECURITY_ISSUE), token)
+    backup_issue = http_get_json(root + "/issues/" + str(BACKUP_ISSUE), token)
 
     frontend_root = "/repos/" + FRONTEND_REPOSITORY
     frontend_pr = http_get_json(
@@ -218,7 +234,7 @@ def collect_evidence(token, number):
             root + "/actions/runs/" + str(run_id) + "/artifacts?per_page=100", token
         ).get("artifacts", [])
         inventory.append(normalize_inventory_run(run, jobs, artifacts))
-    return (pr, main, develop, issue, security_issue, inventory,
+    return (pr, main, develop, issue, security_issue, backup_issue, inventory,
             frontend_pr, frontend_main, frontend_develop)
 
 
@@ -235,11 +251,12 @@ def main():
         number = event.get("pull_request", {}).get("number")
         if not isinstance(number, int):
             raise GateError("Only GitHub main pull requests may be assessed.")
-        p, m, d, i, security_issue, runs, fe_pr, fe_main, fe_develop = collect_evidence(
+        p, m, d, i, security_issue, backup_issue, runs, fe_pr, fe_main, fe_develop = collect_evidence(
             os.environ.get("GITHUB_TOKEN", ""), number
         )
         blockers = assess(p, m, d, i, runs)
         blockers.extend(assess_public_security_issue(security_issue))
+        blockers.extend(assess_backup_issue(backup_issue))
         blockers.extend(assess_frontend_release(fe_pr, fe_main, fe_develop))
     except (GateError, OSError, ValueError) as err:
         blockers = ["Evidence unavailable; fail-closed: " + str(err)]

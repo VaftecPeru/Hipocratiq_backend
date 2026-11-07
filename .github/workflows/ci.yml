@@ -57,6 +57,25 @@ jobs:
           python3 -m unittest discover -s tests/Scripts -p 'test_public_env_template.py' -v
           python3 scripts/check_public_env_template.py .env.example
 
+      - name: Reject tracked credential files and high-confidence token formats
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests/Scripts -p 'test_check_current_tracked_credentials.py' -v
+          python3 scripts/check_current_tracked_credentials.py --repository .
+
+      - name: Validate production OIDC IAM contract (offline, no AWS credentials)
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_prod_oidc_readonly_role.py' -v
+      - name: Validate controlled main release and SSM deploy security (offline, NO AWS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/release_main_gate.py scripts/ssm_approved_release.py
+          python3 -m unittest discover -s tests/Scripts -p test_release_main_gate.py -v
+          python3 -m unittest discover -s tests/Scripts -p test_ssm_approved_release.py -v
+          python3 -m unittest discover -s tests/Scripts -p test_prod_deploy_oidc_role.py -v
+
+
       - name: Create environment file
         run: cp .env.example .env
 
