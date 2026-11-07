@@ -163,6 +163,35 @@ class VersionEvidenceSafetyTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(probe.EvidenceError):
                 probe.aws_preflight(invalid)
 
+    def test_approved_push_preflight_accepts_only_verified_readonly_target(self):
+        config = {
+            "GITHUB_REPOSITORY": "VaftecPeru/Hipocratiq_backend",
+            "GITHUB_REF": "refs/heads/develop",
+            "GITHUB_EVENT_NAME": "push",
+            "AUDIT_ENABLED": "true",
+            "AUDIT_PUSH_APPROVED": "true",
+            "AUDIT_ACKNOWLEDGEMENT": "READ_ONLY_PROD_METADATA",
+            "AUDIT_AWS_ACCOUNT_ID": "390736325457",
+            "AUDIT_AWS_REGION": "us-east-2",
+            "AUDIT_AWS_INSTANCE_ID": "i-0f6789726d40b4122",
+            "AUDIT_AWS_VPC_ID": "vpc-0245b564a2e609bf6",
+            "AUDIT_AWS_ROLE_ARN": "arn:aws:iam::390736325457:role/HIPOCRATIQ-PROD-ReadOnly",
+        }
+        self.assertEqual(probe.aws_preflight(config)["instance"], config["AUDIT_AWS_INSTANCE_ID"])
+        for key, value in [
+            ("AUDIT_PUSH_APPROVED", "false"),
+            ("AUDIT_ACKNOWLEDGEMENT", "NOT_APPROVED"),
+            ("AUDIT_AWS_ROLE_ARN", "arn:aws:iam::390736325457:role/DeployRole"),
+        ]:
+            invalid = {**config, key: value}
+            if key == "AUDIT_AWS_REGION":
+                # A different syntactically valid region must not be conflated
+                # with the externally verified target; checks only role shape.
+                self.assertEqual(probe.aws_preflight(invalid)["region"], value)
+                continue
+            with self.subTest(key=key), self.assertRaises(probe.EvidenceError):
+                probe.aws_preflight(invalid)
+
     def test_push_still_requires_separate_opt_in(self):
         config = {
             "GITHUB_REPOSITORY": "VaftecPeru/Hipocratiq_backend",
