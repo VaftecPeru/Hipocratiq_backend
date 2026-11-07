@@ -120,10 +120,12 @@ def aws_preflight(env):
     role = env.get("AUDIT_AWS_ROLE_ARN", "")
     if not (env.get("GITHUB_REPOSITORY") == "VaftecPeru/Hipocratiq_backend"
             and env.get("GITHUB_REF") == "refs/heads/develop"
-            and env.get("GITHUB_EVENT_NAME") == "push"
+            and env.get("GITHUB_EVENT_NAME") in ("push", "workflow_dispatch")
             and env.get("AUDIT_ENABLED") == "true"
-            and env.get("AUDIT_PUSH_APPROVED") == "true"
-            and env.get("AUDIT_ACKNOWLEDGEMENT") == "READ_ONLY_PROD_METADATA"):
+            and env.get("AUDIT_ACKNOWLEDGEMENT") == "READ_ONLY_PROD_METADATA"
+            and (env.get("AUDIT_PUSH_APPROVED") == "true"
+                 if env.get("GITHUB_EVENT_NAME") == "push"
+                 else env.get("AUDIT_MANUAL_ACK") == "READ_ONLY_PROD_METADATA")):
         raise EvidenceError("Read-only production metadata inspection not explicitly approved")
     if not (ACCOUNT_PATTERN.fullmatch(account) and REGION_PATTERN.fullmatch(region)
             and ID_PATTERN.fullmatch(instance) and VPC_PATTERN.fullmatch(vpc)):

@@ -21,6 +21,11 @@ on:
       - infra/aws/prod-readonly-oidc-role.json
       - tests/Scripts/test_prod_oidc_readonly_role.py
   workflow_dispatch:
+    inputs:
+      confirm_readonly_metadata:
+        description: 'Type READ_ONLY_PROD_METADATA to authorize metadata-only AWS inspection'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -75,14 +80,16 @@ jobs:
 
   aws-prod-metadata:
     name: Approved production EC2 and SSM metadata (no shell/PHI/deploy)
-    # PRs can NEVER assume AWS credentials. The owner must explicitly enable
-    # both opt-in variables and environment reviewers on protected develop.
+    # No AWS access from PRs. Manual runs require explicit input and protected
+    # environment approval; push automation remains independently disabled.
     if: >-
-      github.event_name == 'push' &&
       github.ref == 'refs/heads/develop' &&
       vars.HIPOCRATIQ_PROD_METADATA_ENABLED == 'true' &&
-      vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH == 'true' &&
-      vars.HIPOCRATIQ_PROD_METADATA_ACK == 'READ_ONLY_PROD_METADATA'
+      vars.HIPOCRATIQ_PROD_METADATA_ACK == 'READ_ONLY_PROD_METADATA' &&
+      ((github.event_name == 'push' &&
+        vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH == 'true') ||
+       (github.event_name == 'workflow_dispatch' &&
+        inputs.confirm_readonly_metadata == 'READ_ONLY_PROD_METADATA'))
     needs: safety-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 12
@@ -93,6 +100,7 @@ jobs:
     env:
       AUDIT_ENABLED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ENABLED }}
       AUDIT_PUSH_APPROVED: ${{ vars.HIPOCRATIQ_PROD_METADATA_ON_DEVELOP_PUSH }}
+      AUDIT_MANUAL_ACK: ${{ inputs.confirm_readonly_metadata || '' }}
       AUDIT_ACKNOWLEDGEMENT: ${{ vars.HIPOCRATIQ_PROD_METADATA_ACK }}
       AUDIT_AWS_ACCOUNT_ID: ${{ vars.HIPOCRATIQ_PROD_AWS_ACCOUNT_ID }}
       AUDIT_AWS_REGION: ${{ vars.HIPOCRATIQ_PROD_AWS_REGION }}
