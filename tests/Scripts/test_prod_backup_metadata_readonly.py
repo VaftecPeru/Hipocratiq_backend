@@ -16,9 +16,11 @@ audit = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit)
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
-ACCOUNT = "123456789012"
-INSTANCE = "i-0123456789abcdef0"
-VPC = "vpc-0123456789abcdef0"
+# Match the independently verified target used by the production preflight;
+# all AWS responses below remain offline synthetic fixtures.
+ACCOUNT = "390736325457"
+INSTANCE = "i-0f6789726d40b4122"
+VPC = "vpc-0245b564a2e609bf6"
 VOL = "vol-0123456789abcdef0"
 SNAP = "snap-0123456789abcdef0"
 
