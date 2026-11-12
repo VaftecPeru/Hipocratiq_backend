@@ -18,7 +18,7 @@ class AdminBackupController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if (! $this->backupManager->configured()) {
+        if (!$this->backupManager->configured()) {
             return response()->json([
                 'success' => false,
                 'message' => 'El servicio de respaldos no está configurado.',
