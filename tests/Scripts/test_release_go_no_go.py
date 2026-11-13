@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from release_go_no_go import (  # noqa: E402
     REPOSITORY, FRONTEND_REPOSITORY, assess, assess_frontend_release,
     normalize_inventory_run, http_get_json, GateError,
-    SECURITY_ISSUE, assess_public_security_issue, BACKUP_ISSUE, assess_backup_issue
+    SECURITY_ISSUE, assess_public_security_issue, BACKUP_ISSUE, assess_backup_issue,
+    INFRA_ISSUES, assess_infra_issues
 )
 
 NOW = dt.datetime(2026, 10, 24, 20, tzinfo=dt.timezone.utc)
@@ -133,6 +134,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertTrue(any("#113" in reason for reason in reasons))
             self.assertTrue(any("recovery evidence" in reason for reason in reasons))
         self.assertEqual(assess_backup_issue({"state": "closed"}), [])
+
+    def test_UAT_alternative_and_EBS_issues_block_main_release(self):
+        self.assertEqual(INFRA_ISSUES, (111, 112))
+        for number in INFRA_ISSUES:
+            evidence = {111: {"state": "closed"}, 112: {"state": "closed"}}
+            evidence[number] = {"state": "open"}
+            self.assertIn(f"#{number}", " ".join(assess_infra_issues(evidence)))
+        self.assertEqual(
+            assess_infra_issues({111: {"state": "closed"}, 112: {"state": "closed"}}),
+            [],
+        )
+        self.assertTrue(assess_infra_issues({}))
 
     def test_live_gate_fetches_backup_issue_and_enforces_it(self):
         source = (Path(__file__).resolve().parents[2] / "scripts" /
