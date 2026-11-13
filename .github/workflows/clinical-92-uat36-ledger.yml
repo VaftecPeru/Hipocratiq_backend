@@ -1,0 +1,43 @@
+name: "Clinical #92 36-position UAT ledger contract (NOT signoff)"
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "docs/releases/clinical-92-uat36-ledger.json"
+      - "docs/releases/clinical-92-uat36-ledger.md"
+      - "scripts/clinical_92_ledger.py"
+      - "tests/Scripts/test_clinical_92_ledger.py"
+      - ".github/workflows/clinical-92-uat36-ledger.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "docs/releases/clinical-92-uat36-ledger.json"
+      - "docs/releases/clinical-92-uat36-ledger.md"
+      - "scripts/clinical_92_ledger.py"
+      - "tests/Scripts/test_clinical_92_ledger.py"
+      - ".github/workflows/clinical-92-uat36-ledger.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-contract:
+    name: "36 UAT positions and synthetic fail-closed regressions (NOT UAT)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test schema rejection and no automatic clinical signoff
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile scripts/clinical_92_ledger.py
+          python3 -m unittest discover -s tests/Scripts -p 'test_clinical_92_ledger.py' -v
+      - name: Report sanitized count only (release always NO-GO)
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/clinical_92_ledger.py --file docs/releases/clinical-92-uat36-ledger.json
+          echo "CLINICAL_UAT_APPROVAL=NOT_GRANTED; NO_AWS_CALLS; NO_PHI; MAIN_RELEASE=NO_GO"

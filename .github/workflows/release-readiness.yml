@@ -1,0 +1,58 @@
+name: Release evidence NO-GO gate (no AWS calls)
+
+on:
+  # Mandatory release evidence must run on EVERY PR into main, even when
+  # no release gate files are changed. Never filter this workflow by paths.
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: hipocratiq-release-proof-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-safety-tests:
+    name: Read-only release evidence unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout release guard only
+        uses: actions/checkout@v4
+
+      - name: Python syntax and fail-closed regressions
+        run: |
+          python3 -m py_compile scripts/release_go_no_go.py tests/Scripts/test_release_go_no_go.py
+          python3 -m unittest discover -s tests/Scripts -p 'test_release_go_no_go.py' -v
+
+      - name: State the limits
+        run: |
+          echo 'No AWS credentials acquired. No EC2, Docker, SMS or clinical data touched.'
+          echo 'Offline tests are NOT clinical approval and NOT a release GO.'
+
+  live-release-evidence:
+    name: Release evidence / main P0 NO-GO (read-only)
+    needs: offline-safety-tests
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout release guard
+        uses: actions/checkout@v4
+
+      - name: Require real inventory, protected main, exact SHA and closed P0 issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_go_no_go.py
+
+      - name: Clarify this is not a deploy approval
+        if: success()
+        run: |
+          echo 'GitHub evidence minimum met; still require external clinical UAT'
+          echo 'and release-manager approval before main merge or AWS deployment.'

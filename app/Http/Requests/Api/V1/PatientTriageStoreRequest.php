@@ -32,6 +32,25 @@ class PatientTriageStoreRequest extends FormRequest
         ];
     }
 
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return [
+            'temperature_c.numeric' => 'La temperatura debe ser un valor numérico.',
+            'temperature_c.between' => 'Verifica la temperatura: el rango técnico aceptado es 30–45 °C.',
+            'systolic_bp.integer' => 'La presión sistólica debe ser un número entero.',
+            'systolic_bp.between' => 'Verifica la presión sistólica: el rango técnico aceptado es 60–250 mmHg.',
+            'diastolic_bp.integer' => 'La presión diastólica debe ser un número entero.',
+            'diastolic_bp.between' => 'Verifica la presión diastólica: el rango técnico aceptado es 30–160 mmHg.',
+            'heart_rate.integer' => 'La frecuencia cardiaca debe ser un número entero.',
+            'heart_rate.between' => 'Verifica la frecuencia cardiaca: el rango técnico aceptado es 30–220 lpm.',
+            'respiratory_rate.integer' => 'La frecuencia respiratoria debe ser un número entero.',
+            'respiratory_rate.between' => 'Verifica la frecuencia respiratoria: el rango técnico aceptado es 5–60 rpm.',
+            'oxygen_saturation.integer' => 'La saturación de oxígeno debe ser un número entero.',
+            'oxygen_saturation.between' => 'Verifica la saturación de oxígeno: el rango técnico aceptado es 70–100%.',
+        ];
+    }
+
     protected function prepareForValidation(): void
     {
         foreach (['reason', 'triage_notes'] as $field) {

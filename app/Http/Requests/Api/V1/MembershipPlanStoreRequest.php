@@ -19,7 +19,7 @@ class MembershipPlanStoreRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'key' => ['required', 'string', 'max:60', 'regex:/^[a-z0-9\-]+$/', Rule::unique('plans', 'key')],
+            'key' => ['required', 'string', 'max:60', 'regex:/^[a-z0-9][a-z0-9_-]*$/', Rule::unique('plans', 'key')],
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:500'],
             'monthly_price_usd' => ['required', 'numeric', 'min:0'],

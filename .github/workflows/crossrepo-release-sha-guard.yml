@@ -1,0 +1,28 @@
+name: Cross-repository Frontend SHA consistency (offline)
+
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-source-pin:
+    name: Verify immutable Frontend SHA and full-stack workflow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewed Backend source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python syntax check
+        run: python3 -m py_compile tests/Scripts/test_fullstack_source_pin.py
+      - name: Verify SHA consistency and pre-/post-integration guards
+        run: python3 -m unittest discover -s tests/Scripts -p 'test_fullstack_source_pin.py' -v
+      - name: Explain scope
+        run: |
+          echo "Only static consistency validated: no AWS, no PHI, no external calls."
+          echo "The fullstack UAT workflow independently verifies live Frontend develop and RC head."

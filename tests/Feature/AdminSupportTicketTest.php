@@ -124,7 +124,9 @@ class AdminSupportTicketTest extends TestCase
         $ticket = SupportTicket::query()->findOrFail($response->json('data.id'));
 
         $this->assertNotNull($ticket->due_at);
-        $this->assertEquals(2, $ticket->created_at->diffInHours($ticket->due_at));
+        // PostgreSQL persists timestamps at second precision; the SLA starts when
+        // the ticket is built, while created_at may be recorded a moment later.
+        $this->assertEqualsWithDelta(7200, $ticket->created_at->diffInSeconds($ticket->due_at), 2);
         $this->assertDatabaseHas('support_ticket_activities', [
             'support_ticket_id' => $ticket->id,
             'type' => 'created',
