@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 REPOSITORY = "VaftecPeru/Hipocratiq_backend"
 FRONTEND_REPOSITORY = "VaftecPeru/Hipocratiq_Frontend"
-FRONTEND_RELEASE_PR = 85
+FRONTEND_RELEASE_PR = 80
 ISSUE = 92
 SECURITY_ISSUE = 102
 BACKUP_ISSUE = 113
@@ -116,7 +116,7 @@ def assess(pr, main, develop, issue, inventory, now=None):
             accepted.append(run)
     if not accepted:
         blockers.append(
-            "No recent real read-only production AWS metadata for current develop SHA: "
+            "No recent real read-only production AWS metadata for the exact current develop SHA: "
             "job must be SUCCESS, not SKIPPED, "
             "with a retained non-empty metadata artifact."
         )
@@ -150,28 +150,34 @@ def assess_backup_issue(backup_issue):
 
 
 def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
-    """Require the reviewed Web-only PR #85 to be merged into protected main.
+    """Require the reviewed release PR #80 to be merged into protected main.
 
-    Deliberately do not demand open PR #80 or matching mobile develop; it is a
-    selective web-only release. Clinical/security and real AWS checks stay
-    separate and remain fail-closed.
+    Full-stack release requires the current Frontend develop candidate to
+    be reviewed and merged in main. This is not deployment authorization.
     """
     blockers = []
     if frontend_main.get("protected") is not True:
         blockers.append("GitHub Frontend main branch is not protected.")
+    if frontend_develop.get("protected") is not True:
+        blockers.append("GitHub Frontend develop branch is not protected.")
+    if (frontend_pr.get("head", {}).get("sha") !=
+            frontend_develop.get("commit", {}).get("sha")):
+        blockers.append("Frontend release head SHA differs from current develop.")
+    if frontend_pr.get("draft") is not False:
+        blockers.append("Frontend release PR #80 must be reviewed, not DRAFT.")
     if frontend_pr.get("number") != FRONTEND_RELEASE_PR:
-        blockers.append("Frontend release evidence must be PR #85.")
+        blockers.append("Frontend release evidence must be PR #80.")
     if frontend_pr.get("merged") is not True or frontend_pr.get("state") != "closed":
-        blockers.append("Frontend Web-only PR #85 must be merged.")
+        blockers.append("Frontend release PR #80 must be merged.")
     if frontend_pr.get("base", {}).get("ref") != "main":
-        blockers.append("Frontend Web-only PR #85 must target main.")
+        blockers.append("Frontend release PR #80 must target main.")
     if (frontend_pr.get("head", {}).get("repo") or {}).get("full_name") != FRONTEND_REPOSITORY:
-        blockers.append("Frontend Web-only PR #85 must originate from approved repository.")
+        blockers.append("Frontend release PR #80 must originate from approved repository.")
     merge_sha = frontend_pr.get("merge_commit_sha")
     if not isinstance(merge_sha, str) or len(merge_sha) != 40:
-        blockers.append("Frontend Web-only PR #85 merge SHA is absent.")
-    elif frontend_main.get("web85_in_history") is not True:
-        blockers.append("Frontend PR #85 merge commit is not verified in protected main ancestry.")
+        blockers.append("Frontend release PR #80 merge SHA is absent.")
+    elif frontend_main.get("release_in_history") is not True:
+        blockers.append("Frontend PR #80 merge commit is not verified in protected main ancestry.")
     return blockers
 
 
@@ -205,9 +211,9 @@ def collect_evidence(token, number):
             frontend_root + "/compare/" + merge_sha + "..." + main_sha,
             token, repository=FRONTEND_REPOSITORY,
         )
-        frontend_main["web85_in_history"] = ancestry.get("status") in ("ahead", "identical")
+        frontend_main["release_in_history"] = ancestry.get("status") in ("ahead", "identical")
     else:
-        frontend_main["web85_in_history"] = False
+        frontend_main["release_in_history"] = False
 
 
     # No calls to AWS. All results come from GitHub's own workflow/job API.
