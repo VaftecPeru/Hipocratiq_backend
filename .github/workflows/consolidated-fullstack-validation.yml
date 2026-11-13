@@ -272,10 +272,24 @@ jobs:
           actual="$(gh api "repos/VaftecPeru/Hipocratiq_Frontend/branches/$FRONTEND_BRANCH" --jq '.commit.sha')"
           [[ "$actual" == "$PIN" ]] || { echo "::error::Frontend commit moved; rerun with new pin"; exit 1; }
 
+  restore-isolated:
+    name: "P1 / PostgreSQL 17 synthetic restore and SHA-256"
+    needs: fullstack-integration
+    uses: ./.github/workflows/phase2-postgres-isolated-restore.yml
+    permissions:
+      contents: read
+
+  clinical-contract:
+    name: "P1 / 36 clinical UAT ledger (contract only)"
+    needs: restore-isolated
+    uses: ./.github/workflows/clinical-92-uat36-ledger.yml
+    permissions:
+      contents: read
+
   release-blockers:
     name: "P2 / Production NO-GO evidence and mandatory stop"
     if: ${{ !cancelled() }}
-    needs: [source-lock, backend-ci, frontend-ci, browser-e2e, fullstack-integration]
+    needs: [source-lock, backend-ci, frontend-ci, browser-e2e, fullstack-integration, restore-isolated, clinical-contract]
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
