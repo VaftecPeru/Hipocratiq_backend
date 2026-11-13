@@ -1,6 +1,7 @@
 name: "Clinical #92 36-position UAT ledger contract (NOT signoff)"
 
 on:
+  workflow_call:
   pull_request:
     branches: [develop, main]
     paths:
