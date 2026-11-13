@@ -18,8 +18,8 @@ FRONTEND_RELEASE_PR = 85
 ISSUE = 92
 SECURITY_ISSUE = 102
 BACKUP_ISSUE = 113
-AWS_JOB_NAME = "Approved AWS UAT instance metadata ONLY"
-AWS_ARTIFACT = "hipocratiq-uat-aws-readonly-metadata"
+AWS_JOB_NAME = "Approved production EC2 and SSM metadata (no shell/PHI/deploy)"
+AWS_ARTIFACT = "hipocratiq-production-aws-metadata-not-code-proof"
 MAX_INVENTORY_AGE_DAYS = 7
 NOW_UTC = dt.timezone.utc
 
@@ -116,7 +116,7 @@ def assess(pr, main, develop, issue, inventory, now=None):
             accepted.append(run)
     if not accepted:
         blockers.append(
-            "No recent real AWS UAT inventory for the exact current develop SHA: "
+            "No recent real read-only production AWS metadata for current develop SHA: "
             "job must be SUCCESS, not SKIPPED, "
             "with a retained non-empty metadata artifact."
         )
@@ -212,7 +212,7 @@ def collect_evidence(token, number):
 
     # No calls to AWS. All results come from GitHub's own workflow/job API.
     raw = http_get_json(
-        root + "/actions/workflows/uat-aws-readonly-inventory.yml/runs"
+        root + "/actions/workflows/production-version-evidence-readonly.yml/runs"
         "?branch=develop&per_page=20", token
     )
     inventory = []
