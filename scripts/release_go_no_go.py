@@ -18,6 +18,7 @@ FRONTEND_RELEASE_PR = 80
 ISSUE = 92
 SECURITY_ISSUE = 102
 BACKUP_ISSUE = 113
+INFRA_ISSUES = (111, 112)
 AWS_JOB_NAME = "Approved production EC2 and SSM metadata (no shell/PHI/deploy)"
 AWS_ARTIFACT = "hipocratiq-production-aws-metadata-not-code-proof"
 MAX_INVENTORY_AGE_DAYS = 7
@@ -149,6 +150,15 @@ def assess_backup_issue(backup_issue):
     return []
 
 
+def assess_infra_issues(evidence):
+    """Require formal UAT-alternative approval and EBS encryption decision."""
+    blockers = []
+    for number in INFRA_ISSUES:
+        if (evidence.get(number) or {}).get("state") != "closed":
+            blockers.append(f"Required infrastructure release issue #{number} is open or unverifiable.")
+    return blockers
+
+
 def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
     """Require the reviewed release PR #80 to be merged into protected main.
 
@@ -189,6 +199,7 @@ def collect_evidence(token, number):
     issue = http_get_json(root + "/issues/" + str(ISSUE), token)
     security_issue = http_get_json(root + "/issues/" + str(SECURITY_ISSUE), token)
     backup_issue = http_get_json(root + "/issues/" + str(BACKUP_ISSUE), token)
+    infra_issues = {n: http_get_json(root + "/issues/" + str(n), token) for n in INFRA_ISSUES}
 
     frontend_root = "/repos/" + FRONTEND_REPOSITORY
     frontend_pr = http_get_json(
@@ -240,7 +251,7 @@ def collect_evidence(token, number):
             root + "/actions/runs/" + str(run_id) + "/artifacts?per_page=100", token
         ).get("artifacts", [])
         inventory.append(normalize_inventory_run(run, jobs, artifacts))
-    return (pr, main, develop, issue, security_issue, backup_issue, inventory,
+    return (pr, main, develop, issue, security_issue, backup_issue, infra_issues, inventory,
             frontend_pr, frontend_main, frontend_develop)
 
 
@@ -257,12 +268,13 @@ def main():
         number = event.get("pull_request", {}).get("number")
         if not isinstance(number, int):
             raise GateError("Only GitHub main pull requests may be assessed.")
-        p, m, d, i, security_issue, backup_issue, runs, fe_pr, fe_main, fe_develop = collect_evidence(
+        p, m, d, i, security_issue, backup_issue, infra_issues, runs, fe_pr, fe_main, fe_develop = collect_evidence(
             os.environ.get("GITHUB_TOKEN", ""), number
         )
         blockers = assess(p, m, d, i, runs)
         blockers.extend(assess_public_security_issue(security_issue))
         blockers.extend(assess_backup_issue(backup_issue))
+        blockers.extend(assess_infra_issues(infra_issues))
         blockers.extend(assess_frontend_release(fe_pr, fe_main, fe_develop))
     except (GateError, OSError, ValueError) as err:
         blockers = ["Evidence unavailable; fail-closed: " + str(err)]
