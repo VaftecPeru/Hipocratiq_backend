@@ -127,3 +127,57 @@ jobs:
         run: composer audit --locked --no-interaction
       - name: Security release is still NO-GO without human review
         run: echo 'Composer audit pass is not P0-102 private approval or P0-92 clinical UAT.'
+
+  gitleaks-full-reachable-history:
+    name: Full reachable Git history / Gitleaks (fail closed, no secrets in logs)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout without stored credentials and fetch all branch/tag refs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require complete reachable history
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || {
+            echo 'P0_102_HISTORY_REFS=UNAVAILABLE_NO_GO'
+            exit 2
+          }
+          git fetch --tags origin >/dev/null 2>&1 || {
+            echo 'P0_102_TAG_REFS=UNAVAILABLE_NO_GO'
+            exit 2
+          }
+          if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
+            echo 'P0_102_HISTORY=SHALLOW_NO_GO'
+            exit 2
+          fi
+      - name: Scan all reachable commits with pinned Gitleaks; never publish findings
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          # Never send findings, secret bytes, filenames, SHAs or raw scanner diagnostics to public logs.
+          set +e
+          docker run --rm --network none \
+            --user "$(id -u):$(id -g)" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            -v "$GITHUB_WORKSPACE:/repo:ro" -w /repo \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner '--log-opts=--all' . \
+            > "$RUNNER_TEMP/p0-102-full-history.log" 2>&1
+          scan_code=$?
+          set -e
+          rm -f "$RUNNER_TEMP/p0-102-full-history.log"
+          case "$scan_code" in
+            0) echo 'P0_102_HISTORY_SCAN=NO_SIGNAL_NOT_CLEARANCE' ;;
+            1) echo 'P0_102_HISTORY_SCAN=PRIVATE_TRIAGE_REQUIRED_NO_GO'; exit 1 ;;
+            *) echo 'P0_102_HISTORY_SCAN=SCANNER_ERROR_NO_GO'; exit 2 ;;
+          esac
+      - name: Enforce independent private signoff
+        run: |
+          echo 'A passing history scan does not prove previous credential revocation.'
+          echo 'Public exposure, Actions artifacts and clinical UAT must be reviewed separately.'
+          echo 'Never close P0 #102 or authorize main merely because this job passed.'
