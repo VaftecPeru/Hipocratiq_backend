@@ -13,7 +13,7 @@ fi
 source_db="$DB_DATABASE"
 restore_db="hipocratiq_schema_restore_ci"
 user="$DB_USERNAME"
-pg=(docker run --rm --network host -e "PGPASSWORD=${DB_PASSWORD:?Missing synthetic DB password}" postgres:17-alpine)
+pg=(docker run --rm -i --network host -e "PGPASSWORD=${DB_PASSWORD:?Missing synthetic DB password}" postgres:17-alpine)
 sql() { "${pg[@]}" psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$user" -d "$1" -c "$2"; }
 
 # This sentinel exists only on the ephemeral CI database, never production.
