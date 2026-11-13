@@ -262,6 +262,11 @@ jobs:
             sleep 1
           done
           node scripts/uat-fullstack-http-smoke.mjs
+      - name: Restore actual Laravel PostgreSQL schema in isolated synthetic CI
+        shell: bash
+        run: |
+          bash -n scripts/ci_postgres_schema_restore.sh
+          bash scripts/ci_postgres_schema_restore.sh
       - name: Ensure Frontend branch did not move during testing
         env:
           GH_TOKEN: ${{ github.token }}
