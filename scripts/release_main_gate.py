@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 
 BACKEND = "VaftecPeru/Hipocratiq_backend"
 FRONTEND = "VaftecPeru/Hipocratiq_Frontend"
-REQUIRED_ISSUES = (92, 102, 111, 113)
+REQUIRED_ISSUES = (92, 102, 111, 112, 113)
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{7,159}\Z")
 ALLOWED_API_PATHS = frozenset([

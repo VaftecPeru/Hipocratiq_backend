@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from release_go_no_go import (  # noqa: E402
     REPOSITORY, FRONTEND_REPOSITORY, assess, assess_frontend_release,
     normalize_inventory_run, http_get_json, GateError,
-    SECURITY_ISSUE, assess_public_security_issue, BACKUP_ISSUE, assess_backup_issue
+    SECURITY_ISSUE, assess_public_security_issue, BACKUP_ISSUE, assess_backup_issue,
+    INFRA_ISSUES, assess_infra_issues
 )
 
 NOW = dt.datetime(2026, 10, 24, 20, tzinfo=dt.timezone.utc)
@@ -57,31 +58,52 @@ class ReleaseEvidenceTests(unittest.TestCase):
             " ".join(assess(pr, main, develop, issue, inv, now=NOW)),
         )
 
-    def test_merged_frontend_web_only_pr85_is_valid_evidence(self):
+    def test_merged_frontend_pr80_is_valid_evidence(self):
         frontend_pr = {
-            "number": 85, "base": {"ref": "main"},
-            "head": {"repo": {"full_name": FRONTEND_REPOSITORY}},
+            "number": 80, "draft": False, "base": {"ref": "main"},
+            "head": {"sha": SHA, "repo": {"full_name": FRONTEND_REPOSITORY}},
             "state": "closed", "merged": True, "merge_commit_sha": SHA,
         }
-        frontend_main = {"protected": True, "commit": {"sha": SHA}, "web85_in_history": True}
-        self.assertEqual(assess_frontend_release(frontend_pr, frontend_main, {}), [])
+        frontend_main = {"protected": True, "commit": {"sha": SHA}, "release_in_history": True}
+        frontend_develop = {"protected": True, "commit": {"sha": SHA}}
+        self.assertEqual(assess_frontend_release(frontend_pr, frontend_main, frontend_develop), [])
         frontend_main["protected"] = False
         frontend_pr["merged"] = False
-        frontend_main["web85_in_history"] = False
-        reasons = assess_frontend_release(frontend_pr, frontend_main, {})
+        frontend_main["release_in_history"] = False
+        reasons = assess_frontend_release(frontend_pr, frontend_main, frontend_develop)
         self.assertTrue(any("not protected" in x for x in reasons))
         self.assertTrue(any("must be merged" in x for x in reasons))
         self.assertTrue(any("ancestry" in x for x in reasons))
 
     def test_frontend_evidence_rejects_fork_wrong_base_and_wrong_pr(self):
         frontend_pr = {
-            "number": 80, "base": {"ref": "develop"},
+            "number": 85, "base": {"ref": "develop"},
             "head": {"repo": {"full_name": "untrusted/fork"}},
             "state": "closed", "merged": True, "merge_commit_sha": SHA,
         }
         frontend_main = {"protected": True, "commit": {"sha": SHA}}
         reasons = assess_frontend_release(frontend_pr, frontend_main, {})
         self.assertGreaterEqual(len(reasons), 3)
+
+    def test_fullstack_frontend_sha_protection_and_draft_are_mandatory(self):
+        frontend_pr = {
+            "number": 80, "draft": True, "base": {"ref": "main"},
+            "head": {"sha": "a" * 40, "repo": {"full_name": FRONTEND_REPOSITORY}},
+            "state": "open", "merged": False,
+        }
+        frontend_main = {"protected": True, "release_in_history": False}
+        frontend_develop = {"protected": False, "commit": {"sha": SHA}}
+        reasons = assess_frontend_release(frontend_pr, frontend_main, frontend_develop)
+        self.assertTrue(any("DRAFT" in x for x in reasons))
+        self.assertTrue(any("develop branch is not protected" in x for x in reasons))
+        self.assertTrue(any("head SHA differs" in x for x in reasons))
+
+    def test_release_inventory_uses_existing_production_readonly_metadata(self):
+        script = (Path(__file__).resolve().parents[2] / "scripts" /
+                  "release_go_no_go.py").read_text(encoding="utf-8")
+        self.assertIn("production-version-evidence-readonly.yml/runs", script)
+        self.assertIn("hipocratiq-production-aws-metadata-not-code-proof", script)
+        self.assertNotIn("uat-aws-readonly-inventory.yml/runs", script)
 
     def test_rejects_other_repositories_when_reading_github_evidence(self):
         with self.assertRaises(GateError):
@@ -112,6 +134,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
             self.assertTrue(any("#113" in reason for reason in reasons))
             self.assertTrue(any("recovery evidence" in reason for reason in reasons))
         self.assertEqual(assess_backup_issue({"state": "closed"}), [])
+
+    def test_UAT_alternative_and_EBS_issues_block_main_release(self):
+        self.assertEqual(INFRA_ISSUES, (111, 112))
+        for number in INFRA_ISSUES:
+            evidence = {111: {"state": "closed"}, 112: {"state": "closed"}}
+            evidence[number] = {"state": "open"}
+            self.assertIn(f"#{number}", " ".join(assess_infra_issues(evidence)))
+        self.assertEqual(
+            assess_infra_issues({111: {"state": "closed"}, 112: {"state": "closed"}}),
+            [],
+        )
+        self.assertTrue(assess_infra_issues({}))
 
     def test_live_gate_fetches_backup_issue_and_enforces_it(self):
         source = (Path(__file__).resolve().parents[2] / "scripts" /
@@ -144,8 +178,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
         inv[0]["artifact_present"] = False
         self.assertTrue(assess(pr, main, develop, issue, inv, now=NOW))
         run = {"created_at": "2026-10-24T19:00:00Z", "conclusion": "success"}
-        jobs = [{"name": "Approved AWS UAT instance metadata ONLY", "conclusion": "success"}]
-        artifacts = [{"name": "hipocratiq-uat-aws-readonly-metadata",
+        jobs = [{"name": "Approved production EC2 and SSM metadata (no shell/PHI/deploy)", "conclusion": "success"}]
+        artifacts = [{"name": "hipocratiq-production-aws-metadata-not-code-proof",
                       "expired": True, "size_in_bytes": 2048}]
         self.assertFalse(normalize_inventory_run(run, jobs, artifacts)["artifact_present"])
 
@@ -177,9 +211,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "created_at": "2026-10-24T19:00:00Z", "event": "workflow_dispatch",
             "conclusion": "success",
         }
-        jobs = [{"name": "Approved AWS UAT instance metadata ONLY",
+        jobs = [{"name": "Approved production EC2 and SSM metadata (no shell/PHI/deploy)",
                  "conclusion": "success"}]
-        artifacts = [{"name": "hipocratiq-uat-aws-readonly-metadata",
+        artifacts = [{"name": "hipocratiq-production-aws-metadata-not-code-proof",
                       "expired": False, "size_in_bytes": 2048}]
         item = normalize_inventory_run(run, jobs, artifacts)
         self.assertEqual(item["head_sha"], SHA)

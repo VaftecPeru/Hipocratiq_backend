@@ -46,6 +46,15 @@ class MainReleaseGateTests(unittest.TestCase):
             result = gate.assess(env, be, fe, issues, "deploy")
             self.assertIn(f"P0_{issue}_NOT_CLOSED", result["blockers"])
 
+    def test_unencrypted_ebs_issue_112_blocks_all_release_modes(self):
+        self.assertIn(112, gate.REQUIRED_ISSUES)
+        env, backend, frontend, issues = fixture()
+        issues[112]["state"] = "open"
+        for mode in ("readiness", "deploy"):
+            result = gate.assess(env, backend, frontend, issues, mode)
+            self.assertEqual(result["status"], "NO_GO")
+            self.assertIn("P0_112_NOT_CLOSED", result["blockers"])
+
     def test_main_push_never_qualifies_as_deploy(self):
         env, be, fe, issues = fixture()
         env["GITHUB_EVENT_NAME"] = "push"

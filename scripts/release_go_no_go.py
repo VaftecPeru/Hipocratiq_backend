@@ -14,12 +14,13 @@ from urllib.request import Request, urlopen
 
 REPOSITORY = "VaftecPeru/Hipocratiq_backend"
 FRONTEND_REPOSITORY = "VaftecPeru/Hipocratiq_Frontend"
-FRONTEND_RELEASE_PR = 85
+FRONTEND_RELEASE_PR = 80
 ISSUE = 92
 SECURITY_ISSUE = 102
 BACKUP_ISSUE = 113
-AWS_JOB_NAME = "Approved AWS UAT instance metadata ONLY"
-AWS_ARTIFACT = "hipocratiq-uat-aws-readonly-metadata"
+INFRA_ISSUES = (111, 112)
+AWS_JOB_NAME = "Approved production EC2 and SSM metadata (no shell/PHI/deploy)"
+AWS_ARTIFACT = "hipocratiq-production-aws-metadata-not-code-proof"
 MAX_INVENTORY_AGE_DAYS = 7
 NOW_UTC = dt.timezone.utc
 
@@ -116,7 +117,7 @@ def assess(pr, main, develop, issue, inventory, now=None):
             accepted.append(run)
     if not accepted:
         blockers.append(
-            "No recent real AWS UAT inventory for the exact current develop SHA: "
+            "No recent real read-only production AWS metadata for the exact current develop SHA: "
             "job must be SUCCESS, not SKIPPED, "
             "with a retained non-empty metadata artifact."
         )
@@ -149,29 +150,44 @@ def assess_backup_issue(backup_issue):
     return []
 
 
-def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
-    """Require the reviewed Web-only PR #85 to be merged into protected main.
+def assess_infra_issues(evidence):
+    """Require formal UAT-alternative approval and EBS encryption decision."""
+    blockers = []
+    for number in INFRA_ISSUES:
+        if (evidence.get(number) or {}).get("state") != "closed":
+            blockers.append(f"Required infrastructure release issue #{number} is open or unverifiable.")
+    return blockers
 
-    Deliberately do not demand open PR #80 or matching mobile develop; it is a
-    selective web-only release. Clinical/security and real AWS checks stay
-    separate and remain fail-closed.
+
+def assess_frontend_release(frontend_pr, frontend_main, frontend_develop):
+    """Require the reviewed release PR #80 to be merged into protected main.
+
+    Full-stack release requires the current Frontend develop candidate to
+    be reviewed and merged in main. This is not deployment authorization.
     """
     blockers = []
     if frontend_main.get("protected") is not True:
         blockers.append("GitHub Frontend main branch is not protected.")
+    if frontend_develop.get("protected") is not True:
+        blockers.append("GitHub Frontend develop branch is not protected.")
+    if (frontend_pr.get("head", {}).get("sha") !=
+            frontend_develop.get("commit", {}).get("sha")):
+        blockers.append("Frontend release head SHA differs from current develop.")
+    if frontend_pr.get("draft") is not False:
+        blockers.append("Frontend release PR #80 must be reviewed, not DRAFT.")
     if frontend_pr.get("number") != FRONTEND_RELEASE_PR:
-        blockers.append("Frontend release evidence must be PR #85.")
+        blockers.append("Frontend release evidence must be PR #80.")
     if frontend_pr.get("merged") is not True or frontend_pr.get("state") != "closed":
-        blockers.append("Frontend Web-only PR #85 must be merged.")
+        blockers.append("Frontend release PR #80 must be merged.")
     if frontend_pr.get("base", {}).get("ref") != "main":
-        blockers.append("Frontend Web-only PR #85 must target main.")
+        blockers.append("Frontend release PR #80 must target main.")
     if (frontend_pr.get("head", {}).get("repo") or {}).get("full_name") != FRONTEND_REPOSITORY:
-        blockers.append("Frontend Web-only PR #85 must originate from approved repository.")
+        blockers.append("Frontend release PR #80 must originate from approved repository.")
     merge_sha = frontend_pr.get("merge_commit_sha")
     if not isinstance(merge_sha, str) or len(merge_sha) != 40:
-        blockers.append("Frontend Web-only PR #85 merge SHA is absent.")
-    elif frontend_main.get("web85_in_history") is not True:
-        blockers.append("Frontend PR #85 merge commit is not verified in protected main ancestry.")
+        blockers.append("Frontend release PR #80 merge SHA is absent.")
+    elif frontend_main.get("release_in_history") is not True:
+        blockers.append("Frontend PR #80 merge commit is not verified in protected main ancestry.")
     return blockers
 
 
@@ -183,6 +199,7 @@ def collect_evidence(token, number):
     issue = http_get_json(root + "/issues/" + str(ISSUE), token)
     security_issue = http_get_json(root + "/issues/" + str(SECURITY_ISSUE), token)
     backup_issue = http_get_json(root + "/issues/" + str(BACKUP_ISSUE), token)
+    infra_issues = {n: http_get_json(root + "/issues/" + str(n), token) for n in INFRA_ISSUES}
 
     frontend_root = "/repos/" + FRONTEND_REPOSITORY
     frontend_pr = http_get_json(
@@ -205,14 +222,14 @@ def collect_evidence(token, number):
             frontend_root + "/compare/" + merge_sha + "..." + main_sha,
             token, repository=FRONTEND_REPOSITORY,
         )
-        frontend_main["web85_in_history"] = ancestry.get("status") in ("ahead", "identical")
+        frontend_main["release_in_history"] = ancestry.get("status") in ("ahead", "identical")
     else:
-        frontend_main["web85_in_history"] = False
+        frontend_main["release_in_history"] = False
 
 
     # No calls to AWS. All results come from GitHub's own workflow/job API.
     raw = http_get_json(
-        root + "/actions/workflows/uat-aws-readonly-inventory.yml/runs"
+        root + "/actions/workflows/production-version-evidence-readonly.yml/runs"
         "?branch=develop&per_page=20", token
     )
     inventory = []
@@ -234,7 +251,7 @@ def collect_evidence(token, number):
             root + "/actions/runs/" + str(run_id) + "/artifacts?per_page=100", token
         ).get("artifacts", [])
         inventory.append(normalize_inventory_run(run, jobs, artifacts))
-    return (pr, main, develop, issue, security_issue, backup_issue, inventory,
+    return (pr, main, develop, issue, security_issue, backup_issue, infra_issues, inventory,
             frontend_pr, frontend_main, frontend_develop)
 
 
@@ -251,12 +268,13 @@ def main():
         number = event.get("pull_request", {}).get("number")
         if not isinstance(number, int):
             raise GateError("Only GitHub main pull requests may be assessed.")
-        p, m, d, i, security_issue, backup_issue, runs, fe_pr, fe_main, fe_develop = collect_evidence(
+        p, m, d, i, security_issue, backup_issue, infra_issues, runs, fe_pr, fe_main, fe_develop = collect_evidence(
             os.environ.get("GITHUB_TOKEN", ""), number
         )
         blockers = assess(p, m, d, i, runs)
         blockers.extend(assess_public_security_issue(security_issue))
         blockers.extend(assess_backup_issue(backup_issue))
+        blockers.extend(assess_infra_issues(infra_issues))
         blockers.extend(assess_frontend_release(fe_pr, fe_main, fe_develop))
     except (GateError, OSError, ValueError) as err:
         blockers = ["Evidence unavailable; fail-closed: " + str(err)]

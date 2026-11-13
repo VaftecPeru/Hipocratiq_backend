@@ -1,5 +1,6 @@
 name: "P2 #113 PostgreSQL isolated synthetic restore drill (NO AWS)"
 on:
+  workflow_call:
   pull_request:
     branches: [develop]
     paths:
