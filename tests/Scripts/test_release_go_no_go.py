@@ -144,8 +144,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
         inv[0]["artifact_present"] = False
         self.assertTrue(assess(pr, main, develop, issue, inv, now=NOW))
         run = {"created_at": "2026-10-24T19:00:00Z", "conclusion": "success"}
-        jobs = [{"name": "Approved AWS UAT instance metadata ONLY", "conclusion": "success"}]
-        artifacts = [{"name": "hipocratiq-uat-aws-readonly-metadata",
+        jobs = [{"name": "Approved production EC2 and SSM metadata (no shell/PHI/deploy)", "conclusion": "success"}]
+        artifacts = [{"name": "hipocratiq-production-aws-metadata-not-code-proof",
                       "expired": True, "size_in_bytes": 2048}]
         self.assertFalse(normalize_inventory_run(run, jobs, artifacts)["artifact_present"])
 
@@ -177,9 +177,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "created_at": "2026-10-24T19:00:00Z", "event": "workflow_dispatch",
             "conclusion": "success",
         }
-        jobs = [{"name": "Approved AWS UAT instance metadata ONLY",
+        jobs = [{"name": "Approved production EC2 and SSM metadata (no shell/PHI/deploy)",
                  "conclusion": "success"}]
-        artifacts = [{"name": "hipocratiq-uat-aws-readonly-metadata",
+        artifacts = [{"name": "hipocratiq-production-aws-metadata-not-code-proof",
                       "expired": False, "size_in_bytes": 2048}]
         item = normalize_inventory_run(run, jobs, artifacts)
         self.assertEqual(item["head_sha"], SHA)
