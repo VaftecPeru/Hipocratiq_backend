@@ -17,3 +17,7 @@ bash scripts/security/p0-102-private-gitleaks.sh /ruta/absoluta/privada/hipocrat
 8. Al concluir, aplicar la política de retención y eliminación segura del material confidencial. Confirmar resultados con el equipo antes de solicitar revisión de PR #183 (Backend) / #102 (Frontend).
 
 Este script es una ayuda para revisión privada, **no** cambia los controles de CI, no limpia automáticamente secretos, no habilita `main`, no despliega y no crea infraestructura.
+
+## Remediación adicional Composer (16/11/2026)
+
+El control `composer audit --locked` detectó CVE-2026-128083 en Laravel 13.34.0. La rama de seguridad actualizó la restricción a `^13.40.0` y resolvió `composer.lock` con Composer, fijando Laravel 13.42.0 mediante un workflow temporal de alcance limitado. La ejecución del actualizador finalizó con `composer validate` y `composer audit --locked` correctos. Esta actualización **no** resuelve los hallazgos históricos de Gitleaks ni autoriza despliegue. Se requiere CI completo del nuevo HEAD y revisión clínica y privada independiente.
