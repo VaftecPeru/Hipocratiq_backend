@@ -1,0 +1,85 @@
+name: P0-102 Gitleaks encrypted history evidence (no release)
+
+on:
+  push:
+    branches:
+      - security/p0-102-full-history-gitleaks-20261113
+    paths:
+      - .github/workflows/p0-102-encrypted-history-audit.yml
+      - scripts/security/p0-102-encrypted-history-audit.sh
+      - docs/security/P0-102-AGE-ENCRYPTED-AUDIT.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-102-age-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  encrypted-history-review:
+    name: Encrypted evidence only; never logs or raw findings
+    if: >-
+      github.ref == 'refs/heads/security/p0-102-full-history-gitleaks-20261113' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Validate recipient is configured BEFORE accessing historical findings
+        shell: bash
+        env:
+          AGE_PUBLIC_RECIPIENT: ${{ vars.HIPOCRATIQ_P0_102_AGE_RECIPIENT }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$AGE_PUBLIC_RECIPIENT" || "$AGE_PUBLIC_RECIPIENT" != age1* ]]; then
+            echo 'P0_102_ENCRYPTED_AUDIT=RECIPIENT_NOT_CONFIGURED_NO_GO'
+            echo 'Repository Settings > Secrets and variables > Actions > Variables: HIPOCRATIQ_P0_102_AGE_RECIPIENT'
+            exit 2
+          fi
+          echo 'P0_102_ENCRYPTED_AUDIT=RECIPIENT_CONFIGURED_NOT_SECURITY_APPROVAL'
+      - name: Checkout without persistent GitHub credentials, full history
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install age on ephemeral hosted runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if ! command -v age >/dev/null 2>&1; then
+            sudo apt-get update -qq > /dev/null 2>&1
+            sudo apt-get install -qq -y age > /dev/null 2>&1
+          fi
+          age --version >/dev/null 2>&1
+          echo 'AGE_CLI=AVAILABLE'
+      - name: Scan full reachable Git history, encrypt findings BEFORE artifact upload
+        id: scan
+        env:
+          AGE_PUBLIC_RECIPIENT: ${{ vars.HIPOCRATIQ_P0_102_AGE_RECIPIENT }}
+        shell: bash
+        run: bash scripts/security/p0-102-encrypted-history-audit.sh
+      - name: Upload ONLY age ciphertext (short retention, public repo)
+        if: steps.scan.outputs.encrypted_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-102-encrypted-history-evidence
+          path: ${{ runner.temp }}/p0-102-encrypted-artifacts/*.age
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+      - name: Preserve independent NO-GO on Gitleaks findings
+        if: steps.scan.outputs.encrypted_ready == 'true'
+        env:
+          SCAN_RESULT: ${{ steps.scan.outputs.scan_result }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "$SCAN_RESULT" == 'PRIVATE_TRIAGE_REQUIRED_NO_GO' ]]; then
+            echo 'P0_102_HISTORY_SCAN=PRIVATE_TRIAGE_REQUIRED_NO_GO'
+            exit 1
+          fi
+          [[ "$SCAN_RESULT" == 'NO_SIGNAL_NOT_SECURITY_CLEARANCE' ]] || exit 2
+          echo 'P0_102_HISTORY_SCAN=NO_SIGNAL_NOT_SECURITY_CLEARANCE'
+          echo 'PRIVATE_REVIEW_AND_SECURITY_SIGNOFF=STILL_REQUIRED'
