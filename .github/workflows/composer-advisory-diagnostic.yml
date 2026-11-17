@@ -25,6 +25,10 @@ jobs:
         continue-on-error: true
       - name: Resolve Laravel advisory without executing scripts or installing packages
         run: composer update laravel/framework --with-all-dependencies --no-install --no-scripts --no-plugins --no-interaction --no-progress
+      - name: Validate Composer metadata and prevent manifest drift
+        run: |
+          composer validate --strict --no-check-publish
+          git diff --exit-code -- composer.json
       - name: Verify resolved lock has no known advisories (fail closed)
         run: composer audit --locked --no-interaction
       - name: Upload candidate lockfile for human-reviewed commit
