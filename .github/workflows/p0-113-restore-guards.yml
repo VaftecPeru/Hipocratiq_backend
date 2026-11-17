@@ -2,6 +2,14 @@ name: P0-113 restore guard focused tests (synthetic)
 on:
   push:
     branches: [test/p0-113-restore-failclosed-20261117]
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/p0-113-restore-guards.yml'
+      - 'tests/Feature/Backups/DatabaseRestoreFailClosedTest.php'
+      - 'app/Services/Backups/DatabaseBackupManager.php'
+      - 'composer.json'
+      - 'composer.lock'
   workflow_dispatch:
 permissions:
   contents: read
