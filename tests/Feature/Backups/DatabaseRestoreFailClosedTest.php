@@ -57,4 +57,21 @@ final class DatabaseRestoreFailClosedTest extends TestCase
             Process::assertNothingRan();
         }
     }
+    public function test_restore_rejects_invalid_backup_identifier_without_running_external_process(): void
+    {
+        config()->set('app.env', 'testing');
+        config()->set('admin_operations.backups.restore_enabled', true);
+        config()->set('database.default', 'pgsql');
+        Process::fake();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Identificador de respaldo inválido.');
+
+        try {
+            app(DatabaseBackupManager::class)->restore('../synthetic_backup');
+        } finally {
+            Process::assertNothingRan();
+        }
+    }
+
 }
