@@ -4,7 +4,6 @@ namespace Tests\Feature\Backups;
 
 use App\Services\Backups\DatabaseBackupManager;
 use Illuminate\Support\Facades\Process;
-use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
