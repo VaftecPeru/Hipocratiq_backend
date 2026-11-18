@@ -4,6 +4,7 @@ namespace Tests\Feature\Backups;
 
 use App\Services\Backups\DatabaseBackupManager;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -85,8 +86,8 @@ final class DatabaseRestoreFailClosedTest extends TestCase
         config()->set('admin_operations.backups.restore_target_host', '127.0.0.1');
         config()->set('admin_operations.backups.disk', 'local');
         config()->set('admin_operations.backups.prefix', 'hipocratiq_test');
-        \\Illuminate\\Support\\Facades\\Storage::fake('local');
-        \\Illuminate\\Support\\Facades\\Storage::disk('local')->put(
+        Storage::fake('local');
+        Storage::disk('local')->put(
             'hipocratiq_test/manifests/synthetic_backup.json',
             json_encode(['id' => 'synthetic_backup', 'database' => 'hipocratiq_source'], JSON_THROW_ON_ERROR)
         );
