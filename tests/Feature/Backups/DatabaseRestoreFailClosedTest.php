@@ -75,6 +75,7 @@ final class DatabaseRestoreFailClosedTest extends TestCase
             Process::assertNothingRan();
         }
     }
+
     public function test_restore_rejects_unapproved_target_before_any_external_process(): void
     {
         config()->set('app.env', 'testing');
@@ -102,5 +103,4 @@ final class DatabaseRestoreFailClosedTest extends TestCase
             Process::assertNothingRan();
         }
     }
-
 }
