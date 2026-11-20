@@ -90,7 +90,14 @@ final class DatabaseRestoreFailClosedTest extends TestCase
         Storage::fake('local');
         Storage::disk('local')->put(
             'hipocratiq_test/manifests/synthetic_backup.json',
-            json_encode(['id' => 'synthetic_backup', 'database' => 'hipocratiq_source'], JSON_THROW_ON_ERROR)
+            json_encode([
+                'id' => 'synthetic_backup',
+                'provider' => 'postgresql',
+                'database' => 'hipocratiq_source',
+                'disk' => 'local',
+                'dump_path' => 'hipocratiq_test/database/synthetic_backup.dump',
+                'manifest_path' => 'hipocratiq_test/manifests/synthetic_backup.json',
+            ], JSON_THROW_ON_ERROR)
         );
         Process::fake();
 
@@ -118,7 +125,14 @@ final class DatabaseRestoreFailClosedTest extends TestCase
         Storage::fake('local');
         Storage::disk('local')->put(
             'hipocratiq_test/manifests/synthetic_backup.json',
-            json_encode(['id' => 'synthetic_backup', 'database' => 'hipocratiq_source'], JSON_THROW_ON_ERROR)
+            json_encode([
+                'id' => 'synthetic_backup',
+                'provider' => 'postgresql',
+                'database' => 'hipocratiq_source',
+                'disk' => 'local',
+                'dump_path' => 'hipocratiq_test/database/synthetic_backup.dump',
+                'manifest_path' => 'hipocratiq_test/manifests/synthetic_backup.json',
+            ], JSON_THROW_ON_ERROR)
         );
         Process::fake();
 
