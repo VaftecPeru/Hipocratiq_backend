@@ -206,6 +206,19 @@ final class DatabaseBackupManager
             throw new RuntimeException('El manifiesto del respaldo no es válido.');
         }
 
+        // Never trust paths or identity supplied by a stored manifest.
+        // The storage layout is fixed when a backup is created.
+        $prefix = trim((string) config('admin_operations.backups.prefix', 'hipocratiq'), '/');
+        if (
+            ($manifest['id'] ?? null) !== $id
+            || ($manifest['provider'] ?? null) !== 'postgresql'
+            || ($manifest['disk'] ?? null) !== (string) config('admin_operations.backups.disk')
+            || ($manifest['dump_path'] ?? null) !== $prefix.'/database/'.$id.'.dump'
+            || ($manifest['manifest_path'] ?? null) !== $path
+        ) {
+            throw new RuntimeException('Identidad o rutas del manifiesto de respaldo no válidas.');
+        }
+
         return $manifest;
     }
 
