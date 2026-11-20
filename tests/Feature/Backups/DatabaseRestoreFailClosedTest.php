@@ -103,4 +103,24 @@ final class DatabaseRestoreFailClosedTest extends TestCase
             Process::assertNothingRan();
         }
     }
+    public function test_restore_rejects_missing_manifest_without_running_external_process(): void
+    {
+        config()->set('app.env', 'testing');
+        config()->set('admin_operations.backups.restore_enabled', true);
+        config()->set('database.default', 'pgsql');
+        config()->set('admin_operations.backups.disk', 'local');
+        config()->set('admin_operations.backups.prefix', 'hipocratiq_test');
+        Storage::fake('local');
+        Process::fake();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('No se encontró el manifiesto del respaldo.');
+
+        try {
+            app(DatabaseBackupManager::class)->restore('missing_synthetic_backup');
+        } finally {
+            Process::assertNothingRan();
+        }
+    }
+
 }
