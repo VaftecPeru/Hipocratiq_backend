@@ -1,0 +1,42 @@
+name: P0-113 restore guard focused tests (synthetic)
+on:
+  push:
+    branches: [test/p0-113-restore-failclosed-20261117]
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/p0-113-restore-guards.yml'
+      - 'tests/Feature/Backups/DatabaseRestoreFailClosedTest.php'
+      - 'app/Services/Backups/DatabaseBackupManager.php'
+      - 'composer.json'
+      - 'composer.lock'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  restore-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_sqlite, pdo_pgsql, redis
+          coverage: none
+      - name: Install locked dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Prepare synthetic test environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+      - name: Execute three fail-closed restore guards
+        env:
+          APP_ENV: testing
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+        run: php artisan test tests/Feature/Backups/DatabaseRestoreFailClosedTest.php --no-ansi
+# This focused test is supplementary: it does not replace Composer audit, Gitleaks, UAT or release gates.
