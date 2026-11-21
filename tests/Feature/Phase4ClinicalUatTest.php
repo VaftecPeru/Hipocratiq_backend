@@ -96,7 +96,9 @@ class Phase4ClinicalUatTest extends TestCase
             'signed_doctor_medical_license' => '90000001',
         ]);
         $this->assertDatabaseCount('clinical_history_entries', 15);
-        $this->assertNotNull(Consultation::query()->findOrFail($consultationId)->signature_digest);
+        $signedDigest = Consultation::query()->findOrFail($consultationId)->signature_digest;
+        $this->assertNotNull($signedDigest);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/i', $signedDigest);
 
         $this->withSpaOrigin()
             ->patchJson("/api/v1/auth/doctor/consultations/{$consultationId}", [
@@ -104,6 +106,8 @@ class Phase4ClinicalUatTest extends TestCase
             ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('status');
+
+        $this->assertSame($signedDigest, Consultation::query()->findOrFail($consultationId)->signature_digest);
 
         $this->logoutCurrentWebSession();
         $this->authenticateWeb('paciente@hipocratiq.com', 'patient', 'patient');

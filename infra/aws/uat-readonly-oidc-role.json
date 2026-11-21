@@ -1,0 +1,82 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "HIPOCRATIQ: OIDC read-only inventory role scoped to the approved Backend GitHub Environment; NO AWS resources queried or altered until stack creation is explicitly authorized.",
+  "Resources": {
+    "HipocratiqUatReadOnlyRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "HIPOCRATIQ-UAT-ReadOnly",
+        "Description": "Read-only metadata inventory for approved UAT EC2. Requires preexisting GitHub OIDC provider and GitHub Environment approval.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "GitHubApprovedBackendUatEnvironmentOnly",
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:VaftecPeru/Hipocratiq_backend:environment:hipocratiq-uat-readonly"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "HIPOCRATIQ-UAT-Metadata-Describe-Only",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "ListApprovedUatComputeAndNetworkMetadata",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances",
+                    "ec2:DescribeInstanceStatus",
+                    "ec2:DescribeVolumes",
+                    "ec2:DescribeSecurityGroupRules",
+                    "ssm:DescribeInstanceInformation"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "HIPOCRATIQ"
+          },
+          {
+            "Key": "Environment",
+            "Value": "uat"
+          },
+          {
+            "Key": "Access",
+            "Value": "readonly"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "UatReadOnlyRoleArn": {
+      "Description": "Use as HIPOCRATIQ_UAT_READONLY_ROLE_ARN. Do not put AWS access keys into GitHub.",
+      "Value": {
+        "Fn::GetAtt": [
+          "HipocratiqUatReadOnlyRole",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

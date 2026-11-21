@@ -1,0 +1,109 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "PROPOSAL ONLY: separate manual approved production deploy OIDC role for one verified EC2. Never apply automatically.",
+  "Resources": {
+    "HipocratiqProdDeployRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "HIPOCRATIQ-PROD-Deploy",
+        "Description": "Manual production deployment via tightly scoped GitHub Environment OIDC and SSM one instance. Never use for read-only inventory.",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "ApprovedBackendProductionEnvironmentOnly",
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:VaftecPeru/Hipocratiq_backend:environment:hipocratiq-production"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "HIPOCRATIQ-PROD-SSM-Manual-Deploy-Restricted",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "ReadOnlyVerifyExactProductionHost",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances",
+                    "ssm:DescribeInstanceInformation"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "RunOnlyApprovedShellDocumentOnOneEC2",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:SendCommand"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${ProductionInstanceId}"
+                    }
+                  ]
+                },
+                {
+                  "Sid": "ReadSSMCommandStatusOnly",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:GetCommandInvocation"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "HIPOCRATIQ"
+          },
+          {
+            "Key": "Environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Access",
+            "Value": "manual-deploy-ssm"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ProdDeployRoleArn": {
+      "Description": "Use only with administrator-approved hipocratiq-production Environment, no AWS access keys.",
+      "Value": {
+        "Fn::GetAtt": [
+          "HipocratiqProdDeployRole",
+          "Arn"
+        ]
+      }
+    }
+  },
+  "Parameters": {
+    "ProductionInstanceId": {
+      "Type": "String",
+      "AllowedPattern": "^i-[0-9a-f]{8,17}$",
+      "Description": "Verified exact production EC2 instance. Never guess or copy from an old issue."
+    }
+  }
+}

@@ -1,0 +1,58 @@
+name: P0-102 GitHub Actions artifact metadata audit (no downloads)
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - .github/workflows/security-actions-artifact-metadata.yml
+      - scripts/audit_public_actions_metadata.py
+      - tests/Scripts/test_audit_public_actions_metadata.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hipocratiq-security-artifact-metadata-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata-only:
+    name: Read-only artifact/release counts, NOT content or clearance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python syntax and synthetic fail-closed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/audit_public_actions_metadata.py tests/Scripts/test_audit_public_actions_metadata.py
+          python3 -m unittest discover -s tests/Scripts -p test_audit_public_actions_metadata.py -v
+      - name: Inventory only GitHub Actions artifacts and releases metadata
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          AUDIT_REPORT: ${{ runner.temp }}/hipocratiq-artifact-metadata-only.json
+        run: |
+          set -euo pipefail
+          python3 scripts/audit_public_actions_metadata.py --report "$AUDIT_REPORT"
+          python3 - <<'PY'
+          import json, os, pathlib
+          report = json.loads(pathlib.Path(os.environ["AUDIT_REPORT"]).read_text())
+          assert report["artifact_contents_downloaded"] is False
+          assert report["release_asset_contents_downloaded"] is False
+          assert report["secret_values_recorded"] is False
+          assert report["names_or_paths_recorded"] is False
+          assert report["security_clearance_granted"] is False
+          print("METADATA_ONLY=PASS; PRIVATE_CONTENT_AUDIT_AND_ROTATION=STILL_REQUIRED")
+          PY
+      - name: Publish counts-only evidence (never artifact contents)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-security-artifact-metadata-only
+          path: ${{ runner.temp }}/hipocratiq-artifact-metadata-only.json
+          retention-days: 7
+          if-no-files-found: error

@@ -12,6 +12,13 @@ return [
         'resend_seconds' => (int) env('OTP_RESEND_SECONDS', 60),
         'hash_key' => env('OTP_HASH_KEY') ?: env('APP_KEY'),
         'fixed_code' => env('OTP_FIXED_CODE'),
+        'phone_provider' => env('OTP_PHONE_PROVIDER', 'local'),
+        'aws_notify' => [
+            'region' => env('AWS_NOTIFY_REGION', env('AWS_DEFAULT_REGION', 'us-east-2')),
+            'origination_identity' => env('AWS_NOTIFY_ORIGINATION_IDENTITY'),
+            'notify_code_configuration' => env('AWS_NOTIFY_CODE_CONFIGURATION'),
+            'configuration_set_name' => env('AWS_NOTIFY_CONFIGURATION_SET'),
+        ],
     ],
     'session' => [
         'absolute_minutes' => (int) env('AUTH_SESSION_ABSOLUTE_MINUTES', 720),

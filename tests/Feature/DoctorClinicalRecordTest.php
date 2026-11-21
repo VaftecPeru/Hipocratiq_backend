@@ -204,6 +204,46 @@ class DoctorClinicalRecordTest extends TestCase
         $this->assertDatabaseCount('consultations', 0);
     }
 
+    public function test_fhir_blocks_another_doctors_appointment_in_the_same_clinic(): void
+    {
+        $unrelated = $this->patientInClinic($this->clinic, '+525510000360');
+        $otherDoctor = $this->clinicDoctor('+525510000361');
+        $appointment = Appointment::factory()->create([
+            'clinic_id' => $this->clinic->id,
+            'patient_profile_id' => $unrelated->id,
+            'doctor_user_id' => $otherDoctor->id,
+        ]);
+
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Patient/{$unrelated->id}")
+            ->assertNotFound();
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Appointment/{$appointment->id}")
+            ->assertNotFound();
+    }
+
+    public function test_fhir_revokes_patient_appointment_and_organization_after_doctor_suspension(): void
+    {
+        $patient = $this->connectedPatient('+525510000362');
+        $appointment = Appointment::query()->where('patient_profile_id', $patient->id)->sole();
+
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Patient/{$patient->id}")
+            ->assertOk();
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Appointment/{$appointment->id}")
+            ->assertOk();
+
+        ClinicMembership::query()
+            ->where('user_id', $this->doctor->id)
+            ->where('clinic_id', $this->clinic->id)
+            ->update(['status' => ClinicMembershipStatus::Suspended->value]);
+
+        // The session may remain valid, but clinical access must be revoked immediately.
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Patient/{$patient->id}")
+            ->assertNotFound();
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Appointment/{$appointment->id}")
+            ->assertNotFound();
+        $this->withSpaOrigin()->getJson("/api/v1/fhir/Organization/{$this->clinic->id}")
+            ->assertNotFound();
+    }
+
     public function test_rejects_cross_clinic_patient_access(): void
     {
         $otherPatient = $this->patientInClinic($this->otherClinic, '+525510000317');

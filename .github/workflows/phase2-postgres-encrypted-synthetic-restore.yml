@@ -1,0 +1,110 @@
+name: "P2 #113 encrypted synthetic PostgreSQL restore (NO AWS)"
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/phase2-postgres-encrypted-synthetic-restore.yml
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/phase2-postgres-encrypted-synthetic-restore.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  encrypted-synthetic-restore:
+    name: "Encrypt, verify and restore synthetic PostgreSQL 17 backup"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DOCKER_NAME: "hipocratiq-p113-encrypted-${{ github.run_id }}-${{ github.run_attempt }}"
+    steps:
+      - name: Verify local-only tooling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          command -v docker
+          command -v gpg
+          command -v openssl
+          command -v sha256sum
+          echo "SCOPE=SYNTHETIC_CI_NO_AWS_NO_PHI"
+
+      - name: PostgreSQL 17 synthetic encrypted backup and isolated restore
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          temp_dir="$(mktemp -d)"
+          cleanup() {
+            docker rm -f "$DOCKER_NAME" >/dev/null 2>&1 || true
+            rm -rf "$temp_dir"
+          }
+          trap cleanup EXIT
+          docker run -d --name "$DOCKER_NAME" --pull always \
+            --network none \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=synthetic-ci-only \
+            -e POSTGRES_DB=hipocratiq_fixture \
+            postgres:17-alpine >/dev/null
+
+          ready=false
+          for i in $(seq 1 40); do
+            if docker exec "$DOCKER_NAME" pg_isready -U postgres -d hipocratiq_fixture >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+
+          docker exec "$DOCKER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d hipocratiq_fixture -c \
+            "CREATE TABLE synthetic_restore_fixture (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO synthetic_restore_fixture VALUES (1, 'synthetic-only'), (2, 'synthetic-only');" >/dev/null
+
+          docker exec "$DOCKER_NAME" pg_dump -U postgres -d hipocratiq_fixture -Fc > "$temp_dir/plain.dump"
+          test -s "$temp_dir/plain.dump"
+          sha256sum "$temp_dir/plain.dump" | cut -d ' ' -f1 > "$temp_dir/expected.sha256"
+
+          # The key exists only for this ephemeral CI run and is never logged or uploaded.
+          openssl rand -hex 32 > "$temp_dir/passphrase"
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file "$temp_dir/passphrase" \
+            --cipher-algo AES256 --symmetric \
+            --output "$temp_dir/backup.dump.gpg" "$temp_dir/plain.dump"
+          test -s "$temp_dir/backup.dump.gpg"
+          if cmp -s "$temp_dir/plain.dump" "$temp_dir/backup.dump.gpg"; then
+            echo "::error::Encrypted backup unexpectedly equals plaintext"
+            exit 1
+          fi
+
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file "$temp_dir/passphrase" \
+            --output "$temp_dir/decrypted.dump" --decrypt "$temp_dir/backup.dump.gpg" >/dev/null 2>&1
+          sha256sum "$temp_dir/decrypted.dump" | cut -d ' ' -f1 > "$temp_dir/actual.sha256"
+          cmp "$temp_dir/expected.sha256" "$temp_dir/actual.sha256"
+
+          # A different key must not decrypt the backup.
+          openssl rand -hex 32 > "$temp_dir/wrong-passphrase"
+          if gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file "$temp_dir/wrong-passphrase" \
+            --output "$temp_dir/should-not-decrypt.dump" \
+            --decrypt "$temp_dir/backup.dump.gpg" >/dev/null 2>&1; then
+            echo "::error::Encrypted backup accepted the wrong passphrase"
+            exit 1
+          fi
+
+          docker exec "$DOCKER_NAME" createdb -U postgres hipocratiq_restored
+          docker exec -i "$DOCKER_NAME" pg_restore -U postgres \
+            -d hipocratiq_restored --exit-on-error < "$temp_dir/decrypted.dump"
+          expected="$(docker exec "$DOCKER_NAME" psql -U postgres -d hipocratiq_fixture -Atc \
+            "SELECT count(*) || ':' || count(DISTINCT id) || ':' || min(marker) FROM synthetic_restore_fixture")"
+          actual="$(docker exec "$DOCKER_NAME" psql -U postgres -d hipocratiq_restored -Atc \
+            "SELECT count(*) || ':' || count(DISTINCT id) || ':' || min(marker) FROM synthetic_restore_fixture")"
+          test "$expected" = "2:2:synthetic-only"
+          test "$expected" = "$actual"
+          echo "SYNTHETIC_ENCRYPTED_RESTORE=PASS"
+          echo "ENCRYPTION=AES256_GPG_SYMMETRIC_EPHEMERAL_KEY"
+          echo "DECRYPTED_SHA256_MATCH=PASS"
+          echo "WRONG_PASSPHRASE_REJECTED=PASS"
+          echo "PRODUCTION_RESTORE_CERTIFIED=false"
