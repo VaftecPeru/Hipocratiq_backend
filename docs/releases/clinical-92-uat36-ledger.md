@@ -17,3 +17,7 @@ El archivo clinical-92-uat36-ledger.json (esquema v2) vincula cada posición 1..
 El script scripts/clinical_92_ledger.py verifica **únicamente estructura** de 36 posiciones, referencias de tipo seguro y consistencia de SHA. Emite siempre release_decision=NO_GO y clinical_signoff_verified=false. Un resultado CI SUCCESS significa **formato válido**, nunca aceptación clínica.
 
 **Sin autorización explícita:** no merge a main, no despliegue a AWS, no restauración PostgreSQL ni operación sobre EBS. Las decisiones históricas de #113 (restauración diferida) y #112 (cifrado EBS diferido) se mantienen.
+
+## Cobertura clínica sintética por SHA
+
+El workflow `clinical-92-synthetic-regressions.yml` ejecuta en PR y push a `develop` las suites de citas/expediente/firma, auditoría, acceso de médicos/pacientes, consentimiento activo y epidemiológico, FHIR, codificación e ingreso clínico. El resultado es evidencia técnica sobre el commit ejecutado, no sobre un entorno clínico real. No usar sus resultados para marcar los 36 casos de la matriz como PASS; se mantienen pendientes de ejecución y aceptación independientes.
