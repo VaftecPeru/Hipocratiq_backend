@@ -114,10 +114,18 @@ elif 'psql' in args:
         print(db + '|hipocratiq_ci')
     elif 'CREATE TABLE ci_restore_sentinel' in query:
         pass
+    elif 'ci_check_roundtrip_result' in query:
+        if os.environ.get('MISMATCH') == 'roundtrip_error':
+            sys.exit(93)
+        rows = [['table_a', 'check_a', 'c', True, 'constraint-reparsed' if os.environ.get('MISMATCH') == 'representation' else 'constraint-original'], ['table_b', 'pk_b', 'p', True, 'PRIMARY KEY (id)']]
+        for row in rows:
+            print(json.dumps(row))
     elif 'pg_get_constraintdef' in query:
         rows = [['table_a', 'check_a', 'c', True, 'constraint-changed' if restored and os.environ.get('MISMATCH') == 'constraints' else 'constraint-original'], ['table_b', 'pk_b', 'p', True, 'PRIMARY KEY (id)']]
         if restored and os.environ.get('MISMATCH') == 'reordered':
             rows.reverse()
+        if restored and os.environ.get('MISMATCH') in ('representation', 'roundtrip_error'):
+            rows[0][-1] = 'constraint-reparsed'
         if restored and os.environ.get('MISMATCH') == 'missing':
             rows.pop()
         if restored and os.environ.get('MISMATCH') == 'validity':
@@ -154,15 +162,18 @@ else:
                 "DB_PASSWORD": "synthetic-fixture-not-real",
                 "PATH": directory + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
             }
-            for mismatch in ("", "reordered", "constraints", "indexes", "missing", "validity"):
+            for mismatch in ("", "reordered", "representation", "constraints", "indexes", "missing", "validity", "roundtrip_error"):
                 with self.subTest(mismatch=mismatch):
                     result = subprocess.run(
                         ["bash", str(SCRIPT)], cwd=ROOT, env=dict(env, MISMATCH=mismatch),
                         capture_output=True, text=True, timeout=20, check=False,
                     )
-                    if mismatch not in ("", "reordered"):
-                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                        self.assertIn("stage=restore-" + ("indexes" if mismatch == "indexes" else "constraints"), result.stderr)
+                    if mismatch not in ("", "reordered", "representation"):
+                        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                        stage = ("restore-indexes" if mismatch == "indexes" else
+                                 "source-check-parser-roundtrip" if mismatch == "roundtrip_error" else
+                                 "restore-reparsed-constraints")
+                        self.assertIn("stage=" + stage, result.stderr)
                         self.assertIn("CATALOG_MISMATCH", result.stderr)
                         if mismatch == "validity":
                             self.assertIn("validity_changes=1", result.stderr)
@@ -174,6 +185,8 @@ else:
                     else:
                         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                         self.assertIn("POSTGRES17_CONSTRAINT_AND_INDEX_DEFINITIONS=VERIFIED", result.stdout)
+                        if mismatch == "representation":
+                            self.assertIn("SOURCE_DDL_REPARSED_EXACT", result.stdout)
                         self.assertIn("LARAVEL_SCHEMA_RESTORE=PASS", result.stdout)
 
 
