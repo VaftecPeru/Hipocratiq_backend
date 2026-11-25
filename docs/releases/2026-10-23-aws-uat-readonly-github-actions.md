@@ -2,6 +2,10 @@
 
 **Estado al crear esta guía:** infraestructura UAT no verificada. Producción: **NO-GO**.
 
+## Decisión vigente — issue #111 (13/11/2026)
+
+No adquirir, crear ni presupuestar otra instancia EC2 o servidor UAT. El camino técnico vigente es CI Full Stack con contenedores efímeros y datos ficticios, sin acceso a AWS ni a producción. El inventario descrito a continuación queda como procedimiento condicional para un entorno independiente **ya existente y autorizado**; no habilitar flags, sustituir IDs UAT por IDs de producción ni generar commits artificiales. Si no existe un entorno apto, UAT clínica real y publicación quedan NO-GO.
+
 ## Qué hace el workflow
 
 - En un PR a develop, ejecuta exclusivamente pruebas de seguridad Python sin credenciales ni acceso a AWS. Los servicios AWS se simulan con respuestas ficticias.
@@ -15,7 +19,7 @@ El inventario es seguro **sólo** si IAM también limita al rol a las consultas 
 
 ## Preparación que debe realizar un administrador
 
-1. Identificar o provisionar EC2 y VPC UAT **independientes** de producción. No usar una carpeta QA dentro de la instancia productiva como sustituto de aislamiento de infraestructura.
+1. Identificar únicamente una EC2/VPC UAT independiente ya existente y autorizada. Si no existe, detener esta ruta y continuar CI sintético; no aprovisionar recursos ni usar una carpeta QA productiva.
 2. Etiquetar EC2 con Environment=uat y Project=HIPOCRATIQ. Identificar los IDs de EC2/VPC UAT y producción.
 3. Crear el rol AWS HIPOCRATIQ-UAT-ReadOnly y asociarlo a GitHub OIDC. Audiencia esperada: sts.amazonaws.com. Subject de confianza EXACTO: repo:VaftecPeru/Hipocratiq_backend:environment:hipocratiq-uat-readonly.
 4. Otorgar solamente ec2:DescribeInstances, ec2:DescribeInstanceStatus, ec2:DescribeVolumes, ec2:DescribeSecurityGroupRules, ssm:DescribeInstanceInformation y sts:GetCallerIdentity. No conceder ec2:*, iam:*, ssm:SendCommand, SMS ni permisos de escritura.
@@ -55,4 +59,4 @@ Este inventario no demuestra contenedores funcionales, acceso HTTPS, OTP +52, cl
 
 ## Próximos pasos para cerrar UAT
 
-Validar inventario AWS, construir UAT independiente, conectar Next.js y Laravel con HTTPS, PostgreSQL y Redis reales, ejecutar casos de la matriz clínica con datos ficticios, validar SMS México con autorización expresa, restaurar copia UAT aislada, exigir protección main y aceptación del cliente.
+Continuar CI sintético con Next.js/Laravel/PostgreSQL/Redis. Solo si se acredita un entorno existente apto y autorizado, verificar su aislamiento y ejecutar UAT clínica, OTP México y restauración aislada con evidencias independientes. Mantener #111/#92/#113 abiertos y NO-GO mientras falte evidencia real; no crear recursos.
