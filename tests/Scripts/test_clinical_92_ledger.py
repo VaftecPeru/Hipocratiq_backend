@@ -3,7 +3,9 @@
 import copy
 import json
 from pathlib import Path
+import subprocess
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 
 
@@ -37,6 +39,26 @@ class Clinical92LedgerContractTest(unittest.TestCase):
         altered["rows"].pop()
         with self.assertRaises(LedgerError):
             validate(altered)
+
+    def test_cli_rejects_duplicate_json_fields_without_printing_values(self):
+        source = json.dumps(self.ledger)
+        invalid = (
+            source.replace('"source_issue": 92', '"source_issue": 91, "source_issue": 92', 1),
+            source.replace('"status": "NOT_EXECUTED"',
+                           '"status": "PASS", "status": "NOT_EXECUTED"', 1),
+        )
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "ledger.json"
+            for document in invalid:
+                with self.subTest(document=document[:80]):
+                    path.write_text(document, encoding="utf-8")
+                    run = subprocess.run(
+                        [sys.executable, str(ROOT / "scripts/clinical_92_ledger.py"), "--file", str(path)],
+                        check=False, capture_output=True, text=True,
+                    )
+                    self.assertEqual(run.returncode, 2)
+                    self.assertEqual(run.stdout.strip(), "UAT36_LEDGER=INVALID; RELEASE=NO_GO")
+                    self.assertEqual(run.stderr, "")
 
     def test_misaligned_master_case_id_fails_closed(self):
         altered = copy.deepcopy(self.ledger)
