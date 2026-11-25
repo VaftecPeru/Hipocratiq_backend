@@ -7,6 +7,11 @@ stage=preflight
 trap 'printf "::error::PostgreSQL synthetic restore failed at stage=%s\n" "$stage" >&2' ERR
 fail() { printf "::error::PostgreSQL synthetic restore failed at stage=%s\n" "$stage" >&2; exit 1; }
 require_equal() { [[ "$1" == "$2" ]] || fail; }
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+require_catalog_equal() {
+  python3 "$script_dir/compare_ci_postgres_catalog.py" "$1" \
+    <(printf '%s\n' "$2") <(printf '%s\n' "$3") || fail
+}
 
 if [[ "${CI:-}" != true || "${APP_ENV:-}" != testing ||
       "${DB_HOST:-}" != 127.0.0.1 || "${DB_DATABASE:-}" != hipocratiq_integrated_ci ||
@@ -87,10 +92,10 @@ actual_migration_inventory="$(migration_inventory "$restore_db")"
 require_equal "$actual_migration_inventory" "$expected_migration_inventory"
 stage=restore-constraints
 actual_constraints="$(constraint_inventory "$restore_db")"
-require_equal "$actual_constraints" "$expected_constraints"
+require_catalog_equal constraints "$expected_constraints" "$actual_constraints"
 stage=restore-indexes
 actual_indexes="$(index_inventory "$restore_db")"
-require_equal "$actual_indexes" "$expected_indexes"
+require_catalog_equal indexes "$expected_indexes" "$actual_indexes"
 echo "POSTGRES17_CONSTRAINT_AND_INDEX_DEFINITIONS=VERIFIED"
 stage=source-sentinel
 require_equal "$expected_sentinel_inventory" $'1|synthetic-ci-only\n2|synthetic-ci-only'

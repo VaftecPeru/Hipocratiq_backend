@@ -98,6 +98,7 @@ class PostgresRestorePreflightTests(unittest.TestCase):
         fake_docker = """#!/usr/bin/env python3
 import os
 import sys
+import json
 args = sys.argv[1:]
 if 'pg_dump' in args:
     print('synthetic dump')
@@ -114,9 +115,21 @@ elif 'psql' in args:
     elif 'CREATE TABLE ci_restore_sentinel' in query:
         pass
     elif 'pg_get_constraintdef' in query:
-        print('constraint-changed' if restored and os.environ.get('MISMATCH') == 'constraints' else 'constraint-original')
+        rows = [['table_a', 'check_a', 'c', True, 'constraint-changed' if restored and os.environ.get('MISMATCH') == 'constraints' else 'constraint-original'], ['table_b', 'pk_b', 'p', True, 'PRIMARY KEY (id)']]
+        if restored and os.environ.get('MISMATCH') == 'reordered':
+            rows.reverse()
+        if restored and os.environ.get('MISMATCH') == 'missing':
+            rows.pop()
+        if restored and os.environ.get('MISMATCH') == 'validity':
+            rows[0][-2] = False
+        for row in rows:
+            print(json.dumps(row))
     elif 'pg_get_indexdef' in query:
-        print('index-changed' if restored and os.environ.get('MISMATCH') == 'indexes' else 'index-original')
+        rows = [['table_a', 'index_a', True, 'index-changed' if restored and os.environ.get('MISMATCH') == 'indexes' else 'index-original'], ['table_b', 'index_b', True, 'index-other']]
+        if restored and os.environ.get('MISMATCH') == 'reordered':
+            rows.reverse()
+        for row in rows:
+            print(json.dumps(row))
     elif 'count(*)' in query:
         print('12' if 'pg_tables' in query else '2')
     elif 'SELECT tablename' in query:
@@ -141,15 +154,20 @@ else:
                 "DB_PASSWORD": "synthetic-fixture-not-real",
                 "PATH": directory + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
             }
-            for mismatch in ("", "constraints", "indexes"):
+            for mismatch in ("", "reordered", "constraints", "indexes", "missing", "validity"):
                 with self.subTest(mismatch=mismatch):
                     result = subprocess.run(
                         ["bash", str(SCRIPT)], cwd=ROOT, env=dict(env, MISMATCH=mismatch),
                         capture_output=True, text=True, timeout=20, check=False,
                     )
-                    if mismatch:
+                    if mismatch not in ("", "reordered"):
                         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                        self.assertIn("stage=restore-" + mismatch, result.stderr)
+                        self.assertIn("stage=restore-" + ("indexes" if mismatch == "indexes" else "constraints"), result.stderr)
+                        self.assertIn("CATALOG_MISMATCH", result.stderr)
+                        if mismatch == "validity":
+                            self.assertIn("validity_changes=1", result.stderr)
+                        if mismatch == "missing":
+                            self.assertIn("missing=1 extra=0", result.stderr)
                         self.assertNotIn("LARAVEL_SCHEMA_RESTORE=PASS", result.stdout)
                         self.assertNotIn("constraint-changed", result.stderr)
                         self.assertNotIn("index-changed", result.stderr)
