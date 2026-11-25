@@ -93,5 +93,71 @@ class PostgresRestorePreflightTests(unittest.TestCase):
             self.assertEqual(marker.read_text(encoding="utf-8"), "call\n")
 
 
+    def test_schema_drill_reports_stage_and_rejects_changed_catalog(self):
+        # Simulated Docker/psql responses exercise the real shell control flow.
+        fake_docker = """#!/usr/bin/env python3
+import os
+import sys
+args = sys.argv[1:]
+if 'pg_dump' in args:
+    print('synthetic dump')
+elif 'pg_restore' in args:
+    sys.stdin.read()
+elif 'createdb' in args:
+    pass
+elif 'psql' in args:
+    db = args[args.index('-d') + 1]
+    query = args[args.index('-c') + 1]
+    restored = db == 'hipocratiq_schema_restore_ci'
+    if 'current_database()' in query:
+        print(db + '|hipocratiq_ci')
+    elif 'CREATE TABLE ci_restore_sentinel' in query:
+        pass
+    elif 'pg_get_constraintdef' in query:
+        print('constraint-changed' if restored and os.environ.get('MISMATCH') == 'constraints' else 'constraint-original')
+    elif 'pg_get_indexdef' in query:
+        print('index-changed' if restored and os.environ.get('MISMATCH') == 'indexes' else 'index-original')
+    elif 'count(*)' in query:
+        print('12' if 'pg_tables' in query else '2')
+    elif 'SELECT tablename' in query:
+        print('migrations')
+    elif 'SELECT migration, batch' in query:
+        print('migration|1')
+    elif 'SELECT id, marker' in query:
+        print('1|synthetic-ci-only')
+        print('2|synthetic-ci-only')
+    else:
+        sys.exit(91)
+else:
+    sys.exit(92)
+"""
+        with tempfile.TemporaryDirectory(prefix="hipocratiq-p113-catalog-") as directory:
+            docker = Path(directory) / "docker"
+            docker.write_text(fake_docker, encoding="utf-8")
+            docker.chmod(0o755)
+            env = {
+                "CI": "true", "APP_ENV": "testing", "DB_HOST": "127.0.0.1",
+                "DB_DATABASE": "hipocratiq_integrated_ci", "DB_USERNAME": "hipocratiq_ci",
+                "DB_PASSWORD": "synthetic-fixture-not-real",
+                "PATH": directory + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
+            }
+            for mismatch in ("", "constraints", "indexes"):
+                with self.subTest(mismatch=mismatch):
+                    result = subprocess.run(
+                        ["bash", str(SCRIPT)], cwd=ROOT, env=dict(env, MISMATCH=mismatch),
+                        capture_output=True, text=True, timeout=20, check=False,
+                    )
+                    if mismatch:
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn("stage=restore-" + mismatch, result.stderr)
+                        self.assertNotIn("LARAVEL_SCHEMA_RESTORE=PASS", result.stdout)
+                        self.assertNotIn("constraint-changed", result.stderr)
+                        self.assertNotIn("index-changed", result.stderr)
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertIn("POSTGRES17_CONSTRAINT_AND_INDEX_DEFINITIONS=VERIFIED", result.stdout)
+                        self.assertIn("LARAVEL_SCHEMA_RESTORE=PASS", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
