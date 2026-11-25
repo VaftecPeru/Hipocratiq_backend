@@ -99,6 +99,28 @@ class Clinical92LedgerContractTest(unittest.TestCase):
         with self.assertRaises(LedgerError):
             validate(altered)
 
+    def test_scope_is_fixed_and_cannot_carry_free_text(self):
+        altered = copy.deepcopy(self.ledger)
+        altered["scope"] += " private synthetic free-text marker"
+        with self.assertRaises(LedgerError):
+            validate(altered)
+
+    def test_future_or_noncanonical_execution_timestamp_is_rejected(self):
+        for timestamp in ("9999-01-01T00:00:00Z", "2026-11-04 20:00:00Z",
+                          "2026-11-04T20:00Z", "20261104T200000Z"):
+            with self.subTest(timestamp=timestamp):
+                altered = copy.deepcopy(self.ledger)
+                altered["rows"][0] = self.synthetic_pass(1)
+                altered["rows"][0]["executed_at_utc"] = timestamp
+                with self.assertRaises(LedgerError):
+                    validate(altered)
+
+    def test_canonical_fractional_utc_timestamp_is_accepted_but_never_signoff(self):
+        altered = copy.deepcopy(self.ledger)
+        altered["rows"][0] = self.synthetic_pass(1)
+        altered["rows"][0]["executed_at_utc"] = "2026-11-04T20:00:00.123456Z"
+        self.assertEqual(validate(altered)["release_decision"], "NO_GO")
+
     def test_mixed_candidate_shas_fail_closed(self):
         altered = copy.deepcopy(self.ledger)
         altered["rows"][0] = self.synthetic_pass(1)
