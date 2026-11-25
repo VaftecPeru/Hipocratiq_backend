@@ -39,7 +39,7 @@ BEGIN
         VALUES (item.table_name, item.constraint_name, 'c', item.validated, normalized);
         DROP TABLE pg_temp.ci_check_probe;
     END LOOP;
-END
+END;
 $roundtrip$;
 SELECT json_build_array(table_name, constraint_name, constraint_type, validated, definition)::text
   FROM pg_temp.ci_check_roundtrip_result
