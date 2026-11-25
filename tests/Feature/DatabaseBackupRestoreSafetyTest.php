@@ -42,6 +42,7 @@ class DatabaseBackupRestoreSafetyTest extends TestCase
             json_encode([
                 'id' => self::ID,
                 'provider' => 'postgresql',
+                'disk' => 'backup-drill',
                 'database' => 'hipocratiq_source',
                 'dump_path' => 'hipocratiq-drill/database/'.self::ID.'.dump',
                 'manifest_path' => 'hipocratiq-drill/manifests/'.self::ID.'.json',
