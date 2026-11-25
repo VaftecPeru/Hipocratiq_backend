@@ -8,7 +8,7 @@ authorize deploy. The canonical scenario descriptions remain in the master sheet
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import re
@@ -19,6 +19,9 @@ MASTER_MATRIX = (
     "https://docs.google.com/spreadsheets/d/"
     "1SwuLEHgvPyDVfQC3xic-Fg4d1NzUY4vrl0WCEfEBhls/edit"
 )
+CANONICAL_SCOPE = ("36 canonical UAT-001..UAT-036 IDs mapped to master sheet positions; "
+                   "real clinical evidence remains private and unexecuted")
+UTC_TIMESTAMP = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$")
 ALLOWED_STATUSES = {"NOT_EXECUTED", "PASS", "FAIL", "BLOCKED"}
 EXECUTED_KEYS = {
     "position", "case_id", "status", "backend_sha", "frontend_sha",
@@ -47,11 +50,11 @@ def _nonempty_ref(value: object) -> bool:
 
 
 def _utc_time(value: object) -> bool:
-    if not isinstance(value, str) or not value.endswith("Z"):
+    if not isinstance(value, str) or UTC_TIMESTAMP.fullmatch(value) is None:
         return False
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return parsed.utcoffset() == timedelta(0)
+        return parsed.utcoffset() == timedelta(0) and parsed <= datetime.now(timezone.utc)
     except ValueError:
         return False
 
@@ -68,8 +71,8 @@ def validate(ledger: object) -> dict[str, object]:
         raise LedgerError("incorrect issue reference")
     if ledger["master_matrix_url"] != MASTER_MATRIX:
         raise LedgerError("master source reference mismatch")
-    if not isinstance(ledger["scope"], str) or "private" not in ledger["scope"].lower():
-        raise LedgerError("missing private-evidence scope disclaimer")
+    if ledger["scope"] != CANONICAL_SCOPE:
+        raise LedgerError("scope must be the fixed non-sensitive disclaimer")
     rows = ledger["rows"]
     if not isinstance(rows, list) or len(rows) != 36:
         raise LedgerError("exactly 36 matrix positions are required")

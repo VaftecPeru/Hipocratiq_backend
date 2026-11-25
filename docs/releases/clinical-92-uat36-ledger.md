@@ -10,7 +10,7 @@ El archivo clinical-92-uat36-ledger.json (esquema v2) vincula cada posición 1..
 1. El responsable clínico/QA debe validar en privado la correspondencia de cada posición ordinal con los 36 escenarios reales y sus precondiciones.
 2. Congelar SHA completos de Frontend y Backend, entorno de prueba aislado, ejecutor, fecha UTC y resultado por caso; no utilizar cuentas clínicas reales.
 3. Si se actualiza el registro, conservar **solo referencias opacas** a evidencias privadas; no incluir PHI, cuentas, contraseñas, OTP, URLs internas ni capturas. El contenido real queda bajo custodia aprobada.
-4. Para PASS, FAIL o BLOCKED, el esquema exige dos SHA de 40 caracteres, executed_at_utc, executor_ref y evidence_ref. Los identificadores no prueban que la evidencia exista o sea auténtica.
+4. Para PASS, FAIL o BLOCKED, el esquema exige dos SHA de 40 caracteres, executed_at_utc, executor_ref y evidence_ref. Los identificadores no prueban que la evidencia exista o sea auténtica. La fecha debe ser UTC canónica (`AAAA-MM-DDTHH:MM:SS[.ffffff]Z`), no futura. El campo scope es un texto fijo: se rechaza cualquier texto libre adicional. Estos controles de metadatos no garantizan por sí solos ausencia de PHI ni autenticidad de las referencias.
 5. Los defectos P0/P1 requieren incidencia y reejecución. Cualquier resultado que no sea PASS impide la aceptación; **incluso 36 PASS autorreportados NO autorizan** release ni sustituyen la revisión independiente.
 6. Requiere acta y firma verificable del responsable clínico, Seguridad y autorización del cambio, sin que ninguna de ellas pueda generarse por CI.
 
