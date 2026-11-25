@@ -19,6 +19,13 @@ sql() { "${pg[@]}" psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$user" -d "$
 # This sentinel exists only on the ephemeral CI database, never production.
 sql "$source_db" "CREATE TABLE ci_restore_sentinel (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO ci_restore_sentinel VALUES (1, 'synthetic-ci-only'), (2, 'synthetic-ci-only');"
 
+table_inventory() { sql "$1" "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname='public' ORDER BY tablename COLLATE \"C\""; }
+migration_inventory() { sql "$1" "SELECT migration, batch FROM public.migrations ORDER BY id"; }
+sentinel_inventory() { sql "$1" "SELECT id, marker FROM public.ci_restore_sentinel ORDER BY id"; }
+
+expected_table_inventory="$(table_inventory "$source_db")"
+expected_migration_inventory="$(migration_inventory "$source_db")"
+expected_sentinel_inventory="$(sentinel_inventory "$source_db")"
 expected_tables="$(sql "$source_db" "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='public'")"
 expected_migrations="$(sql "$source_db" "SELECT count(*) FROM public.migrations")"
 [[ "$expected_tables" =~ ^[0-9]+$ && "$expected_tables" -gt 10 ]]
@@ -32,16 +39,18 @@ dump_hash="$(sha256sum "$tmp" | cut -d' ' -f1)"
 [[ "$dump_hash" =~ ^[a-f0-9]{64}$ ]]
 
 "${pg[@]}" createdb -h 127.0.0.1 -U "$user" "$restore_db"
-"${pg[@]}" pg_restore -h 127.0.0.1 -U "$user" -d "$restore_db" --exit-on-error < "$tmp"
+"${pg[@]}" pg_restore -h 127.0.0.1 -U "$user" -d "$restore_db" --single-transaction --exit-on-error < "$tmp"
 [[ "$dump_hash" == "$(sha256sum "$tmp" | cut -d' ' -f1)" ]]
 
 actual_tables="$(sql "$restore_db" "SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='public'")"
 actual_migrations="$(sql "$restore_db" "SELECT count(*) FROM public.migrations")"
-sentinel="$(sql "$restore_db" "SELECT count(*) || ':' || count(DISTINCT id) || ':' || min(marker) FROM ci_restore_sentinel")"
 
 [[ "$actual_tables" == "$expected_tables" ]]
 [[ "$actual_migrations" == "$expected_migrations" ]]
-[[ "$sentinel" == '2:2:synthetic-ci-only' ]]
+[[ "$(table_inventory "$restore_db")" == "$expected_table_inventory" ]]
+[[ "$(migration_inventory "$restore_db")" == "$expected_migration_inventory" ]]
+[[ "$expected_sentinel_inventory" == $'1|synthetic-ci-only\n2|synthetic-ci-only' ]]
+[[ "$(sentinel_inventory "$restore_db")" == "$expected_sentinel_inventory" ]]
 echo "LARAVEL_SCHEMA_RESTORE=PASS; tables=$actual_tables; migrations=$actual_migrations"
 echo "POSTGRES17_DUMP_SHA256_VERIFIED=true; synthetic_only=true"
 echo "PRODUCTION_BACKUP_RESTORED=false; RELEASE_GO=NOT_GRANTED"
