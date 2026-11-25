@@ -1,6 +1,7 @@
 import datetime as dt
 import unittest
-from scripts.controlled_web_release_evidence import validate, REQUIRED
+import json
+from scripts.controlled_web_release_evidence import validate, REQUIRED, unique_object
 
 BACK = "a" * 40
 FRONT = "b" * 40
@@ -36,6 +37,43 @@ class ControlledWebTests(unittest.TestCase):
         x = valid()
         x["uat_independent_completed"] = True
         self.assertTrue(validate(x, BACK, FRONT, NOW))
+
+    def test_duplicate_json_keys_are_rejected(self):
+        with self.assertRaises(ValueError):
+            json.loads('{"security_review":{"status":"pending","status":"approved"}}',
+                       object_pairs_hook=unique_object)
+
+    def test_independent_uat_flag_must_be_explicit_boolean_false(self):
+        for value in (None, 0, "false", True):
+            with self.subTest(value=value):
+                x = valid()
+                x["uat_independent_completed"] = value
+                self.assertTrue(validate(x, BACK, FRONT, NOW))
+        x = valid()
+        del x["uat_independent_completed"]
+        self.assertTrue(validate(x, BACK, FRONT, NOW))
+
+    def test_noncanonical_or_future_approval_rejected(self):
+        for stamp in ("2026-10-28T12:00:00+00:00",
+                      "2026-10-28 12:00:00Z", "2026-10-28T13:00:01Z"):
+            with self.subTest(stamp=stamp):
+                x = valid()
+                x["restore_drill"]["approved_at"] = stamp
+                self.assertTrue(validate(x, BACK, FRONT, NOW))
+
+    def test_reference_must_be_opaque_and_approver_printable(self):
+        for reference in ("  TEST-REF-123", "https://example.test/secret", "ABC\nDEF"):
+            with self.subTest(reference=reference):
+                x = valid()
+                x["security_review"]["evidence_id"] = reference
+                self.assertTrue(validate(x, BACK, FRONT, NOW))
+        x = valid()
+        x["security_review"]["approved_by"] = "reviewer\nother"
+        self.assertTrue(validate(x, BACK, FRONT, NOW))
+
+    def test_nonobject_or_nonstring_sha_rejected(self):
+        self.assertTrue(validate([], BACK, FRONT, NOW))
+        self.assertTrue(validate(valid(), 123, FRONT, NOW))
 
 
 if __name__ == "__main__":
