@@ -3,6 +3,8 @@ name: Clinical #92 synthetic regression evidence (not signoff)
 on:
   pull_request:
     branches: [develop, main]
+  push:
+    branches: [develop]
   workflow_dispatch:
 
 permissions:
@@ -50,7 +52,13 @@ jobs:
             tests/Feature/Phase4ClinicalUatTest.php \
             tests/Feature/ClinicalAuditTrailTest.php \
             tests/Feature/DoctorClinicalRecordTest.php \
-            tests/Feature/PatientPortalTest.php
+            tests/Feature/PatientPortalTest.php \
+            tests/Feature/ActivePatientConsentTest.php \
+            tests/Feature/PatientConsentTest.php \
+            tests/Feature/ClinicEpidemiologyConsentTest.php \
+            tests/Feature/FhirReadTest.php \
+            tests/Feature/ClinicalCodingTest.php \
+            tests/Feature/ClinicPatientIntakeTest.php
       - name: Document evidence scope
         if: success()
         run: |

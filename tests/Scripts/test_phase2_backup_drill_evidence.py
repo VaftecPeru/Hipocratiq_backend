@@ -26,6 +26,47 @@ class DrillEvidenceTests(unittest.TestCase):
         self.assertFalse(result["release_approved"])
         self.assertFalse(result["database_connection_made"])
 
+    @staticmethod
+    def fixture_v2():
+        return {
+            "schema_version": 2, "target_environment": "isolated_nonproduction",
+            **{name: True for name in audit.V2_REQUIRED_TRUE},
+            "backend_sha": "a" * 40, "frontend_sha": "b" * 40,
+            "backup_ciphertext_sha256": "c" * 64, "backup_plaintext_sha256": "d" * 64,
+            "executed_at_utc": "2026-11-04T20:00:00Z", "evidence_ref": "EV-SYNTHETIC",
+            "rto_observed_seconds": 30, "rpo_observed_seconds": 0,
+            "rto_limit_seconds": 60, "rpo_limit_seconds": 0,
+        }
+
+    def test_v2_metadata_never_certifies_recovery(self):
+        report = audit.assess(self.fixture_v2())
+        self.assertTrue(report["version_bound_metadata_present"])
+        self.assertTrue(report["self_reported_recovery_objectives_met"])
+        self.assertFalse(report["recovery_certified"])
+        self.assertFalse(report["release_approved"])
+
+    def test_v2_rejects_invalid_binding_and_future_timestamp(self):
+        for key, value in (
+            ("backend_sha", "main"), ("backup_ciphertext_sha256", "d" * 64),
+            ("executed_at_utc", "9999-01-01T00:00:00Z"),
+            ("evidence_ref", "https://example.test/private"), ("rpo_limit_seconds", True),
+        ):
+            with self.subTest(key=key):
+                data = self.fixture_v2()
+                data[key] = value
+                with self.assertRaises(audit.AttestationError):
+                    audit.assess(data)
+
+    def test_v2_over_limit_and_missing_custody_block(self):
+        for key, value in (("rto_observed_seconds", 61), ("private_custody_confirmed", False)):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
+                data = self.fixture_v2()
+                data[key] = value
+                self.assertIn("NO_GO", audit.assess(data)["status"])
+                path = Path(directory) / "synthetic.json"
+                path.write_text(json.dumps(data), encoding="utf-8")
+                self.assertEqual(audit.main(["--attestation", str(path)]), 1)
+
     def test_missing_any_control_is_no_go(self):
         for control in audit.REQUIRED_TRUE:
             with self.subTest(control=control):
