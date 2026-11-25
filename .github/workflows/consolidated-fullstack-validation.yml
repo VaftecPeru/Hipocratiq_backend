@@ -1,0 +1,356 @@
+name: "HIPOCRATIQ | Consolidated Full Stack gates (no deployment)"
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      verify_release:
+        description: "Also verify production blockers (read-only, cannot deploy)"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: hipocratiq-consolidated-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-lock:
+    name: "P0 / Immutable Frontend source"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      frontend_sha: ${{ steps.pin.outputs.frontend_sha }}
+      frontend_branch: ${{ steps.pin.outputs.frontend_branch }}
+    steps:
+      - name: Resolve exact Frontend develop or main commit (GitHub read-only)
+        id: pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          branch=develop
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then branch=main; fi
+          sha="$(gh api "repos/VaftecPeru/Hipocratiq_Frontend/branches/$branch" --jq '.commit.sha')"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid Frontend source SHA"; exit 1; }
+          echo "frontend_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "frontend_branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "Backend tested SHA: $GITHUB_SHA"
+          echo "Frontend source: $branch @ $sha"
+          echo "No deployment or AWS access."
+
+  backend-ci:
+    name: "P1 / Laravel, security, PostgreSQL, Docker"
+    needs: source-lock
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  frontend-ci:
+    name: "P1 / Next.js, audit, TypeScript, lint, build"
+    needs: [source-lock, backend-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: VaftecPeru/Hipocratiq_Frontend
+          ref: ${{ needs.source-lock.outputs.frontend_sha }}
+          path: frontend-src
+          persist-credentials: false
+      - name: Assert immutable reviewed source
+        env:
+          PIN: ${{ needs.source-lock.outputs.frontend_sha }}
+        run: test "$(git -C frontend-src rev-parse HEAD)" = "$PIN"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-src/front_web/package-lock.json
+      - name: Locked install, security audit, test, lint and build
+        working-directory: frontend-src/front_web
+        env:
+          BACKEND_URL: http://127.0.0.1:8000
+          APP_URL: http://127.0.0.1:3000
+        run: |
+          set -Eeuo pipefail
+          npm ci --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+          npm run typecheck
+          node --test tests/*.test.mjs
+          npm run lint
+          npm run build
+      - name: Validate Docker image without touching production
+        run: docker build --file frontend-src/front_web/Dockerfile --tag hipocratiq-web:validation frontend-src/front_web
+
+  browser-e2e:
+    name: "P1 / Playwright browser with fake API"
+    needs: [source-lock, frontend-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: VaftecPeru/Hipocratiq_Frontend
+          ref: ${{ needs.source-lock.outputs.frontend_sha }}
+          path: frontend-src
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-src/front_web/package-lock.json
+      - name: Install and build browser test candidate
+        working-directory: frontend-src/front_web
+        env:
+          BACKEND_URL: http://127.0.0.1:8000
+          APP_URL: http://127.0.0.1:3000
+        run: |
+          set -Eeuo pipefail
+          npm ci --no-audit --no-fund
+          npm install --no-save --package-lock=false @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+          npm run build
+      - name: Run synthetic browser E2E
+        working-directory: frontend-src/front_web
+        env:
+          BACKEND_URL: http://127.0.0.1:8000
+          APP_URL: http://127.0.0.1:3000
+          CI: "true"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node e2e/fake-backend.mjs > /tmp/hipocratiq-fake-api.log 2>&1 &
+          backend_pid=$!
+          npm run start -- --hostname 127.0.0.1 --port 3000 > /tmp/hipocratiq-web.log 2>&1 &
+          web_pid=$!
+          trap 'kill "$web_pid" "$backend_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:3000/ -o /dev/null; then break; fi
+            if [[ "$attempt" -eq 60 ]]; then echo "::error::Next did not start"; exit 1; fi
+            sleep 1
+          done
+          npx playwright test --config=playwright.config.ts
+      - name: Upload failed browser evidence (synthetic only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hipocratiq-consolidated-browser-failure
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            frontend-src/front_web/playwright-report/
+            frontend-src/front_web/test-results/
+
+  fullstack-integration:
+    name: "P1 / Actual Next + Laravel + PostgreSQL 17 + Redis 8"
+    needs: [source-lock, browser-e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: hipocratiq_integrated_ci
+          POSTGRES_USER: hipocratiq_ci
+          POSTGRES_PASSWORD: synthetic_job_password_only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hipocratiq_ci -d hipocratiq_integrated_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.2.7-alpine
+        ports: [6379:6379]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_DATABASE: hipocratiq_integrated_ci
+      DB_USERNAME: hipocratiq_ci
+      DB_PASSWORD: synthetic_job_password_only
+      DB_URL: ""
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      REDIS_URL: ""
+      CACHE_STORE: redis
+      CACHE_LIMITER_STORE: redis_limiter
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      SESSION_CONNECTION: session
+      SESSION_STORE: redis_session
+      SESSION_ENCRYPT: "true"
+      SESSION_SECURE_COOKIE: "false"
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:3000
+      MAIL_MAILER: array
+      SMS_DRIVER: array
+      OTP_PHONE_PROVIDER: local
+      OTP_HASH_KEY: synthetic-ci-only
+      OTP_FIXED_CODE: "123456"
+      BILLING_DRIVER: simulated
+      BACKUP_SERVICE_ENABLED: "false"
+      HIPOCRATIQ_UAT_ACCESS_ENABLED: "false"
+      WHATSAPP_DRIVER: unavailable
+      EPIDEMIOLOGICAL_AI_ENABLED: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+      BACKEND_URL: http://127.0.0.1:8000
+      APP_URL: http://127.0.0.1:3000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:3000/backend
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: VaftecPeru/Hipocratiq_Frontend
+          ref: ${{ needs.source-lock.outputs.frontend_sha }}
+          path: frontend-src
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_pgsql, redis
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-src/front_web/package-lock.json
+      - name: Build isolated Laravel and Next stack
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          composer install --no-interaction --no-progress --prefer-dist
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+          php artisan migrate:fresh --force --no-interaction
+          npm ci --prefix frontend-src/front_web --no-audit --no-fund
+          (cd frontend-src/front_web && npm run build)
+      - name: Run HTTP smoke against real Laravel, PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          php artisan serve --host=127.0.0.1 --port=8000 > /tmp/hipocratiq-laravel.log 2>&1 &
+          api_pid=$!
+          (cd frontend-src/front_web && npm run start -- --hostname 127.0.0.1 --port 3000) > /tmp/hipocratiq-next.log 2>&1 &
+          web_pid=$!
+          trap 'kill "$web_pid" "$api_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8000/api/health/ready -o /dev/null &&
+               curl --silent --fail http://127.0.0.1:3000/ -o /dev/null; then break; fi
+            if [[ "$attempt" -eq 60 ]]; then echo "::error::Fullstack did not start"; exit 1; fi
+            sleep 1
+          done
+          node scripts/uat-fullstack-http-smoke.mjs
+      - name: Restore actual Laravel PostgreSQL schema in isolated synthetic CI
+        shell: bash
+        run: |
+          bash -n scripts/ci_postgres_schema_restore.sh
+          bash scripts/ci_postgres_schema_restore.sh
+      - name: Ensure Frontend branch did not move during testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PIN: ${{ needs.source-lock.outputs.frontend_sha }}
+          FRONTEND_BRANCH: ${{ needs.source-lock.outputs.frontend_branch }}
+        run: |
+          set -Eeuo pipefail
+          actual="$(gh api "repos/VaftecPeru/Hipocratiq_Frontend/branches/$FRONTEND_BRANCH" --jq '.commit.sha')"
+          [[ "$actual" == "$PIN" ]] || { echo "::error::Frontend commit moved; rerun with new pin"; exit 1; }
+
+  restore-isolated:
+    name: "P1 / PostgreSQL 17 synthetic restore and SHA-256"
+    needs: fullstack-integration
+    uses: ./.github/workflows/phase2-postgres-isolated-restore.yml
+    permissions:
+      contents: read
+
+  clinical-contract:
+    name: "P1 / 36 clinical UAT ledger (contract only)"
+    needs: restore-isolated
+    uses: ./.github/workflows/clinical-92-uat36-ledger.yml
+    permissions:
+      contents: read
+
+  release-blockers:
+    name: "P2 / Production NO-GO evidence and mandatory stop"
+    if: ${{ !cancelled() }}
+    needs: [source-lock, backend-ci, frontend-ci, browser-e2e, fullstack-integration, restore-isolated, clinical-contract]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_CHECK: ${{ inputs.verify_release }}
+      BASE_BRANCH: ${{ github.base_ref }}
+      RESULTS: ${{ toJSON(needs) }}
+    steps:
+      - name: Require all predecessor stages passed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' >/dev/null || {
+            echo "::error::At least one fullstack validation stage failed or was skipped."
+            exit 1
+          }
+      - name: Enforce all open P0 and governance blockers on release assessment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "$BASE_BRANCH" != main && "$RELEASE_CHECK" != true ]]; then
+            echo "VALIDATION_ONLY=PASS; PRODUCTION_GO=NOT_EVALUATED"
+            echo "Synthetic CI does not replace clinical UAT, encrypted backups or AWS runtime inspection." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          blocked=0
+          for number in 92 102 111 112 113; do
+            state="$(gh api "repos/VaftecPeru/Hipocratiq_backend/issues/$number" --jq '.state')"
+            if [[ "$state" != closed ]]; then
+              echo "::error::P0 issue #$number is $state"
+              echo "- BLOCKED: Backend issue #$number ($state)" >> "$GITHUB_STEP_SUMMARY"
+              blocked=1
+            fi
+          done
+          for repository in Hipocratiq_backend Hipocratiq_Frontend; do
+            for branch in main develop; do
+              protected="$(gh api "repos/VaftecPeru/$repository/branches/$branch" --jq '.protected')"
+              if [[ "$protected" != true ]]; then
+                echo "::error::$repository/$branch is not protected"
+                blocked=1
+              fi
+            done
+          done
+          for entry in Hipocratiq_backend:90 Hipocratiq_Frontend:80; do
+            repository="${entry%%:*}"
+            number="${entry##*:}"
+            json="$(gh api "repos/VaftecPeru/$repository/pulls/$number")"
+            draft="$(jq -r '.draft' <<< "$json")"
+            if [[ "$draft" == true ]]; then
+              echo "::error::Release candidate $repository PR #$number is still DRAFT"
+              blocked=1
+            fi
+          done
+          if [[ "$blocked" != 0 ]]; then
+            echo "PRODUCTION=NO_GO; AWS_UNCHANGED=true"
+            exit 1
+          fi
+          echo "GITHUB_METADATA=PASS; PRODUCTION_GO=NOT_GRANTED"
+          echo "An independent real AWS inventory, clinical sign-off, restore, rollback, Environment approval and explicit production authorization remain mandatory." >> "$GITHUB_STEP_SUMMARY"

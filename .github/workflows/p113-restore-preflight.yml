@@ -1,0 +1,29 @@
+name: P113 PostgreSQL restore preflight fail-closed
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - scripts/ci_postgres_schema_restore.sh
+      - tests/Scripts/test_ci_postgres_schema_restore_preflight.py
+      - .github/workflows/p113-restore-preflight.yml
+  push:
+    branches: [develop]
+    paths:
+      - scripts/ci_postgres_schema_restore.sh
+      - tests/Scripts/test_ci_postgres_schema_restore_preflight.py
+      - .github/workflows/p113-restore-preflight.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-no-production-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check recovery script
+        run: bash -n scripts/ci_postgres_schema_restore.sh
+      - name: Verify unsafe restore targets fail before any external command
+        run: python3 -m unittest discover -s tests/Scripts -p test_ci_postgres_schema_restore_preflight.py -v

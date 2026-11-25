@@ -1,11 +1,11 @@
 # HIPOCRATIQ — plan ejecutable de controles P0/P1 (102, 92, 113, 111)
 
-Fecha de corte: 2026-11-07. Esta guía **no certifica ningún GO clínico, auditoría de secretos, restauración real ni infraestructura UAT**. Es una secuencia fail-closed para ejecutar controles con evidencia independiente; no contiene datos clínicos ni secretos.
+Fecha de corte: 2026-11-25. Esta guía **no certifica ningún GO clínico, auditoría de secretos, restauración real ni infraestructura UAT**. Es una secuencia fail-closed para ejecutar controles con evidencia independiente; no contiene datos clínicos ni secretos.
 
 ## Orden de dependencias y criterios comunes
 
 1. **#102** aprobar visibilidad y auditar secretos e historial de ambos repositorios, artifacts y releases en canal privado. Repositories actualmente públicos: Backend y Frontend. Verdes de Gitleaks sobre PR no acreditan historial completo. En caso de hallazgos, **rotar primero** mediante proveedor y contener exposición; nunca pegar hashes de secretos, rutas privadas o PHI en GitHub issues.
-2. **#111** aprobar diseño y presupuesto de UAT separado por escrito; solo después crear recursos separados de producción. Sin esta aprobación, no crear VPC/EC2/EBS, cambiar IAM, generar costos ni dirigir tráfico UAT a producción.
+2. **#111** continuar las validaciones técnicas en GitHub Actions con contenedores efímeros y datos ficticios. Para UAT clínica real, acreditar aislamiento y autorización de un entorno existente antes de usarlo.
 3. **#113** ejecutar recuperación de PostgreSQL con base **sintética** en CI (ya existe), y después ensayar restauración en el entorno UAT aislado con origen autorizado y datos desidentificados. Ningún acceso/copia/restore de PHI productivo permitido por este plan.
 4. **#92** ejecutar 36 casos reales de la matriz con Web/API HTTPS UAT, PostgreSQL/Redis aislados y cuentas ficticias. Cerrar solo con 36/36 aprobados, ausencia P0/P1, evidencia sanitaria redactada y acta del cliente.
 
@@ -24,21 +24,19 @@ Reglas para todo el proceso: PRs a `develop` con CI sobre SHA exacto + revisión
 
 **Gate:** no cerrar #102 con un escaneo parcial ni con repo público sin decisión documentada.
 
-## #111 — Aprobación de entorno UAT AWS independiente
+## #111 — Validación aislada con recursos existentes
 
-**Arquitectura propuesta, sujeta a cliente:** región us-east-2, **VPC diferente de la producción** y segmentación privada; SG mínimos, EC2 dimensionada con métricas, Docker para Next.js + Laravel + PostgreSQL 17 + Redis 8; TLS y DNS UAT exclusivos, almacenamiento EBS cifrado, backups/snapshots cifrados, registros con retención, Secrets Manager/SSM Parameter Store con acceso mínimo, OIDC GitHub con trust restringido al Environment UAT y revisión de terceros; sin permisos de despliegue desde rol de inventario read-only.
+La decisión vigente del [issue #111](https://github.com/VaftecPeru/Hipocratiq_backend/issues/111) establece GitHub Actions y contenedores efímeros de Next.js, Laravel, PostgreSQL 17 y Redis con datos ficticios. El alcance excluye compra, presupuesto o aprovisionamiento de otra instancia.
 
-**Decisiones antes de aprovisionar:**
-- [ ] Dimensionamiento: CPU/RAM/IOPS y concurrencia, tamaño BD sintética, necesidades Android OTP, RTO/RPO y duración de UAT.
-- [ ] Presupuesto escrito y límite de gasto mensual aprobado por cliente; comparar EC2/EBS/almacenamiento de backups, IPv4 pública, salida de datos, NAT/VPC endpoints, logs, SMS y posible KMS. **No asumir cifras sin una cotización AWS actual**.
-- [ ] Titular de cuenta/centro de costos, responsables IAM/DevOps/QA/cliente, ventana UAT y autorización de creación.
-- [ ] Verificar en AWS los nuevos IDs UAT (cuenta, región, EC2, VPC, EBS, SSM) **sin confundirlos con producción** y crear artifact saneado.
+- [ ] Registrar al responsable de QA y la aceptación de esta alternativa para validación técnica.
+- [ ] Para UAT clínica real, verificar de antemano un entorno existente autorizado con HTTPS, base y credenciales segregadas, capacidad, almacenamiento privado cifrado, control de acceso y recuperación comprobable.
+- [ ] Registrar los SHA exactos de Frontend y Backend y el resultado por escenario. Conservar evidencia sensible en un canal privado.
 
-**Gate:** #111 no se cierra por presentar este diseño: requiere autorización cliente y evidencia de segregación real.
+**Gate:** si falta un entorno apto o la aceptación clínica, mantener la UAT real y la publicación bloqueadas.
 
 ## #113 — Restauración PostgreSQL aislada, sin PHI productivo
 
-- [x] Ensayo CI con PostgreSQL 17 y datos sintéticos documentado en PRs previos. **No equivale a restauración operacional real**.
+- [x] Ensayo de esquema Laravel con PostgreSQL 17 y datos sintéticos, verificado en [CI del PR #190](https://github.com/VaftecPeru/Hipocratiq_backend/actions/runs/45651489610). **No equivale a restauración operacional real**.
 - [ ] Reservar UAT separado, almacenamiento cifrado privado y permisos temporales restringidos; definir retención/expurgo y custodio.
 - [ ] Obtener origen sintético o desidentificado con autorización; no usar dumps de producción salvo una aprobación explícita y garantías legales/técnicas independientes.
 - [ ] Generar dump consistente (`pg_dump --format=custom`), hash SHA-256, cifrado en tránsito/reposo y manifiesto de versión PG/fecha **sin datos identificables**.
