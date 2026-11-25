@@ -66,5 +66,32 @@ class PostgresRestorePreflightTests(unittest.TestCase):
                     self.assertFalse(marker.exists(), "Guard invoked Docker before refusing an unsafe environment")
 
 
+    def test_rejects_unexpected_connected_database_before_mutation(self):
+        with tempfile.TemporaryDirectory(prefix="hipocratiq-p113-identity-") as directory:
+            temporary = Path(directory)
+            marker = temporary / "docker-calls"
+            docker = temporary / "docker"
+            docker.write_text(
+                "#!/bin/sh\n"
+                "printf 'call\\n' >> " + repr(str(marker)) + "\n"
+                "printf 'unexpected_database|hipocratiq_ci\\n'\n",
+                encoding="utf-8",
+            )
+            docker.chmod(0o755)
+            env = {
+                "CI": "true", "APP_ENV": "testing", "DB_HOST": "127.0.0.1",
+                "DB_DATABASE": "hipocratiq_integrated_ci", "DB_USERNAME": "hipocratiq_ci",
+                "DB_PASSWORD": "synthetic-fixture-not-real",
+                "PATH": str(temporary) + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"),
+            }
+            result = subprocess.run(
+                ["bash", str(SCRIPT)], cwd=ROOT, env=env, capture_output=True,
+                text=True, timeout=5, check=False,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("identity does not match isolated CI fixtures", result.stdout)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "call\n")
+
+
 if __name__ == "__main__":
     unittest.main()
