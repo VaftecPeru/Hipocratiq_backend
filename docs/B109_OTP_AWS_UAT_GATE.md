@@ -1,5 +1,9 @@
 # B-109 — Gate técnico UAT OTP AWS
 
+## Restricción operativa vigente (#111)
+
+Este gate requiere UAT independiente ya existente, comprobado y autorizado. No crear/comprar/presupuestar otra EC2 ni usar producción para ensayos. La CI sintética debe mantener proveedores simulados y no enviar SMS ni crear configuraciones AWS. El comando histórico puede generar una Notify Code Configuration y enviar SMS real; **no ejecutarlo** sin autorización específica de dichas acciones, destino aislado y costes. El CI sintético no demuestra OTP mexicano real ni aceptación clínica.
+
 ## Objetivo
 
 Validar de extremo a extremo el OTP telefónico con AWS End User Messaging usando directamente `SendNotifyCodeVerification` y `ValidateNotifyCodeVerification`, sin depender de una `Notify Configuration` en estado `ACTIVE`. HIPOCRATIQ adopta México (`MX`, `+52`) como mercado principal; Perú (`PE`) y Estados Unidos (`US`) continúan soportados como mercados secundarios.
