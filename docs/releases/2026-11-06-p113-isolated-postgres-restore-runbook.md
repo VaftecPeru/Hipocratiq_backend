@@ -43,6 +43,15 @@ Fecha: 2026-11-06. Documento preparatorio. **No acredita ejecución real.**
 
 Si falta un criterio, mantener #113 **OPEN / NO-GO** y `PRODUCTION_RESTORE_CERTIFIED=false`.
 
+## Contrato privado de evidencia v2 (solo declaración del operador)
+El validador offline `scripts/phase2_backup_drill_evidence.py` conserva compatibilidad con v1 para ensayos históricos. Para nuevos ensayos sintéticos aislados usar v2, que exige los siete controles booleanos de v1 y además:
+- `encrypted_backup_verified`, `private_custody_confirmed`, `retention_policy_approved`, `production_network_isolation_confirmed`.
+- `backend_sha` y `frontend_sha` completos; `backup_ciphertext_sha256` y `backup_plaintext_sha256` distintos; `executed_at_utc` canónico no futuro y `evidence_ref` opaco EV-.
+- `rto_observed_seconds`, `rpo_observed_seconds`, `rto_limit_seconds`, `rpo_limit_seconds` enteros no negativos. Superar un límite bloquea el ensayo.
+- `schema_version=2`, `target_environment=isolated_nonproduction`; todos los campos requeridos, sin extras.
+
+Conservar la atestación **solo en custodia privada**. Los formatos válidos, hashes declarados y límites no demuestran autenticidad ni cifrado real. El validador jamás certifica recuperación, conecta PostgreSQL ni autoriza release. La revisión independiente sigue siendo obligatoria. La autorización de datos desidentificados exige evaluación específica, no se presume con este contrato de ensayos sintéticos.
+
 ## Siguiente bloqueo operativo
 
 El runbook puede integrarse a `develop` tras revisión. **No ejecutar un backup de la base clínica de producción** hasta que exista autorización concreta para usar los datos, destino cifrado y entorno aislado con acceso validado.
