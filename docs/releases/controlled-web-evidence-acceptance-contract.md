@@ -23,7 +23,7 @@ Cada registro del manifiesto debe tener `status: approved`, `backend_sha`, `fron
 1. Validar CI del SHA candidato; impedir merge con fallos o trabajos incompletos.
 2. Completar auditoría #102 **en canal privado** y cierre fundamentado.
 3. Ejecutar aceptación clínica #92 con datos sintéticos y firmar resultados.
-4. Inspeccionar AWS producción de solo lectura; diseñar backup cifrado y restauración sin afectar producción. Si no es posible aislar el ensayo, mantener NO-GO y solicitar decisión específica de costos.
+4. Inspeccionar AWS producción de solo lectura; diseñar backup cifrado y restauración sin afectar producción. Si no es posible aislar el ensayo, mantener NO-GO sin presupuestar ni crear nuevas instancias.
 5. Habilitar un gate alternativo **por PR independiente**, con evaluaciones positivas y negativas, verificaciones independientes de evidencias y aprobación de política. El script `controlled_web_release_evidence.py` actual es **preliminar** y solo evalúa metadatos; un resultado PASS suyo no autoriza merge.
 6. Tras GO documentado, solicitar al usuario autorización explícita de merge a `main`; desplegar únicamente con aprobación separada, Environment protegido, backup previo, smoke tests y rollback probado.
 
@@ -53,3 +53,7 @@ Para hacer viable un GO futuro sin debilitar los gates, primero formalizar y apr
 5. Registrar autorización final del responsable sobre los SHAs y una ventana de despliegue, *separada* del merge a `main`.
 
 **Prohibido** modificar `main` o publicar AWS únicamente porque los scripts y las pruebas del propio gate están en verde.
+
+## Formato canónico de evidencia preliminar
+
+El manifiesto debe ser JSON sin claves duplicadas, con `uat_independent_completed` exactamente `false`, identificadores de evidencia opacos de 6–128 caracteres ASCII (letras/dígitos, punto, guion y guion bajo), aprobador imprimible de máximo 128 caracteres y timestamp UTC `YYYY-MM-DDTHH:MM:SSZ` no futuro, dentro de siete días. El validador solo comprueba estructura y vigencia; no autentica firmas, no certifica evidencias ni cambia el gate live NO-GO. Las referencias reales se custodian fuera de Git público.
