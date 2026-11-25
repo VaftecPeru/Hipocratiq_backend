@@ -2,7 +2,11 @@
 
 **Estado actual: NO-GO clínico y productivo.** Esta guía no autoriza modificaciones de AWS, producción o ramas `main`.
 
-## Evidencia obtenida
+## Decisión vigente — issue #111 (13/11/2026)
+
+Este documento describe el procedimiento histórico de octubre; no es autorización de compra, nueva EC2/VPC, cambio IAM ni ejecución AWS. La alternativa vigente es GitHub Actions con contenedores efímeros y datos ficticios. Las secciones AWS solo aplican si se acredita un entorno independiente ya existente y autorizado. No rellenar variables UAT con datos de producción. Si falta un entorno apto, conservar NO-GO sin aprovisionar recursos.
+
+## Evidencia histórica obtenida (24/10/2026)
 
 - Backend PR #93 fusionado a `develop`, SHA `89b6f3a2cc259501ab23bb006d9acea8f4baed10`, tras 3 CI de PR en verde.
 - Backend PR #90 y Frontend PR #80: siguen `DRAFT` a `main`, no fusionados.
@@ -49,8 +53,8 @@ No divulgar aquí los valores. Una validación correcta de formato **no demuestr
 
 **Después** de completar A y B y obtener aprobación explícita de ejecución UAT:
 
-1. GitHub Backend → Actions → **UAT AWS Inventory (read-only, opt-in)**.
-2. Pulsar **Run workflow**, seleccionar rama **develop**, introducir `READ_ONLY_UAT_INVENTORY`.
+1. GitHub Backend → Actions → **UAT AWS Inventory (read-only, opt-in)**, solo si existe un destino UAT independiente autorizado.
+2. Si el workflow está presente en la rama predeterminada y la UI permite despacho manual, seleccionar **develop** e introducir `READ_ONLY_UAT_INVENTORY`. Si no está disponible, mantener los opt-in desactivados; no modificar main ni crear commits artificiales para forzar el inventario.
 3. Autorizar el Environment `hipocratiq-uat-readonly` con sus revisores.
 4. Exigir que el job **Approved AWS UAT instance metadata ONLY** alcance `COMPLETED/SUCCESS`, no `SKIPPED`.
 5. Revisar el artifact `hipocratiq-uat-aws-readonly-metadata`; comprobar `INVENTORY_PASS_NOT_RELEASE_APPROVAL` y ausencia de blockers, sin incluir PHI ni secretos. Guardar run ID y fecha.
@@ -112,7 +116,7 @@ y por tanto antes de solicitar OIDC o inspeccionar EC2.
 Solo necesita `GITHUB_TOKEN` de lectura de metadatos de la rama;
 no crea protección de ramas, cuentas ni entornos.
 
-**Advertencia crítica:** actualmente GitHub responde `protected=false`
+**Advertencia histórica (24/10/2026):** en ese corte GitHub respondía `protected=false`
 tanto para `develop` como para `main` de Backend/Frontend.
 El administrador deberá habilitar protección real de `develop` con
 revisión por PR, checks obligatorios, bloqueo de force-push y bypass limitado.
