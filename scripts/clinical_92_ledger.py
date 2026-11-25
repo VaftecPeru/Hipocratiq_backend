@@ -33,6 +33,15 @@ class LedgerError(ValueError):
     """Raised with safe, non-PHI validation descriptions."""
 
 
+def _unique_object(fields: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in fields:
+        if key in result:
+            raise LedgerError("duplicate JSON field in clinical ledger")
+        result[key] = value
+    return result
+
+
 def _nonempty_ref(value: object) -> bool:
     return isinstance(value, str) and PRIVATE_REF.fullmatch(value) is not None
 
@@ -80,7 +89,7 @@ def validate(ledger: object) -> dict[str, object]:
         if row.get("case_id") != f"UAT-{number:03d}":
             raise LedgerError("case ID does not match master matrix position")
         status = row.get("status")
-        if status not in ALLOWED_STATUSES:
+        if not isinstance(status, str) or status not in ALLOWED_STATUSES:
             raise LedgerError("invalid UAT result state")
         counts[status] += 1
         if status == "NOT_EXECUTED":
@@ -124,7 +133,7 @@ def main() -> int:
     parser.add_argument("--file", type=Path, default=Path("docs/releases/clinical-92-uat36-ledger.json"))
     args = parser.parse_args()
     try:
-        result = validate(json.loads(args.file.read_text(encoding="utf-8")))
+        result = validate(json.loads(args.file.read_text(encoding="utf-8"), object_pairs_hook=_unique_object))
     except (LedgerError, ValueError, OSError, TypeError):
         print("UAT36_LEDGER=INVALID; RELEASE=NO_GO")
         return 2
