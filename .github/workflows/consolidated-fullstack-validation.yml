@@ -118,6 +118,44 @@ jobs:
           set -Eeuo pipefail
           npm ci --no-audit --no-fund
           npm install --no-save --package-lock=false @playwright/test@1.55.0
+          # The hosted runner's unrelated Microsoft apt source returned HTTP 403.
+          # Quarantine only a standalone source for that exact origin; retain
+          # all Ubuntu/security sources and normal apt signature verification.
+          # This is a disposable hosted runner, never a production machine.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+          origin = "https://packages.microsoft.com/ubuntu/24.04/prod"
+          target = re.compile(r"(?m)^deb(?:-src)?\s+(?:\[[^\n\]]+\]\s+)?" + re.escape(origin) + r"/?\s+noble\s+main\s*$")
+          for source in Path("/etc/apt/sources.list.d").iterdir():
+              if source.is_symlink() or not source.is_file():
+                  continue
+              if source.suffix not in {".list", ".sources"}:
+                  continue
+              content = source.read_text(encoding="utf-8")
+              if origin not in content:
+                  continue
+              if source.suffix == ".list":
+                  active = [line.strip() for line in content.splitlines()
+                            if line.strip() and not line.lstrip().startswith("#")]
+                  if not active or not all(target.fullmatch(line) for line in active):
+                      raise SystemExit("Refusing to modify mixed or unexpected apt source")
+              else:
+                  # Deb822: do not quarantine mixed stanzas, other origins or suites.
+                  stanzas = [s for s in re.split(r"\n\s*\n", content.strip()) if s.strip()]
+                  if len(stanzas) != 1 or not re.search(r"(?m)^URIs:[ \t]+" + re.escape(origin) + r"/?[ \t]*$", stanzas[0]) or not re.search(r"(?m)^Suites:[ \t]+noble[ \t]*$", stanzas[0]) or not re.search(r"(?m)^Components:[ \t]+main[ \t]*$", stanzas[0]):
+                      raise SystemExit("Refusing to modify mixed or unexpected deb822 source")
+                  # Reject continuation lines on any field rather than risk
+                  # excluding additional URIs/suites/components.
+                  if re.search(r"(?m)^[ \t]+\S", stanzas[0]):
+                      raise SystemExit("Refusing multiline deb822 apt source")
+              destination = source.with_name(source.name + ".hipocratiq-disabled")
+              if destination.exists():
+                  raise SystemExit("Unexpected existing apt quarantine file")
+              subprocess.run(["sudo", "mv", "--", str(source), str(destination)], check=True)
+              print("Quarantined standalone Microsoft runner apt source; Ubuntu sources unchanged.")
+          PY
           npx playwright install --with-deps chromium
           npm run build
       - name: Run synthetic browser E2E
