@@ -55,3 +55,7 @@ Conservar la atestación **solo en custodia privada**. Los formatos válidos, ha
 ## Siguiente bloqueo operativo
 
 El runbook puede integrarse a `develop` tras revisión. **No ejecutar un backup de la base clínica de producción** hasta que exista autorización concreta para usar los datos, destino cifrado y entorno aislado con acceso validado.
+
+## Ensayo cifrado CI: destino separado
+
+El workflow `phase2-postgres-encrypted-synthetic-restore.yml` ensaya únicamente datos ficticios: contenedores PostgreSQL 17 separados, sin red ni volúmenes compartidos, cifrado GPG AES256 con clave efímera, SHA-256 tras descifrado, rechazo de clave incorrecta y ciphertext truncado. El directorio temporal y los volúmenes anónimos se eliminan al finalizar. No se publican dumps ni claves. No acredita restauración de un respaldo operacional ni certifica #113; la prueba real requiere evidencia independiente.
