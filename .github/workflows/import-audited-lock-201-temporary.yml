@@ -1,0 +1,45 @@
+name: Import exact audited Composer lock #201 (temporary)
+on:
+  push:
+    branches: [fix/p0-201-symfony-advisories-20261126]
+    paths: ['.github/workflows/import-audited-lock-201-temporary.yml']
+permissions:
+  contents: read
+jobs:
+  import-lock:
+    if: github.repository == 'VaftecPeru/Hipocratiq_backend' && github.ref == 'refs/heads/fix/p0-201-symfony-advisories-20261126'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: true
+      - name: Require exact parent and only temporary workflow change
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 46965145f2cb7c412d6975e9d966ba6fd0eea877
+          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/import-audited-lock-201-temporary.yml
+      - uses: actions/download-artifact@v4
+        with:
+          name: composer-lock-candidate
+          path: ${{ runner.temp }}/audited-201
+          run-id: 45852648010
+          github-token: ${{ github.token }}
+      - name: Verify exact previously audited bytes and commit only lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/audited-201/composer.lock"
+          echo "a9957aef58699c756c1c808164bd7eb8805a17fba70d321dfddf5b1a96040010  $candidate" | sha256sum --check --strict
+          cp "$candidate" composer.lock
+          git add -- composer.lock
+          test "$(git diff --cached --name-only)" = composer.lock
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(security #201): import verified Symfony 8.1.12 Composer lock"
+          git push origin HEAD:refs/heads/fix/p0-201-symfony-advisories-20261126
