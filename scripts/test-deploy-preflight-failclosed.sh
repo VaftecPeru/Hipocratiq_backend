@@ -141,15 +141,15 @@ MOCK
 
   # Regression: if final SHA capture fails after all health checks pass,
   # EXIT must preserve failure status, roll the app back, and never report success.
-  printf '#!/bin/bash\\nexit 0\\n' >"$TMP/bin/curl"
+  printf '#!/bin/bash\nexit 0\n' >"$TMP/bin/curl"
   rc=0
-  env -i PATH="$TMP/bin" MOCK_OLD="$OLD" MOCK_NEW="$NEW" \\
-    MOCK_FINAL_SHA_FAIL=true MOCK_TRACE="$TMP/final-sha-trace" \\
-    PRODUCTION_DIR="$TMP/repo" COMPOSE_PROJECT=synthetic LOCK_FILE="$TMP/lock" \\
-    BACKUP_ROOT="$TMP/backups" HEALTH_URL= \\
-    RELEASE_APPROVAL=APPROVED_FOR_PRODUCTION RELEASE_APPROVED_SHA="$NEW" \\
-    RELEASE_CHANGE_ID=synthetic-test UAT_RESTORE_EVIDENCE=synthetic-test \\
-    BACKUP_AT_REST_VERIFIED=true WEB_UAT_EVIDENCE=synthetic-test \\
+  env -i PATH="$TMP/bin" MOCK_OLD="$OLD" MOCK_NEW="$NEW" \
+    MOCK_FINAL_SHA_FAIL=true MOCK_TRACE="$TMP/final-sha-trace" \
+    PRODUCTION_DIR="$TMP/repo" COMPOSE_PROJECT=synthetic LOCK_FILE="$TMP/lock" \
+    BACKUP_ROOT="$TMP/backups" HEALTH_URL= \
+    RELEASE_APPROVAL=APPROVED_FOR_PRODUCTION RELEASE_APPROVED_SHA="$NEW" \
+    RELEASE_CHANGE_ID=synthetic-test UAT_RESTORE_EVIDENCE=synthetic-test \
+    BACKUP_AT_REST_VERIFIED=true WEB_UAT_EVIDENCE=synthetic-test \
     "$TMP/bin/bash" "$ROOT/scripts/deploy-production.sh" >"$TMP/final-sha-log" 2>&1 || rc=$?
   [[ "$rc" -ne 0 ]]
   grep -Fxq "merge $NEW" "$TMP/final-sha-trace"
