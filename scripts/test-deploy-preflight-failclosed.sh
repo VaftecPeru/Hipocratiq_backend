@@ -69,7 +69,12 @@ echo "DEPLOY_PREFLIGHT_NEGATIVE_CASES=PASS; no AWS, Docker, migrations, or Git m
 case "$1 $2" in
   'branch --show-current') echo main;;
   'status --porcelain') ;;
-  'rev-parse HEAD') echo "$MOCK_OLD";;
+  'rev-parse HEAD')
+    if grep -q '^reset ' "$MOCK_TRACE"; then echo "$MOCK_OLD"
+    elif grep -q '^merge ' "$MOCK_TRACE" && [[ "${MOCK_FINAL_SHA_FAIL:-}" == "true" ]]; then exit 87
+    elif grep -q '^merge ' "$MOCK_TRACE"; then echo "$MOCK_NEW"
+    else echo "$MOCK_OLD"
+    fi;;
   'rev-parse origin/main') echo "$MOCK_NEW";;
   'merge-base --is-ancestor'|'fetch --prune') ;;
   'merge --ff-only') printf 'merge %s\n' "$3" >> "$MOCK_TRACE"; [[ "$3" == "$MOCK_NEW" ]];;
@@ -133,4 +138,26 @@ MOCK
     exit 1
   fi
   echo 'MOCKED_EXPLICIT_HEALTH_FAILURE_ROLLBACK=PASS'
+
+  # Regression: if final SHA capture fails after all health checks pass,
+  # EXIT must preserve failure status, roll the app back, and never report success.
+  printf '#!/bin/bash\\nexit 0\\n' >"$TMP/bin/curl"
+  rc=0
+  env -i PATH="$TMP/bin" MOCK_OLD="$OLD" MOCK_NEW="$NEW" \\
+    MOCK_FINAL_SHA_FAIL=true MOCK_TRACE="$TMP/final-sha-trace" \\
+    PRODUCTION_DIR="$TMP/repo" COMPOSE_PROJECT=synthetic LOCK_FILE="$TMP/lock" \\
+    BACKUP_ROOT="$TMP/backups" HEALTH_URL= \\
+    RELEASE_APPROVAL=APPROVED_FOR_PRODUCTION RELEASE_APPROVED_SHA="$NEW" \\
+    RELEASE_CHANGE_ID=synthetic-test UAT_RESTORE_EVIDENCE=synthetic-test \\
+    BACKUP_AT_REST_VERIFIED=true WEB_UAT_EVIDENCE=synthetic-test \\
+    "$TMP/bin/bash" "$ROOT/scripts/deploy-production.sh" >"$TMP/final-sha-log" 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]]
+  grep -Fxq "merge $NEW" "$TMP/final-sha-trace"
+  grep -Fxq "reset $OLD" "$TMP/final-sha-trace"
+  grep -Fq 'ROLLBACK:' "$TMP/final-sha-log"
+  if grep -Fq 'DEPLOY BACKEND OK' "$TMP/final-sha-log"; then
+    echo 'Unexpected successful release after final SHA failure' >&2
+    exit 1
+  fi
+  echo 'MOCKED_FINAL_SHA_FAILURE_ROLLBACK=PASS'
 )
