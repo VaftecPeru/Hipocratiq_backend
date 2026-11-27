@@ -2,7 +2,7 @@
 
 namespace App\Actions\Auth;
 
-use App\Contracts\SmsSender;
+use App\Contracts\PhoneOtpProvider;
 use App\Enums\AuthenticationClient;
 use App\Enums\AuthenticationContext;
 use App\Enums\OtpDeliveryChannel;
@@ -13,10 +13,12 @@ use App\Models\User;
 use App\Notifications\OtpCodeNotification;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\OtpHasher;
+use App\Services\Auth\PhoneOtpDelivery;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 use Throwable;
 
@@ -25,7 +27,7 @@ final class IssueOtpChallenge
     public function __construct(
         private OtpCodeGenerator $codeGenerator,
         private OtpHasher $hasher,
-        private SmsSender $smsSender,
+        private PhoneOtpProvider $phoneOtpProvider,
         private RecordAuthenticationEvent $recordEvent,
     ) {}
 
@@ -42,7 +44,7 @@ final class IssueOtpChallenge
         ?string $expectedLatestChallengeId = null,
         OtpDeliveryChannel $deliveryChannel = OtpDeliveryChannel::Phone,
     ): OtpChallenge {
-        [$challenge, $code, $lockedUser] = DB::transaction(function () use (
+        [$challenge, $lockedUser] = DB::transaction(function () use (
             $user,
             $purpose,
             $client,
@@ -78,7 +80,6 @@ final class IssueOtpChallenge
             }
 
             $id = (string) Str::uuid();
-            $code = $this->codeGenerator->generate();
             $challenge = $lockedUser->otpChallenges()->create([
                 'id' => $id,
                 'flow_id' => $flowId ?? $id,
@@ -86,9 +87,14 @@ final class IssueOtpChallenge
                 'client_type' => $client,
                 'actor_context' => $context,
                 'delivery_channel' => $deliveryChannel,
+                'verification_provider' => $deliveryChannel === OtpDeliveryChannel::Email
+                    ? 'local_email'
+                    : $this->phoneOtpProvider->key(),
+                'provider_message_id' => null,
+                'provider_verification_id' => null,
                 'device_name' => $deviceName,
                 'device_id_hash' => $deviceIdHash ?? ($deviceId === null ? null : hash('sha256', $deviceId)),
-                'code_hash' => $this->hasher->make($id, $code),
+                'code_hash' => null,
                 'attempts' => 0,
                 'max_attempts' => config('authentication.otp.max_attempts'),
                 'resend_count' => $expectedLatestChallengeId === null
@@ -100,24 +106,25 @@ final class IssueOtpChallenge
                 'expires_at' => now()->addMinutes(config('authentication.otp.ttl_minutes')),
             ]);
 
-            return [$challenge, $code, $lockedUser];
+            return [$challenge, $lockedUser];
         });
 
         try {
-            $this->deliverCode($lockedUser, $code, $deliveryChannel);
+            $delivery = $this->deliverCode($lockedUser, $challenge, $deliveryChannel);
         } catch (Throwable $exception) {
             $this->discardPendingChallenge($challenge->id);
 
             Log::error('OTP delivery failed.', [
                 'challenge_id' => $challenge->id,
                 'delivery_channel' => $deliveryChannel->value,
+                'verification_provider' => $challenge->verification_provider,
                 'provider_error' => $exception::class,
             ]);
 
             throw new ServiceUnavailableHttpException(null, 'No se pudo enviar el código OTP.', $exception);
         }
 
-        $confirmedChallenge = DB::transaction(function () use ($challenge, $user, $purpose): ?OtpChallenge {
+        $confirmedChallenge = DB::transaction(function () use ($challenge, $user, $purpose, $delivery): ?OtpChallenge {
             $lockedUser = User::query()->lockForUpdate()->findOrFail($user->id);
             $pendingChallenge = OtpChallenge::query()
                 ->lockForUpdate()
@@ -136,7 +143,10 @@ final class IssueOtpChallenge
                 ->orderByDesc('delivery_sequence')
                 ->first();
 
-            if ($latestChallenge?->id !== $pendingChallenge->id) {
+            if (
+                $latestChallenge?->id !== $pendingChallenge->id
+                || $pendingChallenge->verification_provider !== $delivery->provider
+            ) {
                 $pendingChallenge->update([
                     'delivery_status' => OtpDeliveryStatus::Failed,
                     'invalidated_at' => now(),
@@ -158,6 +168,10 @@ final class IssueOtpChallenge
             $pendingChallenge->update([
                 'delivery_status' => OtpDeliveryStatus::Sent,
                 'sent_at' => now(),
+                'code_hash' => $delivery->codeHash,
+                'verification_provider' => $delivery->provider,
+                'provider_message_id' => $delivery->messageId,
+                'provider_verification_id' => $delivery->verificationId,
             ]);
 
             return $pendingChallenge->fresh();
@@ -174,26 +188,36 @@ final class IssueOtpChallenge
             'challenge_id' => $confirmedChallenge->id,
             'purpose' => $purpose->value,
             'delivery_channel' => $deliveryChannel->value,
+            'verification_provider' => $confirmedChallenge->verification_provider,
         ]);
 
         return $confirmedChallenge;
     }
 
-    private function deliverCode(User $user, string $code, OtpDeliveryChannel $deliveryChannel): void
-    {
+    private function deliverCode(
+        User $user,
+        OtpChallenge $challenge,
+        OtpDeliveryChannel $deliveryChannel,
+    ): PhoneOtpDelivery {
         if ($deliveryChannel === OtpDeliveryChannel::Email) {
+            $code = $this->codeGenerator->generate();
+
             $user->notify(new OtpCodeNotification(
                 $code,
                 (int) config('authentication.otp.ttl_minutes'),
             ));
 
-            return;
+            return new PhoneOtpDelivery(
+                provider: 'local_email',
+                codeHash: $this->hasher->make($challenge->id, $code),
+            );
         }
 
-        $this->smsSender->send(
-            $user->phone_number,
-            "Tu código Hipocratiq es {$code}. Expira en ".config('authentication.otp.ttl_minutes').' minutos.',
-        );
+        if (! is_string($user->phone_number) || $user->phone_number === '') {
+            throw new RuntimeException('La cuenta no tiene un teléfono disponible para recibir el código OTP.');
+        }
+
+        return $this->phoneOtpProvider->issue($user->phone_number, $challenge->id);
     }
 
     private function discardPendingChallenge(string $challengeId): void

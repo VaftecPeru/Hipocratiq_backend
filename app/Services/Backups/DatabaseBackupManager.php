@@ -130,14 +130,44 @@ final class DatabaseBackupManager
 
     public function restore(string $id): void
     {
-        $manifest = $this->verify($id);
-        $disk = Storage::disk((string) config('admin_operations.backups.disk'));
-        $content = (string) $disk->get((string) $manifest['dump_path']);
-        $connection = config('database.connections.'.config('database.default'));
+        // No administrative command may restore over the configured production
+        // database. Opt-in and target checks happen before verify() mutates
+        // the manifest or pg_restore can run.
+        if (app()->environment('production') || config('app.env') === 'production') {
+            throw new RuntimeException('Restauración denegada en el entorno de producción.');
+        }
 
+        if (config('admin_operations.backups.restore_enabled') !== true) {
+            throw new RuntimeException('Restauración deshabilitada por defecto.');
+        }
+
+        $connection = config('database.connections.'.config('database.default'));
         if (! is_array($connection) || ($connection['driver'] ?? null) !== 'pgsql') {
             throw new RuntimeException('La restauración requiere una conexión PostgreSQL.');
         }
+
+        $manifest = $this->manifest($id);
+        $targetDb = trim((string) ($connection['database'] ?? ''));
+        $targetHost = trim((string) ($connection['host'] ?? ''));
+        $approvedDb = trim((string) config('admin_operations.backups.restore_target_database', ''));
+        $approvedHost = trim((string) config('admin_operations.backups.restore_target_host', ''));
+
+        if (
+            $approvedDb === '' || $approvedHost === ''
+            || ! preg_match('/^hipocratiq_restore_[a-z0-9_]+$/', $targetDb)
+            || $targetDb !== $approvedDb
+            || $targetHost === '' || $targetHost !== $approvedHost
+            || $targetDb === (string) ($manifest['database'] ?? '')
+        ) {
+            throw new RuntimeException(
+                'Destino de restauración no aislado o no autorizado. '
+                .'Configura una base de ensayo distinta de la base de origen.',
+            );
+        }
+
+        $manifest = $this->verify($id);
+        $disk = Storage::disk((string) config('admin_operations.backups.disk'));
+        $content = (string) $disk->get((string) $manifest['dump_path']);
 
         $command = sprintf(
             'pg_restore --host=%s --port=%s --username=%s --dbname=%s --clean --if-exists --no-owner --no-privileges',
@@ -174,6 +204,19 @@ final class DatabaseBackupManager
 
         if (! is_array($manifest)) {
             throw new RuntimeException('El manifiesto del respaldo no es válido.');
+        }
+
+        // Never trust paths or identity supplied by a stored manifest.
+        // The storage layout is fixed when a backup is created.
+        $prefix = trim((string) config('admin_operations.backups.prefix', 'hipocratiq'), '/');
+        if (
+            ($manifest['id'] ?? null) !== $id
+            || ($manifest['provider'] ?? null) !== 'postgresql'
+            || ($manifest['disk'] ?? null) !== (string) config('admin_operations.backups.disk')
+            || ($manifest['dump_path'] ?? null) !== $prefix.'/database/'.$id.'.dump'
+            || ($manifest['manifest_path'] ?? null) !== $path
+        ) {
+            throw new RuntimeException('Identidad o rutas del manifiesto de respaldo no válidas.');
         }
 
         return $manifest;

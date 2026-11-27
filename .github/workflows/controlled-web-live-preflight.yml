@@ -1,0 +1,26 @@
+name: Controlled web live preflight (NO-GO until independent evidence)
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+jobs:
+  controlled-web-preflight:
+    name: Controlled web evidence live preflight (fail-closed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: |
+          python3 -m py_compile scripts/controlled_web_live_gate.py
+          python3 -m unittest discover -s tests -p 'test_controlled_web_live_gate.py' -v
+      - name: Read actual GitHub issue states without AWS credentials
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_SHA_CANDIDATE: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/controlled_web_live_gate.py

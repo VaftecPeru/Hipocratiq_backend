@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Contracts\BillingGateway;
 use App\Contracts\EpidemiologyAnalyzer;
+use App\Contracts\PhoneOtpProvider;
 use App\Contracts\RegistrationOtpSender;
 use App\Contracts\SmsSender;
 use App\Contracts\VideoMeetingProvider;
@@ -13,8 +14,10 @@ use App\Enums\UserStatus;
 use App\Models\ClinicMembership;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
+use App\Services\Auth\AwsEndUserMessagingOtpProvider;
 use App\Services\Auth\EmailRegistrationOtpSender;
 use App\Services\Auth\FixedOtpCodeGenerator;
+use App\Services\Auth\LocalPhoneOtpProvider;
 use App\Services\Auth\OtpCodeGenerator;
 use App\Services\Auth\RandomOtpCodeGenerator;
 use App\Services\Billing\HttpBillingGateway;
@@ -51,6 +54,14 @@ class AppServiceProvider extends ServiceProvider
                 ? new FixedOtpCodeGenerator($fixedCode)
                 : new RandomOtpCodeGenerator;
         });
+        $this->app->singleton(
+            PhoneOtpProvider::class,
+            fn () => match (config('authentication.otp.phone_provider')) {
+                'local' => $this->app->make(LocalPhoneOtpProvider::class),
+                'aws_notify' => $this->app->make(AwsEndUserMessagingOtpProvider::class),
+                default => throw new LogicException('El proveedor OTP telefónico configurado no está disponible.'),
+            },
+        );
         $this->app->singleton(ArraySmsSender::class);
         $this->app->singleton(UnavailableSmsSender::class);
         $this->app->singleton(

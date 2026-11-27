@@ -1,0 +1,52 @@
+name: Composer advisory remediation diagnostic (synthetic)
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/composer-advisory-diagnostic.yml'
+      - 'composer.json'
+      - 'composer.lock'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  resolve-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_pgsql, redis
+          coverage: none
+      - name: Verify current lock (expected fail-closed on advisory)
+        run: composer audit --locked --no-interaction
+        continue-on-error: true
+      - name: Resolve Symfony #201 advisories without executing scripts or installing packages
+        run: composer update symfony/http-kernel symfony/mailer symfony/routing --with-all-dependencies --no-install --no-scripts --no-plugins --no-interaction --no-progress
+      - name: Validate Composer metadata and prevent manifest drift
+        run: |
+          composer validate --strict --no-check-publish
+          git diff --exit-code -- composer.json
+      - name: Verify resolved lock has no known advisories (fail closed)
+        run: composer audit --locked --no-interaction
+      - name: Verify candidate lock installs without scripts or plugins
+        run: composer install --no-scripts --no-plugins --no-interaction --no-progress --prefer-dist
+      - name: Verify resolved package platform requirements
+        run: composer check-platform-reqs --no-interaction
+      - name: Recheck lockfile after installation
+        run: |
+          composer validate --strict --no-check-publish
+          composer audit --locked --no-interaction
+          git diff --exit-code -- composer.json
+      - name: Upload candidate lockfile for human-reviewed commit
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: composer-lock-candidate
+          path: composer.lock
+          retention-days: 7
+# Diagnostic only: no credentials, AWS, DB, deployment, or automatic lockfile commits.

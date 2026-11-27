@@ -1,0 +1,51 @@
+name: UAT infrastructure diagnostic (static, no AWS)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - scripts/diagnose-uat-infrastructure-readonly.sh
+      - docs/releases/2026-10-23-b109-infrastructure-readonly-diagnostic.md
+      - .github/workflows/uat-readonly-diagnostic-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-readonly-audit:
+    name: Bash syntax and non-invasive command guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+
+      - name: Verify Bash syntax (do not inspect host)
+        shell: bash
+        run: bash -n scripts/diagnose-uat-infrastructure-readonly.sh
+
+      - name: Check offline help mode (no host access)
+        shell: bash
+        run: |
+          set -euo pipefail
+          help="$(bash scripts/diagnose-uat-infrastructure-readonly.sh --help)"
+          printf '%s\n' "$help" | grep -Fq "READ-ONLY" || {
+            echo "::error::Read-only help banner missing."
+            exit 1
+          }
+          printf '%s\n' "$help" | grep -Fq "does not connect to the API" || {
+            echo "::error::Diagnostic limitations missing."
+            exit 1
+          }
+
+      - name: Fail on direct destructive commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          script="scripts/diagnose-uat-infrastructure-readonly.sh"
+          if grep -nE '^[[:space:]]*(docker[[:space:]]+(run|exec|start|stop|restart|rm|build|compose[[:space:]]+(up|down|run)|network[[:space:]]+(create|rm))|git[[:space:]].*(fetch|pull|checkout|reset|merge)|php[[:space:]]+artisan|aws[[:space:]]|psql[[:space:]]|pg_restore[[:space:]]|curl[[:space:]])' "$script"; then
+            echo "::error::A prohibited command was found in the metadata-only diagnostic."
+            exit 1
+          fi
+          echo "Static audit PASS — diagnostic not executed on any infrastructure."

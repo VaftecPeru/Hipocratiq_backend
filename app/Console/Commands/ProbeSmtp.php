@@ -8,9 +8,9 @@ use Throwable;
 
 class ProbeSmtp extends Command
 {
-    protected $signature = 'mail:probe {recipient? : Correo destinatario para la prueba SMTP}';
+    protected $signature = 'mail:probe {recipient? : Correo destinatario para la prueba del transporte de correo}';
 
-    protected $description = 'Envía un correo de prueba y valida la configuración SMTP de HIPOCRATIQ.';
+    protected $description = 'Solicita un correo de prueba mediante SMTP o Amazon SES; confirmar recepción real.';
 
     public function handle(MailInfrastructureService $mail): int
     {
@@ -21,6 +21,7 @@ class ProbeSmtp extends Command
             [
                 ['Driver', (string) ($status['driver'] ?? '')],
                 ['Host', (string) ($status['host'] ?? '')],
+                ['Región AWS', (string) ($status['region'] ?? '')],
                 ['Puerto', (string) ($status['port'] ?? '')],
                 ['Autenticación', (string) ($status['auth_mode'] ?? '')],
                 ['From', (string) ($status['from_address'] ?? '')],
@@ -31,11 +32,11 @@ class ProbeSmtp extends Command
         try {
             $traceId = $mail->probe($this->argument('recipient'));
 
-            $this->info('SMTP operativo. Trace ID: '.$traceId);
+            $this->info('Solicitud de envío completada. Confirma la recepción del correo. Trace ID: '.$traceId);
 
             return self::SUCCESS;
         } catch (Throwable $exception) {
-            $this->error('Prueba SMTP fallida: '.$exception->getMessage());
+            $this->error('Prueba de correo fallida: '.$exception->getMessage());
 
             return self::FAILURE;
         }

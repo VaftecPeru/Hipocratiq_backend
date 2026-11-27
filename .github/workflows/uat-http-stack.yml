@@ -1,0 +1,145 @@
+name: UAT API HTTP PostgreSQL Redis (isolated)
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - .github/workflows/uat-http-stack.yml
+      - scripts/uat-http-contract-smoke.sh
+      - app/**
+      - bootstrap/**
+      - config/**
+      - database/**
+      - routes/**
+      - composer.json
+      - composer.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uat-http-api-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-uat-http:
+    name: Laravel HTTP / PostgreSQL 17 / Redis 8 / no PHI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: hipocratiq_http_ci
+          POSTGRES_USER: uat_http
+          POSTGRES_PASSWORD: uat_http_ephemeral_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uat_http -d hipocratiq_http_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.2.7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: testing
+      APP_DEBUG: "false"
+      APP_URL: http://127.0.0.1:8000
+      APP_PRIMARY_COUNTRY: MX
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_DATABASE: hipocratiq_http_ci
+      DB_USERNAME: uat_http
+      DB_PASSWORD: uat_http_ephemeral_only
+      DB_URL: ""
+      CACHE_STORE: redis
+      CACHE_LIMITER_STORE: redis_limiter
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      SESSION_CONNECTION: session
+      SESSION_STORE: redis_session
+      SESSION_ENCRYPT: "true"
+      SESSION_SECURE_COOKIE: "false"
+      REDIS_CLIENT: phpredis
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ""
+      REDIS_URL: ""
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      MAIL_MAILER: array
+      SMS_DRIVER: array
+      OTP_PHONE_PROVIDER: local
+      OTP_FIXED_CODE: "123456"
+      OTP_HASH_KEY: ci-http-synthetic-only
+      BILLING_DRIVER: simulated
+      BACKUP_SERVICE_ENABLED: "false"
+      HIPOCRATIQ_UAT_ACCESS_ENABLED: "false"
+      WHATSAPP_DRIVER: unavailable
+      EPIDEMIOLOGICAL_AI_ENABLED: "false"
+    steps:
+      - name: Checkout Backend (isolated only)
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.4 and PostgreSQL/Redis extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, xml, bcmath, curl, fileinfo, pdo_pgsql, redis
+          coverage: none
+
+      - name: Install locked Composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Generate ephemeral application key
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+          php artisan config:clear
+
+      - name: Migrate isolated PostgreSQL schema
+        run: |
+          php artisan migrate:fresh --force --no-interaction
+          php artisan migrate:status --no-interaction
+
+      - name: HTTP smoke with actual PostgreSQL Redis and CORS rules
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          php artisan serve --host=127.0.0.1 --port=8000 > /tmp/hipocratiq-http-uat.log 2>&1 &
+          SERVER_PID=$!
+          cleanup() {
+            result=$?
+            if [ "$result" -ne 0 ]; then
+              echo "::group::Sanitized Laravel startup log"
+              tail -n 80 /tmp/hipocratiq-http-uat.log || true
+              echo "::endgroup::"
+            fi
+            kill "$SERVER_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for attempt in {1..45}; do
+            if curl --silent --fail --output /dev/null http://127.0.0.1:8000/api/health/live; then
+              break
+            fi
+            if [ "$attempt" -eq 45 ]; then
+              echo "::error::Laravel API failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+          bash scripts/uat-http-contract-smoke.sh
+
+      - name: Scope of this gate
+        run: |
+          echo "REAL Laravel HTTP + PostgreSQL + Redis, synthetic isolated runner only."
+          echo "External HTTPS, Next.js and AWS SMS OTP still require separate UAT authorization."

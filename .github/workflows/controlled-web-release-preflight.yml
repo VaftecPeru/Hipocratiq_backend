@@ -1,0 +1,40 @@
+name: Controlled Web Release - safe evidence preflight
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - scripts/controlled_web_release_evidence.py
+      - tests/test_controlled_web_release_evidence.py
+      - .github/workflows/controlled-web-release-preflight.yml
+  push:
+    branches: [develop]
+    paths:
+      - scripts/controlled_web_release_evidence.py
+      - tests/test_controlled_web_release_evidence.py
+      - .github/workflows/controlled-web-release-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  controlled-web-evidence-tests:
+    name: Controlled web evidence fail-closed tests (offline)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python syntax
+        run: python3 -m py_compile scripts/controlled_web_release_evidence.py tests/test_controlled_web_release_evidence.py
+      - name: Verify required evidence and reject missing approvals
+        run: python3 -m unittest discover -s tests -p 'test_controlled_web_release_evidence.py' -v
+      - name: Verify standalone validator denies absent evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          output=$(python3 scripts/controlled_web_release_evidence.py /tmp/nonexistent-hipocratiq-evidence.json "$(printf 'a%.0s' {1..40})" "$(printf 'b%.0s' {1..40})" 2>&1)
+          result=$?
+          set -e
+          test "$result" -eq 1
+          grep -q 'HIPOCRATIQ_CONTROLLED_WEB_EVIDENCE=NO_GO' <<< "$output"
+          echo "Expected NO-GO confirmed; no AWS or clinical operations performed."
