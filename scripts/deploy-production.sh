@@ -120,12 +120,18 @@ rollback_code() {
   fi
 }
 
-on_error() {
-  local line="$1"
-  echo "ERROR: despliegue Backend falló cerca de la línea $line." >&2
-  rollback_code
+on_exit() {
+  local rc="$1"
+  trap - EXIT
+  if [[ "$rc" -ne 0 ]]; then
+    echo "ERROR: despliegue Backend falló (código $rc)." >&2
+    rollback_code
+  fi
+  exit "$rc"
 }
-trap 'on_error "$LINENO"' ERR
+# EXIT also catches explicit exit 1 after a failed health check.
+# The original failure status must survive best-effort rollback.
+trap 'on_exit "$?"' EXIT
 
 echo "== HIPOCRATIQ Backend deploy =="
 echo "Origen: $OLD_SHA"
@@ -218,7 +224,7 @@ echo "Backup verificado: $BACKUP_PATH"
 echo "SHA-256: $BACKUP_SHA256"
 
 if [[ "$OLD_SHA" != "$TARGET_SHA" ]]; then
-  git merge --ff-only "origin/$TARGET_BRANCH"
+  git merge --ff-only "$TARGET_SHA"
   UPDATED=1
 fi
 
@@ -314,8 +320,14 @@ if [[ -n "$HEALTH_URL" ]]; then
   fi
 fi
 
-trap - ERR
+FINAL_SHA="$(git rev-parse HEAD)"
+if [[ "$FINAL_SHA" != "$TARGET_SHA" ]]; then
+  echo "ERROR: el SHA final no coincide con el SHA aprobado." >&2
+  exit 1
+fi
+
+trap - EXIT
 echo "DEPLOY BACKEND OK"
-echo "SHA: $(git rev-parse HEAD)"
+echo "SHA: $FINAL_SHA"
 echo "Backup previo verificado: $BACKUP_PATH"
 echo "Backup SHA-256: $BACKUP_SHA256"
