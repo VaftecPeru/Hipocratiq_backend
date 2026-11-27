@@ -152,6 +152,11 @@ MOCK
     BACKUP_AT_REST_VERIFIED=true WEB_UAT_EVIDENCE=synthetic-test \
     "$TMP/bin/bash" "$ROOT/scripts/deploy-production.sh" >"$TMP/final-sha-log" 2>&1 || rc=$?
   [[ "$rc" -ne 0 ]]
+  if [[ ! -f "$TMP/final-sha-trace" ]]; then
+    echo "ERROR: final SHA scenario failed before rollback trace (exit $rc)." >&2
+    cat "$TMP/final-sha-log" >&2
+    exit 1
+  fi
   grep -Fxq "merge $NEW" "$TMP/final-sha-trace"
   grep -Fxq "reset $OLD" "$TMP/final-sha-trace"
   grep -Fq 'ROLLBACK:' "$TMP/final-sha-log"
