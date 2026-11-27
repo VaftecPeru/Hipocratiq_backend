@@ -320,8 +320,14 @@ if [[ -n "$HEALTH_URL" ]]; then
   fi
 fi
 
+FINAL_SHA="$(git rev-parse HEAD)"
+if [[ "$FINAL_SHA" != "$TARGET_SHA" ]]; then
+  echo "ERROR: el SHA final no coincide con el SHA aprobado." >&2
+  exit 1
+fi
+
 trap - EXIT
 echo "DEPLOY BACKEND OK"
-echo "SHA: $(git rev-parse HEAD)"
+echo "SHA: $FINAL_SHA"
 echo "Backup previo verificado: $BACKUP_PATH"
 echo "Backup SHA-256: $BACKUP_SHA256"
